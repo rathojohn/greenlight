@@ -17,14 +17,32 @@ What it found on the first sync (66 records across every branch, 2026-10-02):
 
 ## Setup
 
-1. Copy `greenlight.toml` to the repo root.
-2. Add `session-start.sh` to `.claude/hooks/session-start.sh` so every cloud session has the CLI.
-3. Add `test-gate-addition.md` to the test-gate skill, so sessions ask greenlight before rerunning.
-4. On your machine: `greenlight sync` then `greenlight ui` for the dashboard. With `[otel] endpoint`
-   set, `sync` also sends every run to your OTel backend.
-5. Perf regressions to issues (docs/TESTING.md, "Perf regressions"): `greenlight issues` shows what it
-   would open; `greenlight issues --apply` opens them. It links issue #44 to its check instead of
-   duplicating it.
+What survive-project has, all committed:
+
+1. `.mcp.json`, `.claude/settings.json` and `.codex/config.toml` from `greenlight setup --project`. Every
+   Claude Code session on the repo, cloud sessions included, starts greenlight's MCP server through `uvx`
+   and gets its tools (`greenlight_overview`, `greenlight_playtest_gate` and the rest). Checked in a fresh
+   cloud session: the server synced on first use and answered with the Lantern check as flaky.
+2. `session-start.sh` as `.claude/hooks/session-start.sh`, so the CLI is there too (`greenlight playtest
+   gate`). It can't provide the MCP server: Claude Code starts project MCP servers before hooks run.
+3. `test-gate-addition.md` in the test-gate skill, so sessions ask greenlight before rerunning.
+
+No `greenlight.toml` is needed (the repo ignores it): with none, greenlight finds the playtest ledger and
+counts each patch notes file added on main as a release. `greenlight.toml` here is the same thing written
+out, for a machine that wants to change it.
+
+Elsewhere, with no clone:
+
+- Claude Desktop: `greenlight setup --claude-desktop --repo rathojohn/survive-project`.
+- claude.ai or ChatGPT: run the container with `GREENLIGHT_REPO=rathojohn/survive-project` and a
+  `GITHUB_TOKEN` that can read the repo (it's private), then add its URL as a connector (see the main
+  README).
+- Perf regressions to issues (docs/TESTING.md, "Perf regressions"): `greenlight issues` shows what it
+  would open; `greenlight issues --apply` opens them. It links issue #44 to its check instead of
+  duplicating it.
+
+A cloud session's clone carries limited history, so release numbers from there cover recent commits
+(31 releases and a 10.9 h median lead time in that check, against 33 and 7.5 h from a full clone).
 
 ## Optional: numbers in the records
 
