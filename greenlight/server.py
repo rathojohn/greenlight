@@ -376,6 +376,27 @@ def pipelines(window_days: WindowDays = 30) -> str:
     return _run(go)
 
 
+@mcp.tool(name="greenlight_token_usage", annotations=READ)
+def token_usage(
+    window_days: WindowDays = 30,
+    pr: Annotated[int | None, Field(description="Just this pull request number.")] = None,
+    test_id: Annotated[str | None, Field(description="Just this test (exact id).")] = None,
+) -> str:
+    """Claude Code tokens (output, input, cache reads) per pull request, counted on its branch until it merged,
+    and per test, counted while it was failing in a session. Needs the usage hook that `greenlight setup
+    --project` adds; empty until sessions with it have run."""
+    from . import usage
+
+    def go(c: sqlite3.Connection) -> dict:
+        out = usage.summary(c, window_days, pr, test_id)
+        for k in ("days", "output_per_day", "input_per_day", "cache_read_per_day"):
+            out.pop(k, None)
+        if "sessions" in out:
+            out["sessions"] = out["sessions"][:10]
+        return out
+    return _run(go)
+
+
 @mcp.tool(name="greenlight_delivery", annotations=READ)
 def delivery_metrics(
     window_days: WindowDays = 30,

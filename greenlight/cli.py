@@ -16,6 +16,7 @@
   greenlight sweep [--apply]                   quarantine candidates / release candidates
   greenlight trends                            Toto duration regressions + rerun forecast
   greenlight ui                                the dashboard (the server's, signed in, when GREENLIGHT_URL is set)
+  greenlight usage                             Claude Code tokens per PR and per failing test
   greenlight forget 82 run:6714b3...           delete runs recorded by mistake (--dry-run lists them first)
   greenlight mcp [--repo owner/name]           MCP server over stdio (Claude Code, Codex, Claude Desktop)
   greenlight serve --repo owner/name           MCP server over HTTP (claude.ai and ChatGPT connectors)
@@ -126,7 +127,7 @@ def cmd_setup(a: argparse.Namespace) -> int:
               "dependencies (no --no-deps).")
     url = a.url or os.environ.get("GREENLIGHT_URL")
     if a.project:
-        for line in setup.project_files(target, a.dry_run, url):
+        for line in setup.project_files(target, a.dry_run, url, usage_hook=not a.no_usage_hook):
             print("project: " + line)
         if not a.dry_run and url:
             print(f"project: commit .mcp.json, .claude/settings.json and .codex/config.toml. Sessions connect to {url} "
@@ -194,7 +195,7 @@ def cmd_run(a: argparse.Namespace) -> int:
     import tempfile
     import time
     import uuid
-    from . import ci, client
+    from . import ci, client, usage
     from .ingest import ingest_checkout
     cmd = a.command[1:] if a.command[:1] == ["--"] else a.command
     if not cmd:
@@ -222,7 +223,10 @@ def cmd_run(a: argparse.Namespace) -> int:
         ext = f"run:{uuid.uuid4().hex}" if remote else None
         # with a server, the run is recorded in a throwaway DB, sent, and judged there against all its history
         with closing(connect(os.path.join(tmp, "run.db") if remote else a.db)) as conn:
-            run_id, _, n = ingest_checkout(conn, files, ".", a.sha, a.branch, source=a.source, external_id=ext)
+            me = usage.agent_session()  # inside Claude Code, the run remembers the session (tokens per test)
+            run_id, _, n = ingest_checkout(conn, files, ".", a.sha, a.branch, source=a.source, external_id=ext,
+                                           session=me["remote_session"] or me["session_id"], url=me["url"],
+                                           command=" ".join(cmd))
             rec = ci.export_run(conn, run_id) if remote else None
             t = None if remote else analysis.triage_run(conn, run_id=run_id, window_days=a.window_days)
     if remote:
@@ -507,6 +511,71 @@ def cmd_serve(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_usage(a: argparse.Namespace) -> int:
+    from . import client, usage
+    if a.action == "record":
+        return _usage_record(a, client, usage)
+    remote = client.configured()
+    if remote:
+        import urllib.parse
+        import urllib.request
+        url, token = remote
+        req = urllib.request.Request(f"{url}/api/usage?" + urllib.parse.urlencode({"days": a.days}),
+                                     headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            s = json.loads(r.read())
+    else:
+        with closing(connect(a.db, readonly=True)) as conn:
+            s = usage.summary(conn, a.days)
+    if a.json:
+        print(json.dumps(s, indent=2, default=str))
+        return 0
+    t = s["totals"]
+    k = lambda n: (f"{n / 1e9:.1f}B" if n >= 1e9 else f"{n / 1e6:.1f}M" if n >= 1e6  # noqa: E731
+                   else f"{n / 1e3:.0f}k" if n >= 1e3 else str(n))
+    print(f"Claude Code, last {a.days} days: {t['sessions']} sessions, {t['requests']} requests, "
+          f"{k(t['output_tokens'])} output, {k(t['input_tokens'] + t['cache_write_tokens'])} input, "
+          f"{k(t['cache_read_tokens'])} cache reads")
+    if s["by_pr"]:
+        print("\nBy pull request (output / input / cache reads):")
+        for p in s["by_pr"][:a.limit]:
+            print(f"  #{p['number']:<5} {k(p['output_tokens']):>6} {k(p['input_tokens'] + p['cache_write_tokens']):>6} "
+                  f"{k(p['cache_read_tokens']):>7}  {p['title']}")
+    if s["by_test"]:
+        print("\nWhile a test was red (output / input / cache reads, times red):")
+        for x in s["by_test"][:a.limit]:
+            print(f"  {k(x['output_tokens']):>6} {k(x['input_tokens'] + x['cache_write_tokens']):>6} "
+                  f"{k(x['cache_read_tokens']):>7}  {x['times_red']}x  {x['test_id']}")
+    if not t["requests"]:
+        print("No usage recorded yet. `greenlight setup --project` adds the hook that records it.")
+    return 0
+
+
+def _usage_record(a: argparse.Namespace, client, usage) -> int:  # noqa: ANN001
+    """The Stop hook: never block or fail the session. Problems go to stderr and the exit code stays 0."""
+    try:
+        hook = json.loads(sys.stdin.read() or "{}") if a.hook else {}
+        if a.transcript:
+            hook = {**hook, "transcript_path": a.transcript, "session_id": a.session or Path(a.transcript).stem,
+                    "cwd": hook.get("cwd") or os.getcwd()}
+        payload = usage.payload_from_hook(hook)
+        if not payload:
+            raise ValueError("no transcript: run it as a Claude Code hook, or pass --transcript")
+        remote = client.configured()
+        if remote:
+            client.send_usage(payload)
+        else:
+            with closing(connect(a.db)) as conn:
+                usage.store(conn, payload)
+        if not a.hook:
+            print(f"recorded {sum(r['requests'] for r in payload['rows'])} requests from session "
+                  f"{payload['session']['session_id']}" + (f" on {remote[0]}" if remote else ""))
+        return 0
+    except Exception as e:  # noqa: BLE001 - a hook must never break the session
+        print(f"greenlight usage: {e}", file=sys.stderr)
+        return 0 if a.hook else 1
+
+
 def cmd_forget(a: argparse.Namespace) -> int:
     from . import client
     remote = None if a.local else client.configured()
@@ -585,6 +654,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--codex", action="store_true", help="also add the server to ~/.codex/config.toml (Codex CLI, IDE "
                    "and ChatGPT desktop)")
     s.add_argument("--agent-rules", action="store_true", help="append the gate rule to CLAUDE.md / AGENTS.md")
+    s.add_argument("--no-usage-hook", action="store_true", help="for --project: skip the hook that records Claude "
+                   "Code token usage after each turn")
     s.add_argument("--no-claude", action="store_true", help="skip registering with Claude Code")
     s.add_argument("--dry-run", action="store_true", help="say what would change, change nothing")
     s.set_defaults(fn=cmd_setup)
@@ -724,6 +795,17 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--no-auth", action="store_true", help="no token at all. Only for a public repo you don't mind "
                                                           "anyone reading through this server")
     s.set_defaults(fn=cmd_serve)
+
+    s = sub.add_parser("usage", help="Claude Code tokens per pull request and per failing test (record: the hook "
+                                     "that collects them)")
+    s.add_argument("action", nargs="?", choices=["show", "record"], default="show")
+    s.add_argument("--days", type=int, default=30)
+    s.add_argument("--limit", type=int, default=15, help="rows per list")
+    s.add_argument("--json", action="store_true")
+    s.add_argument("--hook", action="store_true", help="record: read Claude Code's hook input on stdin; never fail")
+    s.add_argument("--transcript", help="record: a session transcript (.jsonl) instead of hook input")
+    s.add_argument("--session", help="record: the session id to file it under (default: from the transcript)")
+    s.set_defaults(fn=cmd_usage)
 
     s = sub.add_parser("forget", help="delete runs recorded by mistake, by number or external id (on the server "
                                       "when GREENLIGHT_URL is set)")

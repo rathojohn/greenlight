@@ -236,3 +236,19 @@ def test_forget_deletes_only_the_runs_named(server, checkout, monkeypatch, tmp_p
         assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM results").fetchone()[0] == 0  # results went with them
     assert first  # named by number above
+
+
+def test_the_usage_hook_reports_to_the_server(server, monkeypatch, tmp_path):
+    import io
+    base, db = server
+    use_server(monkeypatch, base)
+    log = tmp_path / "s.jsonl"
+    log.write_text(json.dumps({"type": "assistant", "timestamp": "2026-10-02T10:00:00Z", "gitBranch": "fix",
+                               "message": {"id": "m1", "model": "claude-opus-5-5", "usage": {
+                                   "input_tokens": 3, "output_tokens": 70, "cache_read_input_tokens": 900}}}) + "\n")
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session_id": "s1", "transcript_path": str(log)})))
+    assert cli.main(["usage", "record", "--hook"]) == 0
+    with closing(connect(str(db), readonly=True)) as conn:
+        assert [tuple(r) for r in conn.execute("SELECT session_id, branch, output_tokens FROM agent_usage")] == [("s1", "fix", 70)]
+    status, _, body = call(base + "/api/usage?days=3650", headers={"Authorization": f"Bearer {TOKEN}"})
+    assert status == 200 and json.loads(body)["totals"]["output_tokens"] == 70

@@ -274,6 +274,7 @@ In practice: the agent runs the tests through greenlight, reruns only the flaky 
 | greenlight_issues | GitHub, only with apply=true | plan or apply the flaky-test and perf issues |
 | greenlight_sync | local DB, reads GitHub | pull everything configured |
 | greenlight_duration_regressions, greenlight_suite_forecast | no | Toto forecasts |
+| greenlight_token_usage | no | Claude Code tokens per pull request and per failing test |
 | greenlight_query | no | read-only SQL over every table |
 
 Read from GitHub (Claude Desktop with `--repo`, claude.ai and ChatGPT connectors, the container), there's no checkout of yours, so the two tools that record a local test run (`greenlight_gate_junit`, `greenlight_playtest_gate`) aren't offered.
@@ -453,6 +454,22 @@ It's dark by default with a light theme one click away. The time range (7, 14, 3
 - **DORA and GitHub**: the four DORA numbers, the deployments behind them, pull request flow and the issue backlog.
 - **Trends**: forecasts from the Toto 2.0 time series model (optional: the server's `:toto` image, or `uv tool install --python 3.12 "greenlight[toto] @ git+https://github.com/rathojohn/greenlight"` on your machine): rerun churn, failure rate and suite duration with a 7-day band, and tests running slower than forecast.
 - **Quarantine**: suggestions, what's quarantined, what's clean enough to release.
+- **Token usage**: Claude Code tokens per day, per pull request, per failing test and per session (see below).
+
+## Token usage (Claude Code)
+
+How many tokens went into each pull request, and into each test while it was failing. `greenlight setup --project` adds a hook that runs after every Claude Code turn (`greenlight usage record --hook`). It reads the session's transcript, which Claude Code keeps on disk with the usage of every API call, and records per-minute counts: output, input, cache reads and writes, the model and the git branch. Prompts and code never leave the machine. With `GREENLIGHT_URL` set the counts go to the server; otherwise to the local database.
+
+- **A pull request** gets the tokens spent on its branch until it merged or closed. If a later PR reuses the branch name, what comes after goes to that one.
+- **A test** gets the tokens a session spent while it was red: from a run in that session that failed it to the next run in the same session that passed it (or the session's end, shown as unfixed). Two tests red at once both count the same tokens, so the per-test numbers don't add up to a total. `greenlight run` and survive-project's playtest records note which session ran them, which is what links the two.
+
+See it with `greenlight usage`, the Token usage page, or ask an agent (it has `greenlight_token_usage`). `--no-usage-hook` leaves the hook out. To add it by hand, this goes under `hooks` in `.claude/settings.json`:
+
+```json
+"Stop": [{"hooks": [{"type": "command", "command": "uvx --from git+https://github.com/rathojohn/greenlight greenlight usage record --hook || true", "timeout": 60}]}]
+```
+
+The hook can't hold up a session: it always exits 0, and `|| true` covers uvx itself failing (a Stop hook that exits 2 tells Claude to keep going). The transcript is Claude Code's own file, not a documented interface, so if its format changes, greenlight needs an update to read it. Claude Code's OpenTelemetry export is documented, but it carries no git branch, which is what ties tokens to a PR.
 
 ## Configuration
 

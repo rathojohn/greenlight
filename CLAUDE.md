@@ -4,7 +4,7 @@ CI/CD observability on OpenTelemetry, built from git, GitHub and test reports. I
 
 ## Layout
 
-- `greenlight/schema.sql` + `db.py`: SQLite schema (v3) and migrations. Columns added after a table first shipped go in both `schema.sql` and `db.MIGRATIONS`, and `SCHEMA_VERSION` goes up. Read-only opens upgrade an old DB first.
+- `greenlight/schema.sql` + `db.py`: SQLite schema (v4) and migrations. Columns added after a table first shipped go in both `schema.sql` and `db.MIGRATIONS`, and `SCHEMA_VERSION` goes up. Read-only opens upgrade an old DB first.
 - `ingest.py`: JUnit XML parsing and `record_run`, the one way runs get written. `ingest_checkout` keys a local run by `gitrepo.Repo.identity` (HEAD plus a hash of uncommitted edits, reports excluded); `greenlight run` and the `greenlight_gate_junit` MCP tool both use it.
 - `analysis.py`: flake stats, `triage_run` (the gate), quarantine, sweep, read-only SQL.
 - `playtest.py`: adapter for a test ledger committed to git (survive-project's `tools/playtest/runs`). Infers passes for watched checks; a crashed suite infers nothing.
@@ -17,7 +17,8 @@ CI/CD observability on OpenTelemetry, built from git, GitHub and test reports. I
 - `hosted.py`: `greenlight serve`, the hosted server: MCP, the dashboard and its `/api`, `POST /api/records` (runs sent by clients, answered with the gate's decision) and OTLP, on one port behind one token (Bearer header, URL path, or a cookie from the sign-in page at `/login` or a one-time `/login?code=` link that `greenlight ui` opens; `/?token=` still works). One-time codes live in memory, which is fine because the server is one process. `client.py`: `GREENLIGHT_URL` + `GREENLIGHT_TOKEN`; `greenlight run`, `playtest gate` and `ci report` record into a throwaway DB, send the run as a record (`ci.export_run`), and print the server's decision.
 - `remote.py`: repo mode. A cache clone per repo under `GREENLIGHT_HOME` (blobless, no checkout), the config for it (a committed greenlight.toml, else guesses), and the `Refresher` that syncs it in the background.
 - `Dockerfile` + `docker-entrypoint.sh` + the `container` CI job: the image on ghcr.io, smoke-tested with `.github/scripts/smoke_mcp.py` before it's published. `deploy/server/docker-compose.yml`: the one deploy example. Nothing host-specific goes in this repo: the README documents what any host needs. `web.py` + `dashboard.py` + `ui/index.html`: dashboard and `--export` snapshot.
-- `forecast.py`: optional Toto 2.0 forecasts.
+- `forecast.py`: optional Toto 2.0 forecasts (the `:toto` image).
+- `usage.py`: Claude Code token usage. A Stop hook (`greenlight usage record --hook`, added by `setup --project`) reads the session transcript and its subagents', and stores per-minute counts per model and branch (`agent_usage`, `agent_sessions`). PRs get their branch's tokens until merge; tests get a session's tokens while they were red (runs carry the session).
 - `deploy/otel/`: local Grafana (otel-lgtm) behind a Collector. `integrations/survive-project/`: worked example.
 - `demo.py`: synthetic history for every view (`greenlight demo`).
 
@@ -43,6 +44,7 @@ Tests use a fake GitHub (`tests/fakegithub.py`), a fake OTLP collector and a loc
 - The dashboard binds to 127.0.0.1 and checks Host; writes need `X-Greenlight: 1`. Off loopback it needs a token, traded for an HttpOnly SameSite=Strict cookie. The OTLP receiver needs a Bearer token off loopback.
 - The dashboard is a panel grid, dark by default (the light theme is a toggle kept in localStorage), with explanations in (i) tooltips instead of paragraphs. API calls use relative URLs so a page served under `/<token>/` keeps working.
 - Dashboard charts follow the dataviz rules: status colors validated in both themes, rounded bar ends, 2px gaps in stacks, text in ink tokens, the flake grid's bar height carries fail share so amber vs red never rests on hue. Snapshot keys built by `snapKey()` in the page must match `snap_key()` in `web.py`.
+- Token usage comes from Claude Code's transcript JSONL (assistant lines' `message.usage`, `gitBranch`, `timestamp`; one response split over several lines repeats its usage, so count each `message.id` once). It's not a documented format, but Claude Code's OpenTelemetry export has no branch. Only counts, models, branches and times are sent. A cloud session's claude.ai id is `CLAUDE_CODE_REMOTE_SESSION_ID` with `cse_` swapped for `session_`; that's what runs record, and `agent_sessions.remote_session` joins it to the transcript's id.
 - The CLI imports only the standard library (the Action installs with `--no-deps`); `mcp`/`pydantic` are for the MCP server, Toto is optional.
 - Project MCP config (`setup --project`) starts the server with `uvx`, never a binary a SessionStart hook installs: Claude Code starts project MCP servers before hooks run (measured in a cloud session: the servers started 0.1 s before the hook, which took 13 s to install).
 - Partial clones fetch blobs one round trip each in `cat-file`, so `Repo.read_blobs` prefetches them in one `git fetch` (68 playtest records: 33 s down to under 1 s). Git calls go through `gitrepo.run_git`, which carries a cache clone's token in the environment, never in a config file.
