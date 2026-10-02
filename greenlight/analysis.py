@@ -267,6 +267,25 @@ def unquarantine(conn: sqlite3.Connection, test_id: str) -> bool:
         return conn.execute("DELETE FROM quarantine WHERE test_id = ?", (test_id,)).rowcount > 0
 
 
+def forget_runs(conn: sqlite3.Connection, runs: list[Any], dry_run: bool = False) -> list[dict[str, Any]]:
+    """Delete runs recorded by mistake, with their results and measurements. A run is named by its number
+    (as the dashboard shows it) or its external id. Returns what was (or with dry_run, would be) deleted;
+    names that match nothing are skipped, so asking twice is harmless."""
+    if not isinstance(runs, list):
+        raise ValueError("runs must be a list of run numbers or external ids")
+    gone = []
+    with conn:
+        for ref in runs:
+            col = "run_id" if isinstance(ref, int) or str(ref).isdigit() else "external_id"
+            row = conn.execute(f"SELECT run_id, external_id, commit_sha, started_at FROM runs WHERE {col} = ?",
+                               (int(ref) if col == "run_id" else str(ref),)).fetchone()
+            if row:
+                if not dry_run:
+                    conn.execute("DELETE FROM runs WHERE run_id = ?", (row[0],))  # results and metrics cascade
+                gone.append({"run_id": row[0], "external_id": row[1], "commit_sha": row[2], "started_at": row[3]})
+    return gone
+
+
 def sweep(
     conn: sqlite3.Connection,
     window_days: int = DEFAULT_WINDOW_DAYS,

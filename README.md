@@ -169,7 +169,9 @@ export GREENLIGHT_TOKEN=paste-the-token-from-.env
 | The GitHub Action | `server-url` and `server-token` inputs, from secrets: see [CI with the GitHub Action](#ci-with-the-github-action) |
 | Claude Code, Codex | `greenlight setup --project --url "$GREENLIGHT_URL"` in the repo, then commit the files: sessions connect with `$GREENLIGHT_TOKEN` instead of starting their own copy |
 | claude.ai, ChatGPT | a custom connector with the URL `$GREENLIGHT_URL/<token>/mcp`: see [claude.ai and ChatGPT](#claudeai-and-chatgpt-web-and-phone) |
-| The dashboard | open `$GREENLIGHT_URL/?token=<token>` once in each browser; it keeps a cookie after that |
+| The dashboard | `greenlight ui` opens it signed in (a one-time link, good for 2 minutes), or open `$GREENLIGHT_URL` and enter the token on the sign-in page, where a password manager can keep it. A browser stays signed in for a year; the sidebar has Sign out |
+
+Recorded something by mistake? `greenlight forget 82 83` deletes those runs and their results, on the server when `GREENLIGHT_URL` is set (`--dry-run` lists them first). Runs are named by the number the dashboard shows, or by external id.
 
 The database is `/data/<owner>-<name>.db`. To back it up, copy it while the container is stopped, or with `sqlite3 <db> ".backup copy.db"` while it runs.
 
@@ -339,7 +341,7 @@ If your tests already emit OpenTelemetry, skip JUnit. `greenlight otel receive` 
 | Dashboard | none on `127.0.0.1`; with `--host`, a token traded once for an HttpOnly, SameSite=Strict cookie | in memory, printed once at start |
 | OTLP receiver | none on loopback; `--token` (Bearer) when it listens elsewhere | in memory |
 | MCP server over stdio | none: it's a local process your agent starts | |
-| greenlight server | `GREENLIGHT_TOKEN`: an `Authorization: Bearer` header, the URL path (`/<token>/mcp`), or a cookie the dashboard's sign-in link sets | the server's environment; never logged |
+| greenlight server | `GREENLIGHT_TOKEN`: an `Authorization: Bearer` header, the URL path (`/<token>/mcp`), or a cookie the dashboard's sign-in page sets | the server's environment; never logged |
 | Clones greenlight keeps itself | the GitHub token above, handed to git in its environment for each call | never written to disk |
 
 `greenlight auth` prints where the token came from (never the token), the access it has and the rate limit left. Public repos sync without a token at 60 requests an hour.

@@ -60,7 +60,10 @@ button { font: inherit; color: inherit; }
 .nav a { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 4px; color: var(--ink-2); }
 .nav a:hover { background: var(--panel-2); color: var(--ink); }
 .nav a[aria-current] { background: var(--wash); color: var(--ink); box-shadow: inset 2px 0 0 var(--accent); }
-.side-foot { margin-top: auto; padding: 10px 16px 14px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-2); display: flex; align-items: center; gap: 8px; min-height: 42px; }
+.side-foot { margin-top: auto; padding: 10px 16px 14px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-2); display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 42px; }
+.sync { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.signout { border: 0; padding: 0; background: none; color: var(--ink-2); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.signout:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
 .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--pass); flex: none; }
 .pulse.off { background: var(--ink-3); }
 .main { min-width: 0; display: flex; flex-direction: column; }
@@ -347,7 +350,7 @@ details.wj[open] > summary .wn .ic { transform: rotate(90deg); }
       <a href="#/pipelines" data-nav="pipelines"><svg class="ic"><use href="#i-pipelines"/></svg>Pipelines</a>
       <a href="#/delivery" data-nav="delivery"><svg class="ic"><use href="#i-delivery"/></svg>DORA and GitHub</a>
     </nav>
-    <div class="side-foot" id="sync"><span class="pulse off"></span><span>Not synced yet</span></div>
+    <div class="side-foot"><div class="sync" id="sync"><span class="pulse off"></span><span>Not synced yet</span></div><form id="signout" method="post" action="logout" hidden><button class="signout" type="submit">Sign out</button></form></div>
   </aside>
   <div class="scrim" id="scrim"></div>
   <div class="main">
@@ -1316,6 +1319,8 @@ if (SNAP) {
 }
 syncRange(); syncTheme();
 window.addEventListener("hashchange", () => { document.body.classList.remove("nav-open"); render(); view.focus({ preventScroll: true }); window.scrollTo(0, 0); });
+/* a browser signed in with a cookie (the hosted server) gets a way out */
+if (LIVE) api("/api/session").then(s => { if (s.auth === "cookie") document.getElementById("signout").hidden = false; }).catch(() => {});
 render().then(() => {
   /* the sidebar's sync status comes with the overview; fetch it once when starting elsewhere */
   if (location.hash && location.hash !== "#/" && LIVE) api("/api/overview", { days: DAYS }).then(d => setSynced(d.synced)).catch(() => {});

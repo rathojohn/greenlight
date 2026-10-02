@@ -18,6 +18,15 @@ from greenlight.ingest import ingest_files  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture(autouse=True)
+def _no_real_servers(monkeypatch):
+    """Whatever this shell has set (a greenlight server, an OTLP backend), tests never send anything there.
+    Tests that need a server or a backend set their own."""
+    for k in list(os.environ):
+        if k.startswith(("GREENLIGHT_", "OTEL_")):
+            monkeypatch.delenv(k)
+
+
 def hide_clis(monkeypatch) -> None:
     """Leave git on PATH and nothing else greenlight shells out to (gh, claude), on any OS."""
     from greenlight import github
