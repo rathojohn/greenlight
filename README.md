@@ -4,8 +4,6 @@ CI/CD observability on OpenTelemetry, for when you can't (or won't) pay for a pl
 
 greenlight answers one question after every red test run: is this real, or is it the same flaky test again? Around that it tracks flaky tests, CI pipelines, deployments and DORA metrics from git and GitHub, sends all of it to any OpenTelemetry backend as traces and metrics, and gives you a local dashboard and an MCP server so Claude Code or Codex can ask it before rerunning anything.
 
-No hosted service, no retention limits, no bill. Your repo and GitHub's API are the source of truth; greenlight's SQLite file is an index you can rebuild any time.
-
 - [How it works](#how-it-works)
 - [Quick start](#quick-start)
 - [OpenTelemetry](#opentelemetry)
