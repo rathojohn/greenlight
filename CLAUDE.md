@@ -47,4 +47,5 @@ Tests use a fake GitHub (`tests/fakegithub.py`) and a fake OTLP collector; nothi
 - UI copy is sentence case with plain verbs.
 - No Claude attribution in commits, PRs or comments (no co-author or session lines).
 - Name branches for the work (`otel-export`, `fix-gate-retries`), never `claude/*`.
+- Merge your own PRs into main as soon as CI is green. Never ask whether to merge.
 - Prefer honest trade-offs over hedged or motivational framing.
