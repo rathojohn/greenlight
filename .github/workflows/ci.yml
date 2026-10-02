@@ -82,3 +82,43 @@ jobs:
           push: true
           tags: ghcr.io/${{ github.repository }}:latest,ghcr.io/${{ github.repository }}:${{ github.sha }}
           cache-from: type=gha
+
+  container-toto:
+    # the same image with the forecasts (Toto 2.0 on CPU), published as :toto
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          build-args: TOTO=1
+          load: true
+          tags: greenlight:toto
+          cache-from: type=gha,scope=toto
+          cache-to: type=gha,mode=max,scope=toto
+      - name: Smoke test the forecasts (downloads the model, forecasts the demo history on CPU)
+        run: |
+          docker run --rm --entrypoint sh greenlight:toto -c \
+            'greenlight demo --db /tmp/d.db > /dev/null && greenlight --db /tmp/d.db trends'
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/setup-qemu-action@v3
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Publish for amd64 and arm64
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          build-args: TOTO=1
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository }}:toto,ghcr.io/${{ github.repository }}:toto-${{ github.sha }}
+          cache-from: type=gha,scope=toto

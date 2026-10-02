@@ -945,7 +945,11 @@ async function trendsView(tok) {
       const a = f.recent_anomaly;
       note.innerHTML = legend([[color, label, true], ["var(--ink-2)", "Forecast", true], ["var(--band)", "Likely range"]]) +
         (a ? `<div style="margin-top:6px">${tag("failing", "Above forecast")} <span class="muted">${a.map(b => `${esc(fmtDay(b.day))}: ${esc(FMT[fmt](b.actual))}, expected ${esc(FMT[fmt](b.expected_p50))}`).join("; ")}</span></div>` : "");
-    } catch (e) { el.innerHTML = ""; note.innerHTML = errorBox(e); }
+    } catch (e) {
+      if (tok !== renderToken) return;
+      if (e.status === 501) { view.innerHTML = errorBox(e); return; }  /* no Toto: one message, not half a page */
+      el.innerHTML = ""; note.innerHTML = errorBox(e);
+    }
   };
   document.getElementById("metric").addEventListener("click", ev => { const b = ev.target.closest("button"); if (b) { suiteMetric = b.dataset.m; drawSuite(); } });
   drawSuite();
