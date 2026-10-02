@@ -131,7 +131,7 @@ A greenlight server is one container holding one database. Everything sends it r
 
 | It needs | |
 | --- | --- |
-| Image | `ghcr.io/rathojohn/greenlight` (amd64 and arm64). The `:toto` tag adds the forecasts on the Trends page: a 2.2 GB image instead of 400 MB, and it wants 1 GB of memory instead of 512 MB |
+| Image | `ghcr.io/rathojohn/greenlight` (amd64 and arm64). The `:toto` tag (amd64 only) adds the forecasts on the Trends page: a 2.2 GB image instead of 400 MB, and it wants 1 GB of memory instead of 512 MB |
 | Port | 8000, or `$PORT` when the host sets one |
 | Disk | a persistent volume at `/data`, for the database (a few hundred MB at most) |
 | Environment | `GREENLIGHT_REPO` (owner/name), `GREENLIGHT_TOKEN` (any long random string, the one password for everything), `GITHUB_TOKEN` (reads the repo; required for a private one) |

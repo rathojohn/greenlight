@@ -30,8 +30,15 @@ for _ in range(60):
         time.sleep(1)
 assert status(base + "/mcp") == 401, "a request without the token got in"
 dash = urllib.request.Request(base + "/api/runs", headers={"Authorization": f"Bearer {token}"})
-with urllib.request.urlopen(dash, timeout=30) as r:  # the dashboard API on the same port
-    assert r.status == 200 and "runs" in json.loads(r.read()), "dashboard API"
+for attempt in range(12):  # 503 while the first sync is still reading the repo
+    try:
+        with urllib.request.urlopen(dash, timeout=30) as r:  # the dashboard API on the same port
+            assert r.status == 200 and "runs" in json.loads(r.read()), "dashboard API"
+        break
+    except urllib.error.HTTPError as e:
+        if e.code != 503 or attempt == 11:
+            raise
+        time.sleep(10)
 
 
 async def overview() -> str:
