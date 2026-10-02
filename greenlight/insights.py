@@ -169,6 +169,7 @@ def _token_insights(use: dict[str, Any], total: int) -> list[dict[str, Any]]:
                     "detail": f"The system prompt, tool definitions and CLAUDE.md are {_pct(system['weighted'], total)} of "
                               "cost. A shorter CLAUDE.md and fewer MCP servers cut every request.",
                     "action": {"label": "Details", "panel": "cat:system"}, "agent": None})
+    out += _item_insights(use.get("items") or {}, total)
     prs = [p for p in use.get("by_pr", []) if p["weighted"]]
     if len(prs) >= 5:
         mid = median(p["weighted"] for p in prs)
@@ -179,6 +180,52 @@ def _token_insights(use: dict[str, Any], total: int) -> list[dict[str, Any]]:
                             "detail": f"{p['title']}: {_tk(p['weighted'])} over {p['sessions']} session"
                                       f"{'s' if p['sessions'] != 1 else ''}.",
                             "action": {"label": "Open", "panel": f"pr:{p['number']}"}, "agent": None})
+    return out
+
+
+def _item_insights(items: dict[str, Any], total: int) -> list[dict[str, Any]]:
+    """The things that rode along longest: CLAUDE.md on every request, a batch of screenshots, one big file or
+    command output, Claude Code's own reminders."""
+    out = []
+    rows, groups = items.get("items") or [], items.get("groups") or []
+    for r in rows:
+        if r["kind"] == "instructions" and r["adds"] and r["weighted"] >= total * .03:
+            each = r["tokens"] / r["adds"]
+            out.append({"id": f"item:instructions:{r['label']}", "severity": "medium", "stake": r["weighted"],
+                        "title": f"{r['label']} is about {_tk(each)} tokens and rides along with every request",
+                        "detail": f"{_pct(r['weighted'], total)} of cost: every session and subagent loads it, and each "
+                                  "request reads it again. What only some tasks need can move into a skill or a doc "
+                                  "Claude reads when it needs it.",
+                        "action": {"label": "Details", "panel": f"item:instructions:{r['label']}"}, "agent": None})
+    for g in groups:
+        if g["kind"] == "image" and g["weighted"] >= total * .02:
+            out.append({"id": f"group:image:{g['grp']}", "severity": "medium", "stake": g["weighted"],
+                        "title": f"{g['labels']} images from {g['grp']} stayed in context for {g['avg_rides']:.0f} "
+                                 "requests on average",
+                        "detail": f"{_pct(g['weighted'], total)} of cost. An image is read again by every request after "
+                                  "it until the session compacts.",
+                        "action": {"label": "Details", "panel": f"group:image:{g['grp']}"},
+                        "agent": "Every image stays in context for the rest of the session: look at screenshots in a "
+                                 "subagent and keep only its verdict."})
+            break
+    single = next((r for r in rows if r["kind"] in ("file", "image") and r["adds"] <= 5 and r["weighted"] >= total * .02),
+                  None)  # one thing that stayed, not many commands under one name
+    if single:
+        out.append({"id": f"item:{single['kind']}:{single['label']}", "severity": "low", "stake": single["weighted"],
+                    "title": f"{single['label']} rode along with {single['avg_rides']:.0f} requests on average",
+                    "detail": f"{_pct(single['weighted'], total)} of cost from {single['adds']} time"
+                              f"{'s' if single['adds'] != 1 else ''} it entered the context.",
+                    "action": {"label": "Details", "panel": f"item:{single['kind']}:{single['label']}"}, "agent": None})
+    tasks = next((r for r in rows if r["kind"] == "reminder" and r["label"] == "task list reminders"
+                  and r["weighted"] >= total * .03), None)
+    if tasks:
+        out.append({"id": "item:reminder:task list reminders", "severity": "medium", "stake": tasks["weighted"],
+                    "title": f"Claude Code's task list reminders were {_pct(tasks['weighted'], total)} of cost",
+                    "detail": f"{tasks['adds']} of them, each carried by the requests after it. They come while a task "
+                              "list is open and untouched.",
+                    "action": {"label": "Details", "panel": "item:reminder:task list reminders"},
+                    "agent": "Keep the task list current as you work and clear it when the work is done: while it sits "
+                             "untouched, Claude Code adds a reminder that every later request carries."})
     return out
 
 
@@ -208,7 +255,8 @@ def brief(conn: sqlite3.Connection, days: int = 30, repo: str | None = None, sub
         lines.append("- After a test run with failures, let the gate judge them before rerunning or debugging "
                      "(greenlight run, greenlight playtest gate, or the greenlight_triage_run tool).")
     # a subagent can't talk to the user, so it only gets habits it can change itself
-    habits = [i["agent"] for i in found if i["agent"] and (not subagent or i["id"].startswith("cat:"))][:1 if subagent else 3]
+    habits = [i["agent"] for i in found if i["agent"] and (not subagent or i["id"].startswith(("cat:", "group:image")))]
+    habits = list(dict.fromkeys(habits))[:1 if subagent else 3]
     lines += [f"- {h}" for h in habits]
     if not lines:
         return ""

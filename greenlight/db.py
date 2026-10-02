@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 SCHEMA = Path(__file__).with_name("schema.sql").read_text(encoding="utf-8")
-SCHEMA_VERSION = 5  # 4: agent_usage, agent_sessions. 5: agent_context, agent_cache_rebuilds, agent_task_switches, 1h writes
+SCHEMA_VERSION = 6  # 4: agent usage. 5: context, rebuilds, task switches, 1h writes. 6: agent_context_items
 
 # Columns added after their table first shipped: (table, column, declaration). schema.sql has them
 # for new databases; these bring older ones up to date.

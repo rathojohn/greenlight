@@ -476,7 +476,7 @@ It's dark by default with a light theme one click away. The time range (7, 14, 3
 
 ## Token usage (Claude Code)
 
-How many tokens went into each pull request, and into each test while it was failing. `greenlight setup --project` adds a hook that runs after every Claude Code turn (`greenlight usage record --hook`). It reads the session's transcript, which Claude Code keeps on disk with the usage of every API call, and records per-minute counts: output, input, cache reads and writes, the model and the git branch. Prompts and code never leave the machine. With `GREENLIGHT_URL` set the counts go to the server; otherwise to the local database.
+How many tokens went into each pull request, and into each test while it was failing. `greenlight setup --project` adds a hook that runs after every Claude Code turn (`greenlight usage record --hook`). It reads the session's transcript, which Claude Code keeps on disk with the usage of every API call, and records per-minute counts: output, input, cache reads and writes, the model and the git branch (and where context went, below). Prompts, code and file contents never leave the machine. With `GREENLIGHT_URL` set the counts go to the server; otherwise to the local database.
 
 - **A pull request** gets the tokens spent on its branch until it merged or closed. If a later PR reuses the branch name, what comes after goes to that one.
 - **A test** gets the tokens a session spent while it was red: from a run in that session that failed it to the next run in the same session that passed it (or the session's end, shown as unfixed). Two tests red at once both count the same tokens, so the per-test numbers don't add up to a total. `greenlight run` and test ledger records note which session ran them, which is what links the two.
@@ -491,7 +491,9 @@ Most of what a session costs is context being read again. Every request sends th
 - **Cache rebuilt after idle**: the prompt cache lasts an hour in a main session and 5 minutes in a subagent. The first request after a longer break writes the whole context again.
 - **Files read again**: the same file and range read while the first read was still in context and unedited.
 
-Only counts leave the machine: categories, token numbers, branch names and times.
+- **What rode along** follows each thing on its own: a file, a screenshot, a command's output, a skill, CLAUDE.md, and Claude Code's own notes (like its task list reminders). For each, how many times it entered the context, how many requests read it again after, and what that cost. A screenshot read early in a session is carried by every request until it compacts; CLAUDE.md is in every request of every session and subagent, so it's measured from disk and charged to all of them. Items that belong together are summed too: 34 screenshots from one folder, every `pytest` run, one MCP server.
+
+What leaves the machine: categories, token numbers, branch names, times, and item labels. A label is a path from the repo root, an image's name, a skill's name, or a command's program and subcommand (`npm run test:changed`, `git diff`, `curl`), never its arguments, never anything's contents. `[usage] item_labels = false` in greenlight.toml sends the rest without them.
 
 See it with `greenlight usage`, the Token usage page, or ask an agent (it has `greenlight_token_usage`). `--no-usage-hook` leaves the hook out. To add it by hand, this goes under `hooks` in `.claude/settings.json`:
 
@@ -539,6 +541,10 @@ endpoint = "http://localhost:4318"
 
 [run]
 junit = "reports/*.xml"          # what `greenlight run` records (default: any JUnit XML the tests write)
+
+[usage]                          # the Claude Code token usage hook
+test_commands = "pytest|make check"  # shell commands that count as test runs (a regex; default covers the usual runners)
+item_labels = true               # false: send categories and counts, but no item labels (paths, skills, commands)
 
 [playtest]                       # a test ledger committed to git, see below
 enabled = false
