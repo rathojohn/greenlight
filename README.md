@@ -42,13 +42,13 @@ Python 3.11+. The CLI and dashboard use only the standard library; the MCP serve
 # Windows PowerShell
 py -3.12 -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install "greenlight @ git+https://github.com/rathojohn/diy-cicd-observability"
+pip install "greenlight @ git+https://github.com/rathojohn/greenlight"
 ```
 
 ```bash
 # macOS / Linux
 python3 -m venv .venv && . .venv/bin/activate
-pip install "greenlight @ git+https://github.com/rathojohn/diy-cicd-observability"
+pip install "greenlight @ git+https://github.com/rathojohn/greenlight"
 ```
 
 Try it on fake data first (60 days of runs, pipelines, releases, PRs and issues):
@@ -200,7 +200,7 @@ jobs:
       - run: pytest --junitxml=reports/junit.xml
         continue-on-error: true            # greenlight decides whether red fails the job
       - id: greenlight
-        uses: rathojohn/diy-cicd-observability@main
+        uses: rathojohn/greenlight@main
         with:
           junit: reports/junit.xml
           name: unit                       # tells matrix jobs apart
@@ -212,7 +212,7 @@ jobs:
         run: pytest -k "$(echo $NAMES | sed 's/ / or /g')" --junitxml=reports/rerun.xml
         continue-on-error: true
       - if: steps.greenlight.outputs.decision == 'RERUN_TARGETED'
-        uses: rathojohn/diy-cicd-observability@main
+        uses: rathojohn/greenlight@main
         with:
           junit: reports/rerun.xml
           name: unit
