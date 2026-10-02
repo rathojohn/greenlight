@@ -17,6 +17,8 @@ import os
 import secrets
 import sqlite3
 import sys
+import threading
+import time
 from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,16 +35,14 @@ except ImportError:  # mcp 1.x
     from mcp.server.fastmcp import FastMCP as _Server
 from mcp.types import ToolAnnotations
 
-mcp = _Server(
-    "greenlight_mcp",
-    instructions=(
-        "CI and test health for one GitHub repo: flaky tests, test run decisions, GitHub Actions pipelines, "
-        "deployments and DORA metrics. Start with greenlight_overview. After a test run, record and judge it "
-        "with greenlight_gate_junit (or greenlight_playtest_gate) before rerunning anything: PASS means carry on, "
-        "RERUN_TARGETED means rerun only rerun_tests, REAL_FAILURE means investigate. Never quarantine a test or "
-        "apply issue changes without telling the user why."
-    ),
+INSTRUCTIONS = (
+    "CI and test health for one GitHub repo: flaky tests, test run decisions, GitHub Actions pipelines, "
+    "deployments, DORA metrics and Claude Code token usage. Start with greenlight_overview. After a test run, "
+    "record and judge it with greenlight_gate_junit (or greenlight_playtest_gate) before rerunning anything: PASS "
+    "means carry on, RERUN_TARGETED means rerun only rerun_tests, REAL_FAILURE means investigate. Never quarantine "
+    "a test or apply issue changes without telling the user why."
 )
+mcp = _Server("greenlight_mcp", instructions=INSTRUCTIONS)
 
 CHECKOUT_TOOLS = ("greenlight_gate_junit", "greenlight_playtest_gate")  # need the user's own checkout
 FIRST_SYNC_WAIT = float(os.environ.get("GREENLIGHT_FIRST_SYNC_WAIT", "25"))
@@ -119,6 +119,58 @@ try:
     configure()
 except ValueError:  # a bad $GREENLIGHT_REPO: main() and the CLI report it
     pass
+
+class _Brief:
+    """The brief (insights.brief) added to the server's instructions, so every session that connects starts out
+    knowing what fails on the default branch, which tests are flaky and what costs the most. Computed off the
+    request path and kept for a minute: a client connecting never waits on it, and the first connect before it's
+    ready just gets the plain instructions."""
+    TTL = 60.0
+
+    def __init__(self) -> None:
+        self.text, self.at, self.lock = "", 0.0, threading.Lock()
+
+    def refresh(self) -> None:
+        if not self.lock.acquire(blocking=False):
+            return
+        try:
+            r = STATE.refresher
+            if r and not r.wait_ready(0):
+                return  # self.at stays 0, so the next connect tries again
+            from . import insights
+            with closing(connect(readonly=True)) as conn:
+                self.text = insights.brief(conn, 30, STATE.cfg.repo)
+            self.at = time.monotonic()
+        except Exception:  # noqa: BLE001 - instructions must never break a connect
+            self.at = time.monotonic()
+        finally:
+            self.lock.release()
+
+    def instructions(self) -> str:
+        if not self.at:  # the first connect (a stdio server's only one) waits for it; a sync not done yet skips it
+            self.refresh()
+        elif time.monotonic() - self.at > self.TTL:
+            threading.Thread(target=self.refresh, daemon=True).start()
+        return INSTRUCTIONS + (f"\n\n{self.text}" if self.text else "")
+
+
+BRIEF = _Brief()
+
+
+def _brief_in_instructions() -> None:
+    """The MCP library reads `instructions` off its low-level server for every initialize; a property there makes
+    it current for each session."""
+    low = getattr(mcp, "_lowlevel_server", None) or getattr(mcp, "_mcp_server", None)
+    if low is None:
+        return
+    try:
+        low.__class__ = type("BriefedServer", (type(low),), {
+            "instructions": property(lambda self: BRIEF.instructions(), lambda self, value: None)})
+    except TypeError:  # a library that won't allow it keeps the plain instructions
+        pass
+
+
+_brief_in_instructions()
 
 READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
@@ -396,6 +448,21 @@ def token_usage(
         if "sessions" in out:
             out["sessions"] = out["sessions"][:10]
         return out
+    return _run(go)
+
+
+@mcp.tool(name="greenlight_insights", annotations=READ)
+def insights_tool(window_days: WindowDays = 30) -> str:
+    """What to do next, most at stake first: tests failing on the default branch, flaky tests Claude spent tokens
+    on, tests worth quarantining or releasing, and where session cost goes (earlier tasks left in context, cache
+    rebuilds, heavy file reads or test output). Each has its evidence and an action. `brief` is the short version
+    an agent gets when it connects."""
+    from . import insights
+
+    def go(c: sqlite3.Connection) -> dict:
+        found = insights.insights(c, window_days)
+        return {"insights": [{k: v for k, v in i.items() if k not in ("red", "rank")} for i in found],
+                "brief": insights.brief(c, window_days, STATE.cfg.repo, found=found)}
     return _run(go)
 
 
