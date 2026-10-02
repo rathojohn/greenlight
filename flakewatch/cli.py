@@ -6,6 +6,8 @@
   flakewatch ingest --sha $SHA reports/*.xml   record a run
   flakewatch gate --sha $SHA                   exit 0 PASS, 2 RERUN_TARGETED, 1 REAL_FAILURE
   flakewatch playtest gate                     sync the playtest ledger, then gate the run just made
+  flakewatch issues [--apply]                  one GitHub issue per flaky test and perf regression
+  flakewatch ci record|report|restore          GitHub Actions: data-branch history, gate, PR comment
   flakewatch flaky                             ranked flaky tests
   flakewatch sweep [--apply]                   quarantine candidates / release candidates
   flakewatch trends                            Toto duration regressions + rerun forecast
@@ -227,6 +229,92 @@ def _print_triage(t: dict) -> None:
         print(f"  [{f['category']}] {f['test_id']}{extra}")
 
 
+def _issue_opts(cfg: config.Config) -> dict:
+    return {k: cfg.get("issues", k) for k in ("flaky_label", "perf_label", "quarantine_label", "min_flips",
+                                               "window_days", "healed_runs", "healed_days")}
+
+
+def cmd_issues(a: argparse.Namespace) -> int:
+    from . import ghsync, github, issues
+    cfg = a.cfg
+    gh = github.client(cfg.repo, cfg.api_url, require_token=a.apply) if (cfg.repo or a.apply) else None
+    with closing(connect(a.db)) as conn:
+        if gh and not a.no_sync:
+            try:
+                ghsync.sync_issues(conn, gh, cfg.get("issues", "quarantine_label"), int(cfg.get("sync", "days")))
+            except github.GitHubError as e:
+                if a.apply:
+                    raise
+                print(f"note: could not refresh issues from GitHub ({e}); planning from the local copy", file=sys.stderr)
+        actions = issues.plan(conn, _issue_opts(cfg))
+        if not a.apply:
+            print(issues.as_json(actions) if a.json else issues.summarize(actions))
+            if actions and not a.json:
+                print("\ndry run: add --apply to do this on GitHub")
+            return 0
+        done = issues.apply(conn, gh, actions)
+    if a.json:
+        print(json.dumps(done, indent=2, default=str))
+    else:
+        for d in done:
+            print(f"{d['kind']:<7} #{d['number'] or '?':<5} {d['result']}  {d['title']}")
+    return 1 if any(str(d["result"]).startswith("error") for d in done) else 0
+
+
+def cmd_issues_link(a: argparse.Namespace) -> int:
+    from . import ghsync, github, issues
+    gh = github.client(a.cfg.repo, a.cfg.api_url, require_token=True)
+    issue = issues.link(gh, a.number, f"{a.kind}:{a.test_id}")
+    with closing(connect(a.db)) as conn, conn:
+        ghsync.upsert_issue(conn, issue)
+    print(f"#{a.number} now tracks {a.kind}:{a.test_id}")
+    return 0
+
+
+def cmd_ci_restore(a: argparse.Namespace) -> int:
+    from . import ci
+    from .gitrepo import Repo
+    with closing(connect(a.db)) as conn:
+        if a.dir:
+            res = ci.restore_dir(conn, a.dir)
+        else:
+            res = ci.restore_branch(conn, Repo(a.cfg.git_path or "."), a.branch or a.cfg.get("ci", "data_branch"))
+    print(json.dumps(res))
+    return 0
+
+
+def cmd_ci_record(a: argparse.Namespace) -> int:
+    from . import ci
+    with closing(connect(a.db)) as conn:
+        res = ci.record_junit(conn, _expand(a.junit), a.name, a.sha, a.branch, a.dir)
+    print(json.dumps(res))
+    return 0
+
+
+def cmd_ci_report(a: argparse.Namespace) -> int:
+    from . import ci, github
+    env = ci.actions_env()
+    pr = a.pr or (env["pr"] if a.pr_comment else None)
+    gh = None
+    if a.pr_comment and pr:
+        try:
+            gh = github.client(a.cfg.repo or env["repo"], a.cfg.api_url, require_token=True)
+        except ValueError as e:
+            print(f"note: no PR comment: {e}", file=sys.stderr)
+    with closing(connect(a.db, readonly=gh is None)) as conn:
+        res = ci.report(conn, a.run_id, a.sha or (None if a.run_id else env["sha"]), a.name, gh, pr, a.window_days)
+    if not res["summary_written"]:
+        print(res["markdown"])
+    if res.get("pr_comment_error"):
+        print(f"note: PR comment failed: {res['pr_comment_error']}", file=sys.stderr)
+    decision = res["triage"]["decision"]
+    if a.fail_on == "never":
+        return 0
+    if a.fail_on == "any":
+        return res["triage"]["exit_code"]
+    return 1 if decision == "REAL_FAILURE" else 0
+
+
 def cmd_ui(a: argparse.Namespace) -> int:
     from . import web
     if a.export:
@@ -252,7 +340,7 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(fn=cmd_auth)
 
     s = sub.add_parser("sync", help="pull git and GitHub data into the DB, per flakewatch.toml")
-    s.add_argument("--only", help="comma list: playtest,pulls,issues,actions,deployments")
+    s.add_argument("--only", help="comma list: playtest,records,pulls,issues,actions,deployments")
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_sync)
 
@@ -266,6 +354,42 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--window-days", type=int, default=analysis.DEFAULT_WINDOW_DAYS)
     t.add_argument("--json", action="store_true")
     t.set_defaults(fn=cmd_playtest_gate)
+
+    s = sub.add_parser("issues", help="plan (or --apply) one GitHub issue per flaky test and perf regression")
+    s.add_argument("--apply", action="store_true", help="create, update and reopen issues on GitHub")
+    s.add_argument("--no-sync", action="store_true", help="plan from the local copy without refreshing issues")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_issues)
+    isub = s.add_subparsers(dest="issues_cmd")
+    t = isub.add_parser("link", help="mark an existing issue as the one tracking a test")
+    t.add_argument("number", type=int)
+    t.add_argument("test_id")
+    t.add_argument("--kind", choices=["flaky", "perf"], default="flaky")
+    t.set_defaults(fn=cmd_issues_link)
+
+    s = sub.add_parser("ci", help="history on a data branch, gate and PR report for GitHub Actions")
+    csub = s.add_subparsers(dest="ci_cmd", required=True)
+    t = csub.add_parser("restore", help="load run records from a data-branch checkout, or the branch in this clone")
+    t.add_argument("--dir", help="a checkout of the data branch")
+    t.add_argument("--branch", help="read this branch from the local clone instead (default: [ci] data_branch)")
+    t.set_defaults(fn=cmd_ci_restore)
+    t = csub.add_parser("record", help="record JUnit results and write a record file for the data branch")
+    t.add_argument("--junit", nargs="+", required=True, help="JUnit XML files or globs")
+    t.add_argument("--name", help="tells matrix jobs apart, e.g. py3.12")
+    t.add_argument("--sha", help="default: $GITHUB_SHA")
+    t.add_argument("--branch")
+    t.add_argument("--dir", help="data-branch checkout to write the record into")
+    t.set_defaults(fn=cmd_ci_record)
+    t = csub.add_parser("report", help="gate, then write the step summary, outputs and PR comment")
+    t.add_argument("--sha", help="default: $GITHUB_SHA")
+    t.add_argument("--run-id", type=int)
+    t.add_argument("--name")
+    t.add_argument("--pr", type=int, help="default: the pull request that triggered the workflow")
+    t.add_argument("--pr-comment", action="store_true", help="add or update a comment on the pull request")
+    t.add_argument("--fail-on", choices=["real", "any", "never"], default="real",
+                   help="real: exit 1 only on REAL_FAILURE (default); any: gate exit codes; never: always 0")
+    t.add_argument("--window-days", type=int, default=analysis.DEFAULT_WINDOW_DAYS)
+    t.set_defaults(fn=cmd_ci_report)
 
     s = sub.add_parser("ingest", help="record a run from JUnit XML")
     s.add_argument("files", nargs="+", help="JUnit XML files or globs")

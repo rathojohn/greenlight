@@ -27,6 +27,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
                  "deploy_files": None, "deploy_files_ref": None, "incident_labels": ["incident", "hotfix", "bug"]},
     "issues": {"flaky_label": "flaky-test", "perf_label": "perf-regression", "quarantine_label": "quarantined",
                "min_flips": 2, "window_days": 30, "healed_runs": 10, "healed_days": 14},
+    "ci": {"data_branch": "flakewatch-data"},
     "sync": {"days": 90},
 }
 

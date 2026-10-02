@@ -68,6 +68,22 @@ class Repo:
                 out[Path(path).name] = parts[2]
         return out
 
+    def ls_tree(self, ref: str, directory: str) -> dict[str, str]:
+        """{path: blob sha} for every file under `directory` on `ref`, recursively."""
+        out = {}
+        for line in self.git("ls-tree", "-r", ref, "--", directory.rstrip("/") + "/", check=False).splitlines():
+            meta, _, path = line.partition("\t")
+            parts = meta.split()
+            if len(parts) == 3 and parts[1] == "blob":
+                out[path] = parts[2]
+        return out
+
+    def fetch(self, remote: str, branch: str) -> bool:
+        """Fetch one branch into refs/remotes/<remote>/<branch>. False if it isn't there or the network is."""
+        out = subprocess.run(["git", "-C", self.path, "fetch", "-q", remote, f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}"],
+                             capture_output=True)
+        return out.returncode == 0
+
     def read_blobs(self, shas: list[str]) -> dict[str, bytes]:
         """Contents of many blobs in one `git cat-file --batch` call."""
         if not shas:
