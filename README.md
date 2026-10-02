@@ -443,10 +443,12 @@ Agents follow the same rules: see [What agents should do](#what-agents-should-do
 
 `greenlight ui` serves it on http://127.0.0.1:8765; `greenlight ui --export snapshot.html` writes a read-only, self-contained copy you can share.
 
+It's dark by default with a light theme one click away. The time range (7, 14, 30 or 90 days) applies to every view that has one, tables sort by any column, and the (i) next to a panel title explains what it counts.
+
 - **Overview**: the latest verdict, rerun share, time spent rerunning, and the most unstable tests across recent commits (taller bars failed more often; amber means the same commit passed and failed).
 - **Flaky tests**, **test pages** (results by commit, duration, failure messages, measured numbers against a baseline, linked issues, quarantine controls), **Runs** and **run pages** (why each failure did or didn't block).
 - **Pipelines**: runs per day, per-workflow success rate, p50/p95 duration and queue time, flaky and slow jobs, and a job waterfall per run.
-- **Delivery**: the four DORA numbers, the deployments behind them, pull request flow and the issue backlog.
+- **DORA and GitHub**: the four DORA numbers, the deployments behind them, pull request flow and the issue backlog.
 - **Trends**: forecasts from the Toto 2.0 time series model (optional, `pip install "greenlight[toto]"`, Python 3.12+): rerun churn, failure rate and suite duration with a 7-day band, and tests running slower than forecast.
 - **Quarantine**: suggestions, what's quarantined, what's clean enough to release.
 
