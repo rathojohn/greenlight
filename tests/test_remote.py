@@ -126,9 +126,11 @@ def test_stdio_server_reads_the_repo_with_no_checkout(hosted, tmp_path):
             await s.initialize()
             names = {t.name for t in (await s.list_tools()).tools}
             res = await s.call_tool("greenlight_overview", {})
-            return names, json.loads(res.content[0].text)
+            return names, res.content[0].text
 
-    names, out = asyncio.run(go())
+    names, text = asyncio.run(go())
+    assert text.startswith("{"), text
+    out = json.loads(text)
     assert "greenlight_overview" in names and not {"greenlight_gate_junit", "greenlight_playtest_gate"} & names
     assert out["repo"] == "acme/game" and out["source"] == "GitHub (acme/game)"
     assert out["flaky_tests"][0]["test_id"] == "smoke::the Lantern points at the foe it locked on"
@@ -184,3 +186,28 @@ def test_http_server_needs_the_token_in_the_path_or_a_header(hosted, tmp_path):
         proc.terminate()
         proc.wait(10)
     assert b"t0ken-abc" not in proc.stderr.read().replace(b"/t0ken-abc/mcp", b"")  # only in the URL it prints
+
+
+def test_checkout_mode_fills_a_fresh_db_on_first_use(game, tmp_path):  # noqa: F811
+    """A fresh cloud session: the project is a checkout with no greenlight.toml and nothing synced yet."""
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+    repo, head = game
+
+    async def go():
+        env = child_env(CLAUDE_PROJECT_DIR=str(repo), GREENLIGHT_HOME=str(tmp_path / "glhome"))
+        params = StdioServerParameters(command=sys.executable, args=["-m", "greenlight.server"], env=env,
+                                       cwd=str(tmp_path))
+        async with stdio_client(params) as (r, w), ClientSession(r, w) as s:
+            await s.initialize()
+            names = {t.name for t in (await s.list_tools()).tools}
+            res = await s.call_tool("greenlight_overview", {})
+            return names, res.content[0].text
+
+    names, text = asyncio.run(go())
+    assert text.startswith("{"), text
+    out = json.loads(text)
+    assert {"greenlight_gate_junit", "greenlight_playtest_gate"} <= names  # a checkout can record runs
+    assert out["source"] == f"checkout at {repo}" and "playtest" in out["synced"]
+    assert out["flaky_tests"][0]["test_id"] == "smoke::the Lantern points at the foe it locked on"
+    assert (tmp_path / "glhome" / "greenlight.db").is_file()

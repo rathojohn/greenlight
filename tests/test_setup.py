@@ -133,7 +133,7 @@ def test_mcp_server_uses_the_claude_project(checkout, tmp_path):
     from mcp.client.stdio import stdio_client
     repo, sha = checkout
     db = tmp_path / "from-config.db"
-    (repo / "greenlight.toml").write_text(f'db = "{db}"\n')
+    (repo / "greenlight.toml").write_text(f'db = "{db.as_posix()}"\n')  # TOML strings treat \\ as an escape
     git(repo, "add", "greenlight.toml")
     git(repo, "commit", "-qm", "config")
     sha = git(repo, "rev-parse", "HEAD")
@@ -166,7 +166,8 @@ def test_project_files_merge_into_what_the_repo_has(tmp_path):
     (repo / ".claude").mkdir(parents=True)
     hooks = {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo hi"}]}]}}
     (repo / ".claude" / "settings.json").write_text(json.dumps(hooks))
-    (repo / ".mcp.json").write_text('﻿{"mcpServers": {"other": {"command": "x"}}}')  # BOM, as Notepad writes
+    (repo / ".mcp.json").write_text('\ufeff{"mcpServers": {"other": {"command": "x"}}}',
+                                    encoding="utf-8")  # a BOM, as Notepad writes
     assert setup.project_files(repo, dry_run=True)[0] == ".mcp.json: would add the greenlight server"
     assert not (repo / ".codex").exists()
     first = setup.project_files(repo)

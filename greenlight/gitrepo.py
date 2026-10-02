@@ -39,8 +39,12 @@ def set_auth(token: str | None, host: str = "https://github.com/") -> None:
 
 def run_git(args: list[str], **kw) -> subprocess.CompletedProcess:  # noqa: ANN003
     """Every git call goes through here, so the cache clones' credentials reach lazy blob fetches too.
-    GIT_TERMINAL_PROMPT=0: fail instead of waiting on a password prompt nobody can see."""
+    GIT_TERMINAL_PROMPT=0: fail instead of waiting on a password prompt nobody can see. stdin is never
+    inherited: in a stdio MCP server it's the protocol pipe, and on Windows a child that inherits a pipe
+    another thread is reading can hang until the client sends something."""
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", **_AUTH_ENV}
+    if "input" not in kw:
+        kw.setdefault("stdin", subprocess.DEVNULL)
     try:
         return subprocess.run(["git", *args], env=env, **kw)
     except FileNotFoundError as e:

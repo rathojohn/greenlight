@@ -74,7 +74,7 @@ def configure(repo: str | None = None, project: str | Path | None = None) -> Non
             STATE.repo = repo
             STATE.cfg = config.Config(sections={"github": {"repo": repo}}, db=remote.db_path(repo))
             set_config_db(STATE.cfg.db)
-            STATE.refresher = remote.Refresher(_sync_repo, ready=Path(default_db_path()).exists())
+            STATE.refresher = remote.Refresher(_sync, ready=Path(default_db_path()).exists())
             return
     try:  # greenlight.toml in the project (or a parent) sets the DB and the repo
         STATE.cfg = config.load(start=here)
@@ -83,14 +83,25 @@ def configure(repo: str | None = None, project: str | Path | None = None) -> Non
     if repo:
         STATE.cfg.sections.setdefault("github", {})["repo"] = repo
     set_config_db(STATE.cfg.db)
-
-
-def _sync_repo() -> None:
     from . import sync
-    cfg = remote.config_for(STATE.repo)
+    from .gitrepo import Repo
+    git = STATE.cfg.git_path
+    if STATE.cfg.path is None and git and Repo(git).ok():  # no greenlight.toml, like a repo that ignores it
+        checkout = Repo(git)
+        remote.guess_delivery(STATE.cfg, checkout, checkout.default_branch())
+    if sync.plan(STATE.cfg, SYNCED):  # a fresh cloud session starts with no DB: fill it on first use
+        STATE.refresher = remote.Refresher(_sync, ready=Path(default_db_path()).exists())
+
+
+SYNCED = {"playtest", "records", "pulls", "issues", "actions", "deployments"}  # never otel from here
+
+
+def _sync() -> None:
+    from . import sync
+    cfg = remote.config_for(STATE.repo) if STATE.repo else STATE.cfg
     with closing(connect()) as conn:
         conn.execute("PRAGMA journal_mode = WAL")  # tool calls read while this writes
-        STATE.last_sync = sync.run(conn, cfg, set(sync.SOURCES) - {"otel"})
+        STATE.last_sync = sync.run(conn, cfg, SYNCED)
     STATE.cfg = cfg
 
 
@@ -120,10 +131,10 @@ def _run(fn: Callable[[sqlite3.Connection], Any], readonly: bool = True) -> str:
     if r:
         r.kick()
         if not r.wait_ready(FIRST_SYNC_WAIT):
-            return (f"Error: greenlight is reading {STATE.repo} from GitHub for the first time (a small clone, then "
-                    "pull requests, issues and Actions runs). Try again in a minute.")
+            return (f"Error: greenlight is reading {STATE.repo or STATE.cfg.repo or 'this repo'} for the first time "
+                    "(run records, then pull requests, issues and Actions runs). Try again in a minute.")
         if r.error and not Path(default_db_path()).exists():
-            return f"Error: couldn't read {STATE.repo} from GitHub: {r.error}"
+            return f"Error: couldn't sync {STATE.repo or STATE.project}: {r.error}"
     try:
         with closing(connect(readonly=readonly)) as conn:
             return json.dumps(fn(conn), default=str, separators=(",", ":"))
@@ -333,7 +344,7 @@ def sync_sources(
     """Pull git and GitHub data into the local DB: playtest records, CI run records from the data branch,
     pull requests, issues, GitHub Actions runs and deployments. Reads GitHub only; writes only the local DB."""
     from . import sync
-    if STATE.refresher:
+    if STATE.refresher and not only:
         try:
             STATE.refresher.now()
         except RuntimeError as e:

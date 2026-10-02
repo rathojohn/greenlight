@@ -87,17 +87,27 @@ def config_for(repo: str) -> config.Config:
     playtest = cfg.sections.setdefault("playtest", {})
     if playtest.get("enabled") is None:
         playtest["enabled"] = bool(r.ls_dir(default, cfg.get("playtest", "runs_dir")))
-    if not text:  # nothing committed: guess what marks a release, the way `greenlight init` does
-        delivery = cfg.sections.setdefault("delivery", {})
-        if r.ls_dir(default, "docs/patch-notes"):
-            delivery["deploy_files"] = "docs/patch-notes/20??-??-??-*.md"
-        elif r.resolve("refs/remotes/origin/release"):
-            delivery["deploy_branch"] = "release"
-        else:
-            delivery["deploy_releases"] = True
+    if not text:
+        guess_delivery(cfg, r, default)
     playtest.pop("report", None)  # a report.json only exists in someone's checkout
     cfg.db = db_path(repo)  # a committed db path names someone else's disk
     return cfg
+
+
+def guess_delivery(cfg: config.Config, r: Repo, ref: str) -> None:
+    """With no greenlight.toml, guess what marks a release the way `greenlight init` does: release notes,
+    then a release branch, then GitHub Releases."""
+    delivery = cfg.sections.setdefault("delivery", {})
+    if any(delivery.get(k) for k in ("deploy_files", "deploy_branch", "deploy_environment", "deploy_releases")):
+        return
+    if r.ls_dir(ref, "docs/patch-notes"):
+        delivery["deploy_files"] = "docs/patch-notes/20??-??-??-*.md"
+    elif not cfg.repo:  # the other two come from the GitHub API
+        return
+    elif r.resolve("refs/remotes/origin/release") or r.resolve("refs/heads/release"):
+        delivery["deploy_branch"] = "release"
+    else:
+        delivery["deploy_releases"] = True
 
 
 class Refresher:

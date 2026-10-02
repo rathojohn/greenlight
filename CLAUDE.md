@@ -44,7 +44,7 @@ Tests use a fake GitHub (`tests/fakegithub.py`), a fake OTLP collector and a loc
 - Project MCP config (`setup --project`) starts the server with `uvx`, never a binary a SessionStart hook installs: Claude Code starts project MCP servers before hooks run (measured in a cloud session: the servers started 0.1 s before the hook, which took 13 s to install).
 - Partial clones fetch blobs one round trip each in `cat-file`, so `Repo.read_blobs` prefetches them in one `git fetch` (68 playtest records: 33 s down to under 1 s). Git calls go through `gitrepo.run_git`, which carries a cache clone's token in the environment, never in a config file.
 - The HTTP server takes its token in the URL path because claude.ai and ChatGPT connectors can't send an API key header; access logs are off so the token never lands in a log.
-- Windows: paths handed to git are made relative with forward slashes (`gitrepo._rel`), JSON files are read as `utf-8-sig`, and the Action converts `RUNNER_TEMP` to forward slashes and uses `python` (`python3` can be the Store stub).
+- Windows: paths handed to git are made relative with forward slashes (`gitrepo._rel`), JSON files are read as `utf-8-sig`, and the Action converts `RUNNER_TEMP` to forward slashes and uses `python` (`python3` can be the Store stub). Subprocesses the server starts get `stdin=DEVNULL`: a stdio server's stdin is the protocol pipe, and on Windows a child inheriting it hangs while another thread reads it. Paths in test TOML go through `as_posix()`, since TOML strings treat a backslash as an escape.
 
 ## Writing conventions
 

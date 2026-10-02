@@ -86,6 +86,7 @@ class Config:
 def remote_repo(git_path: str) -> str | None:
     try:
         url = subprocess.run(["git", "-C", git_path, "remote", "get-url", "origin"], capture_output=True,
+                             stdin=subprocess.DEVNULL,
                              text=True, timeout=10).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return None

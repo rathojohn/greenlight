@@ -56,8 +56,8 @@ def test_sync_reports_each_source_and_keeps_going(game, no_token, tmp_path, caps
         fake.route("GET", "{repo}/issues", lambda q, b: (500, {"message": "boom"}))
         fake.pages("GET", "{repo}/actions/runs", [], key="workflow_runs")
         cfg = tmp_path / "greenlight.toml"
-        cfg.write_text(f'db = "{tmp_path}/s.db"\n[github]\nrepo = "o/r"\napi_url = "{fake.url}"\n'
-                       f'[git]\npath = "{repo}"\n[playtest]\nenabled = true\n')
+        cfg.write_text(f'db = "{tmp_path.as_posix()}/s.db"\n[github]\nrepo = "o/r"\napi_url = "{fake.url}"\n'
+                       f'[git]\npath = "{repo.as_posix()}"\n[playtest]\nenabled = true\n')
         code = cli.main(["--config", str(cfg), "sync"])
         out = capsys.readouterr().out
         assert code == 1
