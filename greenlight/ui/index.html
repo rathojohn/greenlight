@@ -231,6 +231,7 @@ table.t { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .facts > div { min-width: 0; padding: 8px 10px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 4px; }
 .facts .k { display: flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 11.5px; }
 .facts .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brief { margin: 0; padding: 10px 12px; background: var(--sunk); border: 1px solid var(--line-2); border-radius: 4px; font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .advice { margin: 0; padding: 10px 12px; border-left: 2px solid var(--accent); border-radius: 0 4px 4px 0; background: var(--wash); line-height: 1.5; }
 @media (max-width: 560px) { .drawer { border-left: 0; } .dh .da .lbl { display: none; } }
 @media (min-width: 1680px) { body.panel-open .main { margin-right: 560px; } }
@@ -697,17 +698,19 @@ function panelTable() {
   }
   return null;
 }
+/* the next row in direction d that opens a panel (some rows open a page instead), or -1 */
+function nextRow(t, d) {
+  let to = t.at + d;
+  while (to >= 0 && to < t.keys.length && !t.keys[to]) to += d;
+  return to >= 0 && to < t.keys.length ? to : -1;
+}
 function stepButtons() {
   const t = panelTable();
-  drawer.querySelectorAll('[data-act="step"]').forEach(b => {
-    const to = t ? t.at + Number(b.dataset.d) : -1;
-    b.disabled = !t || to < 0 || to >= t.keys.length;
-  });
+  drawer.querySelectorAll('[data-act="step"]').forEach(b => { b.disabled = !t || nextRow(t, Number(b.dataset.d)) < 0; });
 }
 function stepPanel(d) {
-  const t = panelTable();
-  if (!t || t.at + d < 0 || t.at + d >= t.keys.length) return;
-  const to = t.at + d;
+  const t = panelTable(), to = t ? nextRow(t, d) : -1;
+  if (to < 0) return;
   if (t.T.size && Math.floor(to / t.T.size) !== t.T.page) {
     t.T.page = Math.floor(to / t.T.size);
     document.getElementById(t.id).innerHTML = tableInner(t.id);
@@ -887,8 +890,29 @@ function gate(t) {
 }
 
 /* ---------- views ---------- */
+const SEV = { high: ["failing", "High"], medium: ["flaky", "Medium"], low: ["neutral", "Low"] };
+function nextSteps(ins) {
+  if (!ins || !ins.insights.length) return "";
+  const cols = [
+    { h: "", cell: i => tag(...SEV[i.severity]), sort: i => ["high", "medium", "low"].indexOf(i.severity), dir: 1, cls: "fit" },
+    { h: "What", cell: i => `${esc(i.title)}<div class="sub">${esc(i.detail)}</div>`, cls: "wrap" },
+    { h: "At stake", cell: i => i.stake ? tk(i.stake) : "", sort: i => i.stake || 0, cls: "num hide-sm", tip: "Cost in input tokens: what it cost, or what changing it would have saved" },
+  ];
+  return `<div class="grid">${panel({ title: "What to do next", tip: "From the test history and Claude's sessions, most at stake first. Open one for the evidence.", flush: true,
+    actions: `<a class="lnk" href="${esc(panelHref("brief:session"))}">What Claude starts with</a>`,
+    body: table("t-next", cols, ins.insights, { limit: 5, panel: i => i.action.panel || null, href: i => i.action.href || null }) })}</div>`;
+}
+PANELS.brief = async kind => {
+  const d = await api("/api/insights", { days: DAYS });
+  return {
+    title: "What Claude starts with", sub: "The brief greenlight adds when a session connects",
+    body: (d.brief ? `<pre class="brief">${esc(d.brief)}</pre>` : `<p class="empty">Nothing to say yet: no failures on the default branch, no flaky tests, no costly habits.</p>`)
+      + `<p class="advice">A session gets this in the greenlight server's instructions when it connects, with no tool call. Subagents get a shorter one from the SubagentStart hook that <code>greenlight setup --project</code> adds, and <code>greenlight brief</code> prints it for scripts and workflows.</p>`,
+  };
+};
+
 async function overviewView(tok) {
-  const d = await api("/api/overview", { days: DAYS });
+  const [d, ins] = await Promise.all([api("/api/overview", { days: DAYS }), api("/api/insights", { days: DAYS }).catch(() => null)]);
   if (tok !== renderToken) return;
   setSynced(d.synced);
   const t = d.totals, f = d.field;
@@ -906,6 +930,7 @@ async function overviewView(tok) {
         ${stat({ k: "Quarantined", v: t.quarantined, s: "ignored by the gate", href: "#/quarantine" })}
       </div>
     </div>
+    ${nextSteps(ins)}
     <div class="grid">
       ${panel({ cls: "s6", title: "Runs per day", tip: "Reruns are second and later attempts on the same code.", body: `<div class="chart" id="c-runs"></div>`, foot: legend([["var(--neutral)", "First attempt"], ["var(--flip)", "Rerun"]]) })}
       ${panel({ cls: "s6", title: "Failure rate", tip: "Share of test executions that failed, per day.", body: `<div class="chart" id="c-fail"></div>` })}

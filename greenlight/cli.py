@@ -127,7 +127,8 @@ def cmd_setup(a: argparse.Namespace) -> int:
               "dependencies (no --no-deps).")
     url = a.url or os.environ.get("GREENLIGHT_URL")
     if a.project:
-        for line in setup.project_files(target, a.dry_run, url, usage_hook=not a.no_usage_hook):
+        for line in setup.project_files(target, a.dry_run, url, usage_hook=not a.no_usage_hook,
+                                        brief_hook=not a.no_brief_hook):
             print("project: " + line)
         if not a.dry_run and url:
             print(f"project: commit .mcp.json, .claude/settings.json and .codex/config.toml. Sessions connect to {url} "
@@ -570,6 +571,57 @@ def cmd_usage(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_insights(a: argparse.Namespace) -> int:
+    """What to do next, from the server when GREENLIGHT_URL is set."""
+    from . import client, insights
+    if client.configured() and not a.local:
+        d = client.get("/api/insights", {"days": a.days})
+    else:
+        with closing(connect(a.db, readonly=True)) as conn:
+            found = insights.insights(conn, a.days)
+            d = {"insights": [{k: v for k, v in i.items() if k not in ("red", "rank")} for i in found],
+                 "brief": insights.brief(conn, a.days, found=found)}
+    if a.json:
+        print(json.dumps(d, indent=2, default=str))
+        return 0
+    if not d["insights"]:
+        print(f"Nothing to act on in the last {a.days} days.")
+    for i in d["insights"][:a.limit]:
+        print(f"[{i['severity']}] {i['title']}\n        {i['detail']}")
+    return 0
+
+
+# Subagents that only search or plan: a brief about tests is noise for them
+QUIET_AGENTS = {"Explore", "Plan", "claude-code-guide", "statusline-setup", "output-style-setup"}
+
+
+def cmd_brief(a: argparse.Namespace) -> int:
+    """The brief an agent starts with. --hook: Claude Code's SessionStart or SubagentStart hook, which answers as
+    hook JSON and never fails the session."""
+    from . import client, insights
+    try:
+        hook = json.loads(sys.stdin.read() or "{}") if a.hook else {}
+        event = hook.get("hook_event_name") or ("SubagentStart" if a.subagent else "SessionStart")
+        subagent = a.subagent or event == "SubagentStart"
+        if subagent and hook.get("agent_type") in QUIET_AGENTS:
+            return 0
+        if client.configured() and not a.local:
+            text = client.get("/api/brief", {"days": a.days, **({"subagent": 1} if subagent else {})},
+                              timeout=8 if a.hook else 60)["brief"]
+        else:
+            with closing(connect(a.db, readonly=True)) as conn:
+                text = insights.brief(conn, a.days, a.cfg.repo, subagent=subagent)
+        if text and a.hook:
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}))
+        elif text:
+            print(text)
+    except Exception as e:  # noqa: BLE001 - a hook must never hold up a session
+        if not a.hook:
+            raise
+        print(f"greenlight brief: {e}", file=sys.stderr)
+    return 0
+
+
 def _usage_record(a: argparse.Namespace, client, usage) -> int:  # noqa: ANN001
     """The Stop hook: never block or fail the session. Problems go to stderr and the exit code stays 0."""
     try:
@@ -675,6 +727,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--agent-rules", action="store_true", help="append the gate rule to CLAUDE.md / AGENTS.md")
     s.add_argument("--no-usage-hook", action="store_true", help="for --project: skip the hook that records Claude "
                    "Code token usage after each turn")
+    s.add_argument("--no-brief-hook", action="store_true", help="for --project: skip the hook that gives subagents "
+                                                                 "the brief")
     s.add_argument("--no-claude", action="store_true", help="skip registering with Claude Code")
     s.add_argument("--dry-run", action="store_true", help="say what would change, change nothing")
     s.set_defaults(fn=cmd_setup)
@@ -825,6 +879,23 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--transcript", help="record: a session transcript (.jsonl) instead of hook input")
     s.add_argument("--session", help="record: the session id to file it under (default: from the transcript)")
     s.set_defaults(fn=cmd_usage)
+
+    s = sub.add_parser("insights", help="what to do next, most at stake first (from the server when GREENLIGHT_URL "
+                                        "is set)")
+    s.add_argument("--days", type=int, default=30)
+    s.add_argument("--limit", type=int, default=20)
+    s.add_argument("--json", action="store_true")
+    s.add_argument("--local", action="store_true", help="read the local database even with GREENLIGHT_URL set")
+    s.set_defaults(fn=cmd_insights)
+
+    s = sub.add_parser("brief", help="the short brief an agent starts work with: what fails on the default branch, "
+                                     "flaky tests, costly habits")
+    s.add_argument("--days", type=int, default=30)
+    s.add_argument("--hook", action="store_true", help="answer a Claude Code SessionStart or SubagentStart hook "
+                                                       "(hook input on stdin); never fail")
+    s.add_argument("--subagent", action="store_true", help="the shorter brief for a subagent")
+    s.add_argument("--local", action="store_true", help="read the local database even with GREENLIGHT_URL set")
+    s.set_defaults(fn=cmd_brief)
 
     s = sub.add_parser("forget", help="delete runs recorded by mistake, by number or external id (on the server "
                                       "when GREENLIGHT_URL is set)")

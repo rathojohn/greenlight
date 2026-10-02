@@ -10,6 +10,7 @@ import gzip
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -28,15 +29,19 @@ def configured() -> tuple[str, str] | None:
     return url, token
 
 
-def _post(path: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+def _post(path: str, payload: dict[str, Any] | None, timeout: float, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    """POST a payload (gzip JSON), or GET when there's none."""
     conf = configured()
     if not conf:
         raise ServerError("set GREENLIGHT_URL and GREENLIGHT_TOKEN to use a greenlight server")
     url, token = conf
-    body = gzip.compress(json.dumps(payload, separators=(",", ":"), default=str).encode())
-    req = urllib.request.Request(f"{url}{path}", data=body, method="POST", headers={
-        "Authorization": f"Bearer {token}", "Content-Type": "application/json", "Content-Encoding": "gzip",
-        "Accept": "application/json", "User-Agent": "greenlight"})
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": "greenlight"}
+    body = None
+    if payload is not None:
+        body = gzip.compress(json.dumps(payload, separators=(",", ":"), default=str).encode())
+        headers |= {"Content-Type": "application/json", "Content-Encoding": "gzip"}
+    query = f"?{urllib.parse.urlencode(params)}" if params else ""
+    req = urllib.request.Request(f"{url}{path}{query}", data=body, method="POST" if body else "GET", headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read() or b"{}")
@@ -68,6 +73,10 @@ def login_link(timeout: float = 30) -> str:
 def forget(runs: list[str], dry_run: bool = False, timeout: float = 60) -> list[dict[str, Any]]:
     """Delete runs on the server by number or external id."""
     return _post("/api/forget", {"runs": runs, "dry_run": dry_run}, timeout)["forgotten"]
+
+
+def get(path: str, params: dict[str, Any] | None = None, timeout: float = 60) -> dict[str, Any]:
+    return _post(path, None, timeout, params)
 
 
 def send_usage(payload: dict[str, Any], timeout: float = 30) -> dict[str, Any]:

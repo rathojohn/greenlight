@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
-from . import analysis, dashboard, delivery, usage
+from . import analysis, dashboard, delivery, insights, usage
 from .db import connect, iso, utcnow
 
 UI_FILE = Path(__file__).with_name("ui") / "index.html"
@@ -52,6 +52,12 @@ def _forecast():
     return forecast
 
 
+def _insights(c: sqlite3.Connection, days: int) -> dict[str, Any]:
+    found = insights.insights(c, days)
+    return {"insights": [{k: v for k, v in i.items() if k not in ("red", "rank")} for i in found],
+            "brief": insights.brief(c, days, found=found)}
+
+
 GET_ROUTES: dict[str, Callable[[sqlite3.Connection, Params], Any]] = {
     "/api/overview": lambda c, p: dashboard.overview(c, _int(p, "days", 30)),
     "/api/flaky": lambda c, p: dashboard.flaky_table(c, _int(p, "days", 30)),
@@ -67,6 +73,8 @@ GET_ROUTES: dict[str, Callable[[sqlite3.Connection, Params], Any]] = {
     "/api/trends/durations": lambda c, p: _forecast().duration_regressions(c, include_series=30),
     "/api/usage": lambda c, p: usage.summary(c, _int(p, "days", 30)),
     "/api/usage/detail": lambda c, p: usage.detail(c, _int(p, "days", 30), _require(p, "kind"), _require(p, "key")),
+    "/api/insights": lambda c, p: _insights(c, _int(p, "days", 30)),
+    "/api/brief": lambda c, p: {"brief": insights.brief(c, _int(p, "days", 30), subagent=p.get("subagent") == "1")},
     "/api/session": lambda c, p: {"auth": "local"},  # the hosted server answers this itself (cookie, bearer...)
     "/api/trends/suite": lambda c, p: _forecast().suite_forecast(
         c, p.get("metric", "reruns"), history_days=60, lookback_days=90),
@@ -249,6 +257,7 @@ def export_snapshot(db: str | None, out: str, days: int = 30, with_forecasts: bo
     pipes = grab("/api/pipelines", {"days": d}) or {}
     deliv = grab("/api/delivery", {"days": d}) or {}
     grab("/api/usage", {"days": d})
+    grab("/api/insights", {"days": d})
     for env in (deliv.get("dora") or {}).get("environments", []):
         grab("/api/delivery", {"days": d, "env": env["environment"]})
     for p in pipes.get("recent", [])[:20]:

@@ -179,12 +179,15 @@ def test_project_files_merge_into_what_the_repo_has(tmp_path):
     assert settings["hooks"]["SessionStart"] == hooks["hooks"]["SessionStart"]  # the repo's own hooks stay
     assert settings["enabledMcpjsonServers"] == ["greenlight"]
     assert settings["hooks"]["Stop"] == [{"hooks": [{"type": "command", "command": setup.USAGE_HOOK, "timeout": 60}]}]
+    assert settings["hooks"]["SubagentStart"] == [{"hooks": [{"type": "command", "command": setup.BRIEF_HOOK,
+                                                             "timeout": 30}]}]
     assert "mcp__greenlight__greenlight_overview" in settings["permissions"]["allow"]
     assert "mcp__greenlight__greenlight_quarantine" not in settings["permissions"]["allow"]  # changes things: asks
     codex = tomllib.loads((repo / ".codex" / "config.toml").read_text())["mcp_servers"]["greenlight"]
     assert codex["command"] == "uvx" and codex["args"] == setup.UVX_COMMAND[1:] and codex["startup_timeout_sec"] == 120
     assert all("already" in line for line in setup.project_files(repo))
-    assert len(json.loads((repo / ".claude" / "settings.json").read_text())["hooks"]["Stop"]) == 1  # no second hook
+    hooks_now = json.loads((repo / ".claude" / "settings.json").read_text())["hooks"]
+    assert len(hooks_now["Stop"]) == 1 and len(hooks_now["SubagentStart"]) == 1  # no second hook
 
 
 def test_claude_desktop_gets_one_entry_per_repo(tmp_path):

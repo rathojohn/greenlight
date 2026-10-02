@@ -199,7 +199,7 @@ git add .mcp.json .claude/settings.json .codex/config.toml
 git commit -m "Start greenlight in Claude Code and Codex sessions"
 ```
 
-That writes the repo's own MCP config: `.mcp.json` for Claude Code, `.codex/config.toml` for Codex, and `.claude/settings.json` approving the server and its read-only tools, so nobody gets asked (the tools that change something, like quarantine, still ask). Each starts greenlight through `uvx`, which downloads it on first use, so nobody installs anything by hand. Anyone with [uv](https://docs.astral.sh/uv/) gets it, and Claude Code on the web already has uv.
+That writes the repo's own MCP config: `.mcp.json` for Claude Code, `.codex/config.toml` for Codex, and `.claude/settings.json` approving the server and its read-only tools, so nobody gets asked (the tools that change something, like quarantine, still ask). It also adds two hooks: one records token usage after each turn, and one gives subagents the brief (below). `--no-usage-hook` and `--no-brief-hook` leave them out. Each starts greenlight through `uvx`, which downloads it on first use, so nobody installs anything by hand. Anyone with [uv](https://docs.astral.sh/uv/) gets it, and Claude Code on the web already has uv.
 
 That's also why it works in Claude Code on the web: each session is a fresh container, and Claude Code starts project MCP servers before SessionStart hooks run, so a server that a hook installs isn't there yet when Claude looks for it. `uvx` installs it on the spot. Codex only reads `.codex/config.toml` in projects you've marked as trusted.
 
@@ -241,6 +241,24 @@ Codex cloud doesn't start MCP servers yet. Install the CLI in the environment's 
 ```bash
 uv tool install "greenlight @ git+https://github.com/rathojohn/greenlight"
 ```
+
+### What a session starts out knowing
+
+Every session that connects to greenlight gets a short brief in the server's instructions, without calling a tool:
+
+```
+greenlight (acme/game), from the last 30 days of test runs and sessions:
+- Failing on the default branch, so not caused by your branch: test_lantern (since 3f2a1c90). Report these; don't fix them in other work.
+- Flaky, passed and failed on the same code: test_boss_entrance (5/12 commits). If one fails, rerun only it once; don't debug it.
+- 2 quarantined tests: the gate ignores their failures.
+- After a test run with failures, let the gate judge them before rerunning or debugging (greenlight run, greenlight playtest gate, or the greenlight_triage_run tool).
+- When the work moves to a new branch in a long session, tell the user /compact first would cut the cost of everything after it.
+- 14% of cost here is file reads kept in context: read files with an offset and limit, or Grep for the lines first.
+```
+
+It comes from the same findings as the dashboard's "What to do next", recomputed every minute: what fails on the default branch, which tests are flaky, and the habits that cost the most in this repo (from [token usage](#token-usage-claude-code)). A line only shows up when there's something behind it, so a healthy repo's brief is short or empty.
+
+Subagents, workflow agents included, see CLAUDE.md but not a server's instructions, so `setup --project` adds a SubagentStart hook (`greenlight brief --hook`) that hands them a shorter version. Agents that only search or plan (Explore, Plan) get nothing. `greenlight brief` prints it for scripts, or for an agent prompt you write yourself, and the dashboard shows it under "What Claude starts with".
 
 ### What agents should do
 
@@ -448,7 +466,7 @@ Agents follow the same rules: see [What agents should do](#what-agents-should-do
 
 It's dark by default with a light theme one click away. The time range (7, 14, 30 or 90 days) applies to every view that has one, and the (i) next to a panel title explains what it counts. Tables sort by any column and page instead of growing. A row opens a side panel with its details, and the list stays where it was: j and k (or the arrows) step through the rows, Esc closes it, and the panel is part of the URL, so Back closes it and a link opens it. Each panel links to the full page for the deep dive.
 
-- **Overview**: the latest verdict, rerun share, time spent rerunning, and the most unstable tests across recent commits (taller bars failed more often; amber means the same commit passed and failed).
+- **Overview**: the latest verdict, rerun share, time spent rerunning, what to do next (most at stake first: tests failing on main, flaky tests Claude spent tokens on, what to quarantine or release, where session cost goes), and the most unstable tests across recent commits (taller bars failed more often; amber means the same commit passed and failed). `greenlight insights` prints the same list.
 - **Flaky tests**, **test pages** (results by commit, duration, failure messages, measured numbers against a baseline, linked issues, quarantine controls), **Runs** and **run pages** (why each failure did or didn't block).
 - **Pipelines**: runs per day, per-workflow success rate, p50/p95 duration and queue time, flaky and slow jobs, and a job waterfall per run.
 - **DORA and GitHub**: the four DORA numbers, the deployments behind them, pull request flow and the issue backlog.
