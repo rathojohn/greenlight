@@ -1,7 +1,7 @@
-"""Local dashboard: `flakewatch ui` serves it, `flakewatch ui --export file.html` writes a read-only snapshot.
+"""Local dashboard: `greenlight ui` serves it, `greenlight ui --export file.html` writes a read-only snapshot.
 
 By default it binds to 127.0.0.1 and needs no login: requests with a foreign Host header are rejected
-(DNS rebinding), and writes need an X-Flakewatch header, which a cross-site form or simple fetch
+(DNS rebinding), and writes need an X-Greenlight header, which a cross-site form or simple fetch
 cannot send. To open it from a phone on your LAN or tailnet, bind elsewhere with --host; then every
 request needs the access token too (printed once as a link that sets a cookie).
 """
@@ -24,7 +24,7 @@ from .db import connect, iso, utcnow
 UI_FILE = Path(__file__).with_name("ui") / "index.html"
 SNAPSHOT_TAG = '<script id="snapshot" type="application/json">null</script>'
 LOOPBACK = {"127.0.0.1", "localhost", "::1"}
-COOKIE = "fw_token"
+COOKIE = "greenlight_token"
 Params = dict[str, str]
 _incident_labels: list[str] | None = None
 
@@ -93,9 +93,9 @@ def call(route: Callable, db: str | None, params: Any, readonly: bool) -> tuple[
 
 
 LOGIN_PAGE = b"""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>flakewatch</title><body style="font:16px system-ui;max-width:34rem;margin:15vh auto;padding:0 16px;
-background:#F1F3F5;color:#16202A"><h1 style="font-size:1.4rem">flakewatch needs its access link</h1>
-<p>Open the link <code>flakewatch ui</code> printed when it started. It ends in <code>?token=</code> and signs this
+<title>greenlight</title><body style="font:16px system-ui;max-width:34rem;margin:15vh auto;padding:0 16px;
+background:#F1F3F5;color:#16202A"><h1 style="font-size:1.4rem">greenlight needs its access link</h1>
+<p>Open the link <code>greenlight ui</code> printed when it started. It ends in <code>?token=</code> and signs this
 browser in.</p></body>"""
 
 
@@ -171,8 +171,8 @@ def make_handler(db: str | None, port: int, token: str | None = None) -> type[Ba
         def do_POST(self) -> None:  # noqa: N802
             if not self._allowed():
                 return
-            if self.headers.get("X-Flakewatch") != "1":
-                self._json(403, {"error": "Missing X-Flakewatch header"})
+            if self.headers.get("X-Greenlight") != "1":
+                self._json(403, {"error": "Missing X-Greenlight header"})
                 return
             route = POST_ROUTES.get(urlparse(self.path).path)
             if route is None:
@@ -200,10 +200,10 @@ def serve(db: str | None, port: int = 8765, open_browser: bool = True, host: str
     shown = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     url = f"http://{shown}:{port}/" + (f"?token={token}" if remote else "")
     if remote:
-        print(f"flakewatch ui on {host}:{port}. Open this once on each device (it signs the browser in):\n  {url}")
+        print(f"greenlight ui on {host}:{port}. Open this once on each device (it signs the browser in):\n  {url}")
         print("Use it on a network you trust (home LAN, Tailscale). It is plain HTTP.  (Ctrl+C to stop)")
     else:
-        print(f"flakewatch ui on {url}  (Ctrl+C to stop)")
+        print(f"greenlight ui on {url}  (Ctrl+C to stop)")
     if open_browser:
         webbrowser.open(url)
     try:

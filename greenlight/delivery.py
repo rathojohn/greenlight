@@ -137,7 +137,7 @@ def slow_jobs(conn: sqlite3.Connection, days: int = 30, limit: int = 8) -> list[
 def pipeline_detail(conn: sqlite3.Connection, pipeline_id: str) -> dict[str, Any]:
     p = conn.execute("SELECT * FROM pipelines WHERE pipeline_id = ?", (pipeline_id,)).fetchone()
     if p is None:
-        raise LookupError(f"No pipeline {pipeline_id}. Run `flakewatch sync` to pull Actions runs.")
+        raise LookupError(f"No pipeline {pipeline_id}. Run `greenlight sync` to pull Actions runs.")
     p = dict(p)
     origin = parse_time(p["started_at"] or p["created_at"])
     jobs = []
@@ -292,7 +292,7 @@ def issues_summary(conn: sqlite3.Connection, days: int = 30, incident_labels: li
     open_issues = [i for i in issues if i["state"] == "open"]
     now = utcnow().isoformat()
     by_label = Counter(lb for i in open_issues for lb in i["labels"])
-    managed = sorted((i for i in issues if i["fw_key"]), key=lambda i: (i["state"] != "open", i["created_at"]))
+    managed = sorted((i for i in issues if i["managed_key"]), key=lambda i: (i["state"] != "open", i["created_at"]))
     close_times = [_hours(i["created_at"], i["closed_at"]) for i in issues if i["closed_at"] and i["closed_at"] >= start]
     return {
         "window_days": days,
@@ -308,8 +308,8 @@ def issues_summary(conn: sqlite3.Connection, days: int = 30, incident_labels: li
             "open_age_p50_h": pct([_hours(i["created_at"], now) for i in open_issues], .5),
         },
         "open_by_label": by_label.most_common(12),
-        "managed": [{**{k: i[k] for k in ("number", "title", "state", "fw_key", "created_at", "closed_at", "url")},
-                     "kind": i["fw_key"].split(":", 1)[0], "test_id": i["fw_key"].split(":", 1)[1]} for i in managed],
+        "managed": [{**{k: i[k] for k in ("number", "title", "state", "managed_key", "created_at", "closed_at", "url")},
+                     "kind": i["managed_key"].split(":", 1)[0], "test_id": i["managed_key"].split(":", 1)[1]} for i in managed],
         "oldest_open": [{**{k: i[k] for k in ("number", "title", "labels", "created_at", "url")},
                          "age_h": _hours(i["created_at"], now)}
                         for i in sorted(open_issues, key=lambda i: i["created_at"])[:15]],

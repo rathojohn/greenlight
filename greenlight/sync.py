@@ -1,4 +1,4 @@
-"""`flakewatch sync`: bring the local DB up to date from git and GitHub, per flakewatch.toml.
+"""`greenlight sync`: bring the local DB up to date from git and GitHub, per greenlight.toml.
 Each source runs on its own, so one failing (no token, rate limit) doesn't stop the rest."""
 from __future__ import annotations
 
@@ -35,8 +35,8 @@ def run(conn: sqlite3.Connection, cfg: Config, only: set[str] | None = None,
         log: Callable[[str], None] = lambda _: None) -> dict[str, Any]:
     sources = plan(cfg, only)
     if not sources:
-        raise ValueError("Nothing to sync. Add a flakewatch.toml with [github] repo (or run inside a GitHub clone), "
-                         "or set [playtest] for a playtest ledger. `flakewatch init` writes one.")
+        raise ValueError("Nothing to sync. Add a greenlight.toml with [github] repo (or run inside a GitHub clone), "
+                         "or set [playtest] for a playtest ledger. `greenlight init` writes one.")
     token, token_from = resolve_token()
     gh = GitHub(cfg.repo, token, cfg.api_url) if cfg.repo else None
     git = Repo(cfg.git_path) if cfg.git_path and Repo(cfg.git_path).ok() else None

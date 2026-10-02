@@ -125,7 +125,7 @@ def resolve_test_id(conn: sqlite3.Connection, test_id: str) -> str:
         "SELECT DISTINCT test_id FROM results WHERE test_id LIKE ? LIMIT 6", (f"%{test_id}%",))]
     if len(matches) == 1:
         return matches[0]
-    hint = f" Closest matches: {matches[:5]}" if matches else " Check the id, or list candidates with `flakewatch flaky`."
+    hint = f" Closest matches: {matches[:5]}" if matches else " Check the id, or list candidates with `greenlight flaky`."
     raise LookupError(f"No test with id '{test_id}'.{hint}")
 
 
@@ -155,7 +155,7 @@ def resolve_run(conn: sqlite3.Connection, run_id: int | None = None, commit_sha:
         row = conn.execute("SELECT * FROM runs ORDER BY started_at DESC, run_id DESC LIMIT 1").fetchone()
     if row is None:
         what = f"run_id={run_id}" if run_id is not None else f"sha={commit_sha}" if commit_sha else "any run"
-        raise LookupError(f"No run found for {what}. Ingest results first with `flakewatch ingest`.")
+        raise LookupError(f"No run found for {what}. Ingest results first with `greenlight ingest`.")
     return row
 
 

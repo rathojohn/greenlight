@@ -1,4 +1,4 @@
-"""An in-process stand-in for the GitHub REST API, enough for flakewatch's client and sync."""
+"""An in-process stand-in for the GitHub REST API, enough for greenlight's client and sync."""
 from __future__ import annotations
 
 import json

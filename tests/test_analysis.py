@@ -1,6 +1,6 @@
 import pytest
 
-from flakewatch import analysis
+from greenlight import analysis
 
 STABLE = [("t.api::a", "pass", 0.1, None), ("t.api::b", "pass", 0.1, None)]
 FLAKY = "t.e2e::login"

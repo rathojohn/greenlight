@@ -1,17 +1,17 @@
-"""flakewatch CLI.
+"""greenlight CLI.
 
-  flakewatch init                              write flakewatch.toml for the repo you're in
-  flakewatch auth                              where the GitHub token comes from, and what it can do
-  flakewatch sync                              pull git and GitHub data into the DB (flakewatch.toml)
-  flakewatch ingest --sha $SHA reports/*.xml   record a run
-  flakewatch gate --sha $SHA                   exit 0 PASS, 2 RERUN_TARGETED, 1 REAL_FAILURE
-  flakewatch playtest gate                     sync the playtest ledger, then gate the run just made
-  flakewatch issues [--apply]                  one GitHub issue per flaky test and perf regression
-  flakewatch ci record|report|restore          GitHub Actions: data-branch history, gate, PR comment
-  flakewatch flaky                             ranked flaky tests
-  flakewatch sweep [--apply]                   quarantine candidates / release candidates
-  flakewatch trends                            Toto duration regressions + rerun forecast
-  flakewatch ui                                dashboard at http://127.0.0.1:8765
+  greenlight init                              write greenlight.toml for the repo you're in
+  greenlight auth                              where the GitHub token comes from, and what it can do
+  greenlight sync                              pull git and GitHub data into the DB (greenlight.toml)
+  greenlight ingest --sha $SHA reports/*.xml   record a run
+  greenlight gate --sha $SHA                   exit 0 PASS, 2 RERUN_TARGETED, 1 REAL_FAILURE
+  greenlight playtest gate                     sync the playtest ledger, then gate the run just made
+  greenlight issues [--apply]                  one GitHub issue per flaky test and perf regression
+  greenlight ci record|report|restore          GitHub Actions: data-branch history, gate, PR comment
+  greenlight flaky                             ranked flaky tests
+  greenlight sweep [--apply]                   quarantine candidates / release candidates
+  greenlight trends                            Toto duration regressions + rerun forecast
+  greenlight ui                                dashboard at http://127.0.0.1:8765
 """
 from __future__ import annotations
 
@@ -102,9 +102,9 @@ def cmd_init(a: argparse.Namespace) -> int:
     has_notes = (target / "docs/patch-notes").is_dir()
     name = (gh_repo or target.name).split("/")[-1]
     lines = [
-        "# flakewatch config. Every key is optional; `flakewatch sync` reads this.",
-        "# The GitHub token never goes here: see `flakewatch auth`.",
-        f'db = "~/.flakewatch/{name}.db"',
+        "# greenlight config. Every key is optional; `greenlight sync` reads this.",
+        "# The GitHub token never goes here: see `greenlight auth`.",
+        f'db = "~/.greenlight/{name}.db"',
         "",
         "[github]",
         f'repo = "{gh_repo}"' if gh_repo else '# repo = "owner/name"',
@@ -135,7 +135,7 @@ def cmd_init(a: argparse.Namespace) -> int:
     ]
     out.write_text("\n".join(lines), encoding="utf-8")
     print(f"wrote {out}")
-    print("next: `flakewatch auth` to check GitHub access, then `flakewatch sync` and `flakewatch ui`")
+    print("next: `greenlight auth` to check GitHub access, then `greenlight sync` and `greenlight ui`")
     return 0
 
 
@@ -143,7 +143,7 @@ def cmd_auth(a: argparse.Namespace) -> int:
     from . import github
     cfg = a.cfg
     token, source = github.resolve_token()
-    print(f"repo:  {cfg.repo or 'not set (flakewatch.toml [github] repo, or run inside a GitHub clone)'}")
+    print(f"repo:  {cfg.repo or 'not set (greenlight.toml [github] repo, or run inside a GitHub clone)'}")
     print(f"token: {'found via ' + source if token else 'none'}")
     if cfg.repo:
         gh = github.GitHub(cfg.repo, token, cfg.api_url)
@@ -161,8 +161,8 @@ def cmd_auth(a: argparse.Namespace) -> int:
 
 
 AUTH_HELP = """
-How flakewatch authenticates
-  Locally: a token from $FLAKEWATCH_GITHUB_TOKEN, $GH_TOKEN or $GITHUB_TOKEN, else `gh auth token`
+How greenlight authenticates
+  Locally: a token from $GREENLIGHT_GITHUB_TOKEN, $GH_TOKEN or $GITHUB_TOKEN, else `gh auth token`
   if the GitHub CLI is logged in. It is read per command and never written anywhere.
   In GitHub Actions: the built-in GITHUB_TOKEN, scoped by the workflow's `permissions:` block.
   The dashboard and MCP server are local: they bind to 127.0.0.1 and need no login.
@@ -328,12 +328,12 @@ def cmd_ui(a: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="flakewatch")
-    p.add_argument("--db", help="SQLite path (default: $FLAKEWATCH_DB, then flakewatch.toml, then ~/.flakewatch/flakewatch.db)")
-    p.add_argument("--config", help="flakewatch.toml path (default: $FLAKEWATCH_CONFIG, then this folder or a parent)")
+    p = argparse.ArgumentParser(prog="greenlight")
+    p.add_argument("--db", help="SQLite path (default: $GREENLIGHT_DB, then greenlight.toml, then ~/.greenlight/greenlight.db)")
+    p.add_argument("--config", help="greenlight.toml path (default: $GREENLIGHT_CONFIG, then this folder or a parent)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("init", help="write flakewatch.toml for the repo in this folder")
+    s = sub.add_parser("init", help="write greenlight.toml for the repo in this folder")
     s.add_argument("path", nargs="?", help="repo folder (default: here)")
     s.add_argument("--force", action="store_true")
     s.set_defaults(fn=cmd_init)
@@ -341,7 +341,7 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("auth", help="show where the GitHub token comes from and what it can do")
     s.set_defaults(fn=cmd_auth)
 
-    s = sub.add_parser("sync", help="pull git and GitHub data into the DB, per flakewatch.toml")
+    s = sub.add_parser("sync", help="pull git and GitHub data into the DB, per greenlight.toml")
     s.add_argument("--only", help="comma list: playtest,records,pulls,issues,actions,deployments")
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_sync)

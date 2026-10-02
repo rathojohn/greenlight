@@ -1,11 +1,11 @@
 """Seed a demo DB with 60 days of synthetic history so every view has something to show: test runs
 (with reruns until green, the old habit), GitHub Actions pipelines, daily releases, pull requests,
-issues (including the ones flakewatch would manage) and a perf check with numbers.
+issues (including the ones greenlight would manage) and a perf check with numbers.
 
     python examples/seed_demo.py --db demo.db
-    flakewatch --db demo.db flaky
-    flakewatch --db demo.db gate
-    flakewatch --db demo.db ui
+    greenlight --db demo.db flaky
+    greenlight --db demo.db gate
+    greenlight --db demo.db ui
 """
 from __future__ import annotations
 
@@ -18,8 +18,8 @@ from datetime import timedelta
 from pathlib import Path
 from xml.sax.saxutils import quoteattr
 
-from flakewatch.db import connect, iso, utcnow
-from flakewatch.ingest import TestResult, ingest_files, record_run
+from greenlight.db import connect, iso, utcnow
+from greenlight.ingest import TestResult, ingest_files, record_run
 
 STABLE = [f"tests.test_api::test_endpoint_{i}" for i in range(30)]
 FLAKY = {  # test_id -> failure probability
@@ -154,7 +154,7 @@ def main() -> None:
                 conn.execute("INSERT OR REPLACE INTO pull_requests (number, title, author, state, base, head, head_sha, created_at, merged_at, updated_at) "
                              "VALUES (?, ?, 'demo', ?, 'main', ?, ?, ?, ?, ?)",
                              (n, f"Change {n}", state, f"work-{n}", s, iso(opened), iso(c) if state == "merged" else None, iso(c)))
-            # issues: two bugs after releases (incidents), the ones flakewatch manages, and some plain ones
+            # issues: two bugs after releases (incidents), the ones greenlight manages, and some plain ones
             now = utcnow()
             issues = [
                 (901, "Login loops back to the title after an update", ["bug"], now - timedelta(days=9, hours=5), now - timedelta(days=9), None),
@@ -168,7 +168,7 @@ def main() -> None:
                 (907, "Add a colorblind palette option", ["enhancement"], now - timedelta(days=16), now - timedelta(days=4), None),
             ]
             for n, title, labels, created, closed, key in issues:
-                conn.execute("INSERT OR REPLACE INTO issues (number, title, state, labels, created_at, closed_at, updated_at, fw_key) "
+                conn.execute("INSERT OR REPLACE INTO issues (number, title, state, labels, created_at, closed_at, updated_at, managed_key) "
                              "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                              (n, title, "closed" if closed else "open", json.dumps(labels), iso(created),
                               iso(closed) if closed else None, iso(closed or created), key))

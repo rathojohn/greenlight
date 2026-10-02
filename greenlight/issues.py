@@ -1,13 +1,13 @@
 """Keep one GitHub issue per flaky test and per perf regression, the way Datadog's flaky test
 management keeps a case per test.
 
-`flakewatch issues` plans; `--apply` does it:
+`greenlight issues` plans; `--apply` does it:
   create   a flaky test (flipped on min_flips+ commits) or a slower-than-base check with no issue yet
   update   an open issue whose body is out of date (the body is regenerated; comment below it instead)
   reopen   a closed issue whose test flipped, or ran slower, again after it was closed
   healed   one comment on an open flaky issue once its test has run clean long enough to close it
   link     an existing issue that looks like the same check: mark it instead of opening a duplicate
-Each managed issue carries a hidden marker, <!-- flakewatch:flaky:<test id> -->, which is how sync
+Each managed issue carries a hidden marker, <!-- greenlight:flaky:<test id> -->, which is how sync
 and the next plan find it. Nothing is ever closed for you.
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ from .db import iso, since, utcnow
 from .ghsync import MARKER, upsert_issue
 from .github import GitHub, GitHubError
 
-HEALED = "<!-- flakewatch:healed -->"
+HEALED = "<!-- greenlight:healed -->"
 LABEL_COLORS = {"flaky-test": "B07A00", "perf-regression": "6366A8", "quarantined": "55606C"}
 _WORDS = re.compile(r"[a-z0-9]+")
 
@@ -41,7 +41,7 @@ class Action:
 
 
 def marker(key: str) -> str:
-    return f"<!-- flakewatch:{key} -->"
+    return f"<!-- greenlight:{key} -->"
 
 
 def _title(prefix: str, test_id: str) -> str:
@@ -117,8 +117,8 @@ def flaky_body(conn: sqlite3.Connection, s: dict[str, Any], window: int, quarant
         f"- The gate treats this test as flaky: when it fails, rerun {_rerun_hint(test_id, source)}, not the suite.",
         f"- Add the `{quarantine_label}` label to stop it blocking while it gets fixed. Remove the label or close "
         "this issue to release it.",
-        "- Close this issue when the fix merges. flakewatch reopens it if the test flips again.",
-        "", f"<sub>Kept up to date by flakewatch, last {iso(utcnow())[:16].replace('T', ' ')} UTC. The text above "
+        "- Close this issue when the fix merges. greenlight reopens it if the test flips again.",
+        "", f"<sub>Kept up to date by greenlight, last {iso(utcnow())[:16].replace('T', ' ')} UTC. The text above "
             "is regenerated on each run, so comment below instead of editing it.</sub>",
     ]
     return "\n".join(lines)
@@ -155,9 +155,9 @@ def perf_body(test_id: str, rows: list[dict[str, Any]]) -> str:
         lines += ["", "Latest detail:", _fence(detail)]
     lines += [
         "", "A slower check does not fail the gate; it gets this issue instead. Close it when the fix merges, or with "
-            "the numbers if a rerun shows it was noise (within 10% of the base). flakewatch reopens it if it runs "
+            "the numbers if a rerun shows it was noise (within 10% of the base). greenlight reopens it if it runs "
             "slower again.",
-        "", f"<sub>Kept up to date by flakewatch, last {iso(utcnow())[:16].replace('T', ' ')} UTC. Comment below "
+        "", f"<sub>Kept up to date by greenlight, last {iso(utcnow())[:16].replace('T', ' ')} UTC. Comment below "
             "instead of editing the text above.</sub>",
     ]
     return "\n".join(lines)
@@ -169,13 +169,13 @@ def _words(text: str) -> set[str]:
 
 
 def lookalike(conn: sqlite3.Connection, test_id: str) -> dict[str, Any] | None:
-    """An open issue flakewatch doesn't manage whose title holds most of the check's words, e.g. a perf
-    issue someone opened by hand before flakewatch ran."""
+    """An open issue greenlight doesn't manage whose title holds most of the check's words, e.g. a perf
+    issue someone opened by hand before greenlight ran."""
     name = _words(test_id.split("::", 1)[-1])
     if len(name) < 3:
         return None
     best = None
-    for r in conn.execute("SELECT number, title FROM issues WHERE state = 'open' AND fw_key IS NULL"):
+    for r in conn.execute("SELECT number, title FROM issues WHERE state = 'open' AND managed_key IS NULL"):
         share = len(name & _words(r["title"] or "")) / len(name)
         if share >= 0.7 and (best is None or share > best[0]):
             best = (share, dict(r))
@@ -187,8 +187,8 @@ def plan(conn: sqlite3.Connection, opts: dict[str, Any]) -> list[Action]:
     min_flips = int(opts.get("min_flips", 2))
     flaky_label, perf_label = opts.get("flaky_label", "flaky-test"), opts.get("perf_label", "perf-regression")
     qlabel = opts.get("quarantine_label", "quarantined")
-    managed = {r["fw_key"]: dict(r) for r in conn.execute(
-        "SELECT * FROM issues WHERE fw_key IS NOT NULL ORDER BY state = 'open', number")}
+    managed = {r["managed_key"]: dict(r) for r in conn.execute(
+        "SELECT * FROM issues WHERE managed_key IS NOT NULL ORDER BY state = 'open', number")}
     actions: list[Action] = []
 
     stats = analysis.flake_stats(conn, window, min_flips=min_flips)
@@ -223,7 +223,7 @@ def plan(conn: sqlite3.Connection, opts: dict[str, Any]) -> list[Action]:
         if s and s["executions"] >= healed_runs and s["failures"] == 0:
             actions.append(Action("healed", key, issue["title"], issue["number"],
                                   comment=f"{HEALED}\nNo failures in {s['executions']} runs over the last {healed_days} days. "
-                                          "Close this if the fix is in; flakewatch reopens it if the test flips again.",
+                                          "Close this if the fix is in; greenlight reopens it if the test flips again.",
                                   why=f"clean for {s['executions']} runs"))
 
     for test_id, rows in sorted(perf_rows(conn, window).items()):
@@ -256,7 +256,7 @@ def _ensure_labels(gh: GitHub, labels: set[str]) -> None:
             if e.status != 404:
                 raise
             gh.post("/labels", {"name": name, "color": LABEL_COLORS.get(name, "B07A00"),
-                                "description": "Managed by flakewatch"})
+                                "description": "Managed by greenlight"})
 
 
 def _has_healed_comment(gh: GitHub, number: int) -> bool:
@@ -306,11 +306,11 @@ def _apply_one(gh: GitHub, a: Action) -> dict[str, Any] | None:
 
 def _strip_stamp(body: str | None) -> str:
     """The body without its 'last updated' line, so a refresh with the same numbers is a no-op."""
-    return re.sub(r"<sub>Kept up to date by flakewatch.*?</sub>", "", body or "", flags=re.S).strip()
+    return re.sub(r"<sub>Kept up to date by greenlight.*?</sub>", "", body or "", flags=re.S).strip()
 
 
 def link(gh: GitHub, number: int, key: str) -> dict[str, Any]:
-    """Put flakewatch's marker on an existing issue so it manages that one from now on."""
+    """Put greenlight's marker on an existing issue so it manages that one from now on."""
     issue = gh.get(f"/issues/{number}")
     body = issue.get("body") or ""
     if MARKER.search(body):

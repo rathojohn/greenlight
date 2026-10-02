@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from flakewatch import analysis, playtest
-from flakewatch.gitrepo import Repo
+from greenlight import analysis, playtest
+from greenlight.gitrepo import Repo
 
 SHA = "8d285fc583d476c06eac311f39842ed2de85328b"
 

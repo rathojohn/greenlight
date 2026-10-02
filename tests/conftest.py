@@ -10,8 +10,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from flakewatch.db import connect  # noqa: E402
-from flakewatch.ingest import ingest_files  # noqa: E402
+from greenlight.db import connect  # noqa: E402
+from greenlight.ingest import ingest_files  # noqa: E402
 
 
 def junit_xml(cases: list[tuple[str, str, float, str | None]]) -> str:

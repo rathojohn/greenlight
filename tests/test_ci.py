@@ -4,9 +4,9 @@ import subprocess
 
 import pytest
 
-from flakewatch import ci, cli, github
-from flakewatch.db import connect
-from flakewatch.gitrepo import Repo
+from greenlight import ci, cli, github
+from greenlight.db import connect
+from greenlight.gitrepo import Repo
 from tests.conftest import junit_xml
 from tests.fakegithub import FakeGitHub
 
@@ -26,7 +26,7 @@ def actions(monkeypatch, tmp_path):
         monkeypatch.setenv(k, v)
     for var in github.TOKEN_VARS:
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.delenv("FLAKEWATCH_CONFIG", raising=False)
+    monkeypatch.delenv("GREENLIGHT_CONFIG", raising=False)
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     return tmp_path
 
@@ -67,16 +67,16 @@ def test_restore_from_a_branch_in_the_clone(actions, tmp_path):
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
     subprocess.run(["git", "clone", "-q", str(origin), str(clone)], check=True, capture_output=True)
     data = tmp_path / "data"
-    subprocess.run(["git", "init", "-q", "-b", "flakewatch-data", str(data)], check=True)
+    subprocess.run(["git", "init", "-q", "-b", "greenlight-data", str(data)], check=True)
     with connect(str(tmp_path / "a.db")) as conn:
         ci.record_junit(conn, [write_junit(tmp_path / "j.xml", [(FLAKY, "pass", 1.0, None)])], out_dir=str(data))
     for args in (["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "r"],
-                 ["push", "-q", str(origin), "flakewatch-data"]):
+                 ["push", "-q", str(origin), "greenlight-data"]):
         subprocess.run(["git", "-C", str(data), *args], check=True, capture_output=True)
     with connect(str(tmp_path / "c.db")) as conn:
-        out = ci.restore_branch(conn, Repo(str(clone)), "flakewatch-data")
+        out = ci.restore_branch(conn, Repo(str(clone)), "greenlight-data")
         assert out["fetched"] and (out["records"], out["added"]) == (1, 1)
-        assert ci.restore_branch(conn, Repo(str(clone)), "flakewatch-data")["added"] == 0
+        assert ci.restore_branch(conn, Repo(str(clone)), "greenlight-data")["added"] == 0
         assert ci.restore_branch(conn, Repo(str(clone)), "nope")["note"] == "no nope branch yet"
 
 
@@ -92,7 +92,7 @@ def test_report_markdown_summary_outputs_and_exit_codes(actions, tmp_path, capsy
     capsys.readouterr()
     assert cli.main(["--db", db, "ci", "report"]) == 0  # flaky only: passes with --fail-on real
     summary = (tmp_path / "summary.md").read_text()
-    assert "flakewatch: Rerun the flaky tests only" in summary and "| `t.e2e::login` | known flaky | 3 of 3 commits |" in summary
+    assert "greenlight: Rerun the flaky tests only" in summary and "| `t.e2e::login` | known flaky | 3 of 3 commits |" in summary
     assert "decision=RERUN_TARGETED" in (tmp_path / "out.txt").read_text()
     assert cli.main(["--db", db, "ci", "report", "--fail-on", "any"]) == 2
     # a stable test fails on new code (on the same code it would be a flip)
@@ -121,7 +121,7 @@ def test_pr_comment_is_upserted(actions, tmp_path):
 
 
 def test_matrix_entries_are_separate_environments(actions, tmp_path):
-    from flakewatch import analysis
+    from greenlight import analysis
     with connect(str(tmp_path / "m.db")) as conn:
         for name, outcome in (("py3.11", "fail"), ("py3.12", "pass"), ("py3.11", "fail")):
             ci.record_junit(conn, [write_junit(tmp_path / "m.xml", [("t.a::x", outcome, 0.1, "boom")])], name=name)

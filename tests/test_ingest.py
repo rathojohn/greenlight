@@ -1,4 +1,4 @@
-from flakewatch.ingest import assign_retries, failure_signature, ingest_files, parse_junit
+from greenlight.ingest import assign_retries, failure_signature, ingest_files, parse_junit
 
 
 def test_parse_outcomes_and_ids(tmp_path):

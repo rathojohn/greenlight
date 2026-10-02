@@ -6,8 +6,8 @@ import zipfile
 
 import pytest
 
-from flakewatch import ghsync, github
-from flakewatch.gitrepo import Repo
+from greenlight import ghsync, github
+from greenlight.gitrepo import Repo
 from tests.conftest import junit_xml
 from tests.fakegithub import FakeGitHub
 
@@ -33,8 +33,8 @@ def test_token_precedence(monkeypatch, tmp_path):
     monkeypatch.setenv("GITHUB_TOKEN", "a")
     monkeypatch.setenv("GH_TOKEN", "b")
     assert github.resolve_token() == ("b", "$GH_TOKEN")
-    monkeypatch.setenv("FLAKEWATCH_GITHUB_TOKEN", "c")
-    assert github.resolve_token() == ("c", "$FLAKEWATCH_GITHUB_TOKEN")
+    monkeypatch.setenv("GREENLIGHT_GITHUB_TOKEN", "c")
+    assert github.resolve_token() == ("c", "$GREENLIGHT_GITHUB_TOKEN")
 
 
 def test_token_from_gh_cli(monkeypatch, tmp_path):
@@ -126,14 +126,14 @@ def test_sync_issues_skips_prs_reads_markers_and_mirrors_quarantine_labels(db, f
     conn, _ = db
     conn.execute("INSERT INTO quarantine VALUES ('manual::t', 'mine', '2026-01-01', 'manual')")
     fake.pages("GET", "{repo}/issues", [
-        issue(1, "<!-- flakewatch:flaky:smoke::the Lantern -->", ["flaky-test", "quarantined"]),
-        issue(2, "<!-- flakewatch:perf:perf::early -->", ["perf-regression"]),
+        issue(1, "<!-- greenlight:flaky:smoke::the Lantern -->", ["flaky-test", "quarantined"]),
+        issue(2, "<!-- greenlight:perf:perf::early -->", ["perf-regression"]),
         issue(3, pr_link=True),
         issue(4, "plain bug", ["bug"]),
     ])
     out = ghsync.sync_issues(conn, gh)
     assert out == {"issues": 3, "quarantined_by_label": 1}
-    keys = dict(conn.execute("SELECT number, fw_key FROM issues").fetchall())
+    keys = dict(conn.execute("SELECT number, managed_key FROM issues").fetchall())
     assert keys == {1: "flaky:smoke::the Lantern", 2: "perf:perf::early", 4: None}
     q = {r["test_id"]: r["added_by"] for r in conn.execute("SELECT * FROM quarantine")}
     assert q == {"manual::t": "manual", "smoke::the Lantern": "github#1"}
@@ -189,7 +189,7 @@ def test_sync_actions_stores_every_attempt_and_ingests_junit(db, fake, gh):
     rows = conn.execute("SELECT pipeline_id, attempt, status, duration_ms, queue_ms FROM pipelines ORDER BY attempt").fetchall()
     assert [tuple(r) for r in rows] == [("gha:1:1", 1, "failure", 180000, 60000), ("gha:1:2", 2, "success", 300000, 60000)]
     assert conn.execute("SELECT COUNT(*) FROM steps").fetchone()[0] == 2
-    from flakewatch import analysis
+    from greenlight import analysis
     assert analysis.flake_stats(conn, 3650)["t.a::x"]["flip_shas"] == 1  # failed on attempt 1, passed on 2
     assert not fake.calls("GET", "{repo}/actions/artifacts/7")
     # second sync: the run is finished and stored, so jobs aren't fetched again

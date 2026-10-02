@@ -1,7 +1,7 @@
 """A small GitHub REST client on the standard library.
 
-Auth: a token from $FLAKEWATCH_GITHUB_TOKEN, $GH_TOKEN or $GITHUB_TOKEN (in that order), else
-`gh auth token` if the GitHub CLI is logged in. flakewatch never stores it: not in the DB, the
+Auth: a token from $GREENLIGHT_GITHUB_TOKEN, $GH_TOKEN or $GITHUB_TOKEN (in that order), else
+`gh auth token` if the GitHub CLI is logged in. greenlight never stores it: not in the DB, the
 config file or any output. Public repos can be read without one, at 60 requests an hour.
 """
 from __future__ import annotations
@@ -22,7 +22,7 @@ from typing import Any, Iterator
 
 from . import __version__
 
-TOKEN_VARS = ("FLAKEWATCH_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
+TOKEN_VARS = ("GREENLIGHT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
 _REPO = re.compile(r"^[\w.-]+/[\w.-]+$")
 _NEXT = re.compile(r'<([^>]+)>;\s*rel="next"')
 MAX_DOWNLOAD = 64 * 1024 * 1024
@@ -100,7 +100,7 @@ class GitHub:
         return url
 
     def _headers(self, accept: str = "application/vnd.github+json", auth: bool = True) -> dict[str, str]:
-        h = {"Accept": accept, "User-Agent": f"flakewatch/{__version__}", "X-GitHub-Api-Version": "2022-11-28"}
+        h = {"Accept": accept, "User-Agent": f"greenlight/{__version__}", "X-GitHub-Api-Version": "2022-11-28"}
         if auth and self.token:
             h["Authorization"] = f"Bearer {self.token}"
         return h
@@ -156,16 +156,16 @@ class GitHub:
         if resp.status in (403, 429) and h.get("X-RateLimit-Remaining") == "0":
             reset = h.get("X-RateLimit-Reset")
             when = time.strftime("%H:%M UTC", time.gmtime(int(reset))) if reset and reset.isdigit() else "later"
-            hint = "" if self.token else " Set a token (see `flakewatch auth`) to get 5,000 requests an hour."
+            hint = "" if self.token else " Set a token (see `greenlight auth`) to get 5,000 requests an hour."
             return RateLimited(f"GitHub rate limit reached; it resets at {when}.{hint}", resp.status)
         if resp.status == 401:
-            return GitHubError("GitHub rejected the token (401). It may be expired or revoked. Run `flakewatch auth`.", 401)
+            return GitHubError("GitHub rejected the token (401). It may be expired or revoked. Run `greenlight auth`.", 401)
         if resp.status == 404:
             return GitHubError(f"GitHub returned 404 for {method} {where}. If the repo is private, the token "
                                "needs access to it.", 404)
         if resp.status == 403:
             return GitHubError(f"GitHub refused {method} {where} (403): {detail}. The token may lack a permission "
-                               "this needs; `flakewatch auth` lists them.", 403)
+                               "this needs; `greenlight auth` lists them.", 403)
         return GitHubError(f"GitHub {resp.status} for {method} {where}: {detail}", resp.status)
 
     # ---------- verbs ----------
@@ -207,7 +207,7 @@ class GitHub:
             location = resp.headers.get("Location")
             if not location:
                 raise GitHubError("GitHub redirected without a Location header")
-            req = urllib.request.Request(location, headers={"User-Agent": f"flakewatch/{__version__}"})
+            req = urllib.request.Request(location, headers={"User-Agent": f"greenlight/{__version__}"})
             try:
                 with self._opener.open(req, timeout=self.timeout * 4) as r:
                     body = r.read(MAX_DOWNLOAD + 1)
@@ -222,9 +222,9 @@ class GitHub:
 
 def client(repo: str | None, api_url: str = "https://api.github.com", require_token: bool = False) -> GitHub:
     if not repo:
-        raise ValueError("No GitHub repo configured. Set [github] repo in flakewatch.toml, or run inside a clone "
+        raise ValueError("No GitHub repo configured. Set [github] repo in greenlight.toml, or run inside a clone "
                          "whose origin is on github.com.")
     token, _ = resolve_token()
     if require_token and not token:
-        raise ValueError("This needs a GitHub token. Run `flakewatch auth` to see how to set one.")
+        raise ValueError("This needs a GitHub token. Run `greenlight auth` to see how to set one.")
     return GitHub(repo, token, api_url)

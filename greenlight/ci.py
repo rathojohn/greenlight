@@ -1,13 +1,13 @@
-"""flakewatch in CI: keep history on a data branch, gate on it, and report on the pull request.
+"""greenlight in CI: keep history on a data branch, gate on it, and report on the pull request.
 
 GitHub Actions jobs start with an empty disk, so each run's results are saved as a small record file
-(runs/YYYY/MM/<id>.json.gz) on a branch in the same repo, `flakewatch-data` by default. A job restores
+(runs/YYYY/MM/<id>.json.gz) on a branch in the same repo, `greenlight-data` by default. A job restores
 every record into a fresh DB, adds its own, gates, and pushes its record back. Records have unique
-names, so concurrent jobs never conflict. `flakewatch sync` reads the same branch on your machine.
+names, so concurrent jobs never conflict. `greenlight sync` reads the same branch on your machine.
 
-  flakewatch ci restore --dir DIR                      ingest every record under DIR
-  flakewatch ci record --junit 'reports/*.xml' --dir DIR [--name py3.12]
-  flakewatch ci report [--pr-comment] [--name py3.12]  step summary, outputs, PR comment
+  greenlight ci restore --dir DIR                      ingest every record under DIR
+  greenlight ci record --junit 'reports/*.xml' --dir DIR [--name py3.12]
+  greenlight ci report [--pr-comment] [--name py3.12]  step summary, outputs, PR comment
 """
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ def export_run(conn: sqlite3.Connection, run_id: int) -> dict[str, Any]:
         "SELECT * FROM metrics WHERE run_id = ? ORDER BY test_id, name", (run_id,))]
     keep = ("external_id", "commit_sha", "branch", "source", "started_at", "duration_ms", "git_commit", "total_tests",
             "session", "command", "url")
-    return {"flakewatch_record": RECORD_VERSION, **{k: run[k] for k in keep}, "results": results, "metrics": metrics}
+    return {"greenlight_record": RECORD_VERSION, **{k: run[k] for k in keep}, "results": results, "metrics": metrics}
 
 
 def write_record(conn: sqlite3.Connection, run_id: int, out_dir: str) -> str:
@@ -85,7 +85,7 @@ def write_record(conn: sqlite3.Connection, run_id: int, out_dir: str) -> str:
 
 
 def load_record(conn: sqlite3.Connection, data: dict[str, Any]) -> bool:
-    if data.get("flakewatch_record") != RECORD_VERSION or not data.get("external_id"):
+    if data.get("greenlight_record") != RECORD_VERSION or not data.get("external_id"):
         return False
     results = [TestResult(t, f, o, d, retry=r, failure_sig=s, message=m, flags=fl)
                for t, f, o, d, r, s, m, fl in data.get("results", [])]
@@ -194,13 +194,13 @@ WHY = {
 
 
 def pr_marker(name: str | None) -> str:
-    return f"<!-- flakewatch:pr-report{':' + name if name else ''} -->"
+    return f"<!-- greenlight:pr-report{':' + name if name else ''} -->"
 
 
 def report_markdown(t: dict[str, Any], name: str | None = None, issue_links: dict[str, int] | None = None,
                     repo: str | None = None) -> str:
     links = issue_links or {}
-    head = f"### flakewatch{' (' + name + ')' if name else ''}: {LABELS[t['decision']]}"
+    head = f"### greenlight{' (' + name + ')' if name else ''}: {LABELS[t['decision']]}"
     lines = [pr_marker(name), head, "", t["summary"], ""]
     if t["failures"]:
         lines += ["| Test | Verdict | Flipped on |", "| --- | --- | --- |"]
@@ -226,8 +226,8 @@ def issue_links(conn: sqlite3.Connection, test_ids: list[str]) -> dict[str, int]
     if not test_ids:
         return {}
     keys = [f"flaky:{t}" for t in test_ids]
-    rows = conn.execute(f"SELECT number, fw_key FROM issues WHERE fw_key IN ({','.join('?' * len(keys))})", keys)
-    return {r["fw_key"].split(":", 1)[1]: r["number"] for r in rows}
+    rows = conn.execute(f"SELECT number, managed_key FROM issues WHERE managed_key IN ({','.join('?' * len(keys))})", keys)
+    return {r["managed_key"].split(":", 1)[1]: r["number"] for r in rows}
 
 
 def write_step_summary(markdown: str) -> bool:

@@ -1,4 +1,4 @@
--- flakewatch schema (SQLite). Safe to run repeatedly. Columns added after a table first shipped
+-- greenlight schema (SQLite). Safe to run repeatedly. Columns added after a table first shipped
 -- live in db.py's MIGRATIONS too, so older databases pick them up.
 PRAGMA journal_mode = WAL;
 
@@ -154,10 +154,10 @@ CREATE TABLE IF NOT EXISTS issues (
     closed_at     TEXT,
     updated_at    TEXT,
     comments      INTEGER,
-    fw_key        TEXT,                       -- "flaky:<test id>" / "perf:<test id>" on issues flakewatch manages
+    managed_key        TEXT,                       -- "flaky:<test id>" / "perf:<test id>" on issues greenlight manages
     url           TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_issues_key ON issues(fw_key);
+CREATE INDEX IF NOT EXISTS idx_issues_key ON issues(managed_key);
 
 -- Where each sync left off.
 CREATE TABLE IF NOT EXISTS sync_state (

@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from flakewatch import issues
-from flakewatch.github import GitHub
+from greenlight import issues
+from greenlight.github import GitHub
 from tests.fakegithub import FakeGitHub
 from tests.test_analysis import FLAKY, STABLE, flaky_history
 
@@ -18,12 +18,12 @@ def fake():
 
 
 def add_issue(conn, n, title, state="open", key=None, closed_at=None, labels=()):
-    conn.execute("INSERT INTO issues (number, title, state, labels, created_at, closed_at, fw_key) VALUES (?,?,?,?,?,?,?)",
+    conn.execute("INSERT INTO issues (number, title, state, labels, created_at, closed_at, managed_key) VALUES (?,?,?,?,?,?,?)",
                  (n, title, state, json.dumps(list(labels)), "2026-01-01T00:00:00+00:00", closed_at, key))
 
 
 def slower_run(rec, sha, value=31.5, base=22.1):
-    from flakewatch.ingest import TestResult, record_run
+    from greenlight.ingest import TestResult, record_run
     record_run(rec.conn, [TestResult("perf::early: worst frame under 25ms", None, "pass", None,
                                      message="median 31.5 ms", flags="slower")],
                commit_sha=sha, source="playtest-report",
@@ -93,8 +93,8 @@ def test_apply_against_github(db, rec, fake):
     assert sorted((d["kind"], d["number"], d["result"]) for d in done) == [("create", 51, "done"), ("link", 44, "done")]
     assert fake.calls("POST", "{repo}/labels")[0]["body"]["name"] == "flaky-test"
     patched = fake.calls("PATCH", "{repo}/issues/44")[0]["body"]["body"]
-    assert patched.startswith("<!-- flakewatch:perf:perf::early: worst frame under 25ms -->\nnumbers")
-    keys = dict(conn.execute("SELECT number, fw_key FROM issues").fetchall())
+    assert patched.startswith("<!-- greenlight:perf:perf::early: worst frame under 25ms -->\nnumbers")
+    keys = dict(conn.execute("SELECT number, managed_key FROM issues").fetchall())
     assert keys[51] == f"flaky:{FLAKY}" and keys[44] == "perf:perf::early: worst frame under 25ms"
     # the next plan finds both and only refreshes them
     assert sorted(a.kind for a in issues.plan(conn, OPTS)) == ["update", "update"]
@@ -106,7 +106,7 @@ def test_update_is_a_noop_when_only_the_stamp_changed(db, rec, fake):
     add_issue(conn, 7, "Flaky test: t.e2e: login", key=f"flaky:{FLAKY}")
     (act,) = issues.plan(conn, OPTS)
     # the same content under an older "last updated" stamp
-    old = issues.re.sub(r"flakewatch, last [\d: -]+ UTC", "flakewatch, last 1999-01-01 00:00 UTC", act.body)
+    old = issues.re.sub(r"greenlight, last [\d: -]+ UTC", "greenlight, last 1999-01-01 00:00 UTC", act.body)
     assert old != act.body
     fake.route("GET", "{repo}/issues/7", {"number": 7, "body": old, "state": "open"})
     done = issues.apply(conn, GitHub("o/r", "t", fake.url), [act])

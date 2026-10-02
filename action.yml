@@ -1,4 +1,4 @@
-name: flakewatch
+name: greenlight
 description: Record test results, gate on their flake history, and report on the pull request. History lives on a branch in your own repo.
 branding:
   icon: activity
@@ -13,7 +13,7 @@ inputs:
     default: ""
   data-branch:
     description: Branch that holds the run records. Created on first use.
-    default: flakewatch-data
+    default: greenlight-data
   pr-comment:
     description: Add or update a comment on the pull request
     default: "true"
@@ -35,14 +35,14 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Install flakewatch
+    - name: Install greenlight
       shell: bash
       run: |
-        python3 -m venv "$RUNNER_TEMP/flakewatch-venv"
+        python3 -m venv "$RUNNER_TEMP/greenlight-venv"
         # the CLI only needs the standard library; the MCP server's dependencies stay out of CI
-        "$RUNNER_TEMP/flakewatch-venv/bin/pip" install -q --no-deps "$GITHUB_ACTION_PATH"
-        echo "$RUNNER_TEMP/flakewatch-venv/bin" >> "$GITHUB_PATH"
-        echo "FLAKEWATCH_DB=$RUNNER_TEMP/flakewatch.db" >> "$GITHUB_ENV"
+        "$RUNNER_TEMP/greenlight-venv/bin/pip" install -q --no-deps "$GITHUB_ACTION_PATH"
+        echo "$RUNNER_TEMP/greenlight-venv/bin" >> "$GITHUB_PATH"
+        echo "GREENLIGHT_DB=$RUNNER_TEMP/greenlight.db" >> "$GITHUB_ENV"
 
     - name: Load history from ${{ inputs.data-branch }}
       shell: bash
@@ -50,7 +50,7 @@ runs:
         TOKEN: ${{ inputs.token }}
         BRANCH: ${{ inputs.data-branch }}
       run: |
-        D="$RUNNER_TEMP/flakewatch-data"
+        D="$RUNNER_TEMP/greenlight-data"
         AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')"
         URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
         if git -c http.extraheader="$AUTH" ls-remote --exit-code --heads "$URL" "$BRANCH" >/dev/null 2>&1; then
@@ -60,17 +60,17 @@ runs:
           git init -q -b "$BRANCH" "$D"
           git -C "$D" remote add origin "$URL"
         fi
-        # commits and rebases on this clone are flakewatch's, not the person who triggered the run
-        git -C "$D" config user.name flakewatch
-        git -C "$D" config user.email flakewatch@users.noreply.github.com
-        flakewatch ci restore --dir "$D"
+        # commits and rebases on this clone are greenlight's, not the person who triggered the run
+        git -C "$D" config user.name greenlight
+        git -C "$D" config user.email greenlight@users.noreply.github.com
+        greenlight ci restore --dir "$D"
 
     - name: Refresh quarantine labels
       shell: bash
       continue-on-error: true
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
-      run: flakewatch sync --only issues || echo "::notice::flakewatch could not read issues; quarantine labels were skipped"
+      run: greenlight sync --only issues || echo "::notice::greenlight could not read issues; quarantine labels were skipped"
 
     - name: Record this run
       shell: bash
@@ -78,8 +78,8 @@ runs:
         JUNIT: ${{ inputs.junit }}
         NAME: ${{ inputs.name }}
       run: |
-        set -f  # flakewatch expands the globs itself
-        flakewatch ci record --junit $JUNIT ${NAME:+--name "$NAME"} --dir "$RUNNER_TEMP/flakewatch-data"
+        set -f  # greenlight expands the globs itself
+        greenlight ci record --junit $JUNIT ${NAME:+--name "$NAME"} --dir "$RUNNER_TEMP/greenlight-data"
 
     - name: Gate and report
       id: report
@@ -89,7 +89,7 @@ runs:
         NAME: ${{ inputs.name }}
         COMMENT: ${{ inputs.pr-comment }}
       run: |
-        flakewatch ci report --fail-on never ${NAME:+--name "$NAME"} $([ "$COMMENT" = "true" ] && echo --pr-comment)
+        greenlight ci report --fail-on never ${NAME:+--name "$NAME"} $([ "$COMMENT" = "true" ] && echo --pr-comment)
 
     - name: Save the record to ${{ inputs.data-branch }}
       shell: bash
@@ -97,7 +97,7 @@ runs:
         TOKEN: ${{ inputs.token }}
         BRANCH: ${{ inputs.data-branch }}
       run: |
-        cd "$RUNNER_TEMP/flakewatch-data"
+        cd "$RUNNER_TEMP/greenlight-data"
         git add -A
         git commit -q -m "Record $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" || exit 0
         AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')"
@@ -107,7 +107,7 @@ runs:
           git -c http.extraheader="$AUTH" pull -q --rebase origin "$BRANCH" || true
           sleep $((i * 2))
         done
-        echo "::warning::flakewatch could not save this run to $BRANCH (a fork's read-only token?). The gate still ran."
+        echo "::warning::greenlight could not save this run to $BRANCH (a fork's read-only token?). The gate still ran."
 
     - name: Apply fail-on
       shell: bash
@@ -118,5 +118,5 @@ runs:
         case "$FAIL_ON:$DECISION" in
           never:*|*:PASS) exit 0 ;;
           real:RERUN_TARGETED) echo "::notice::Only known flaky tests failed. Rerun just: ${{ steps.report.outputs.rerun-tests }}"; exit 0 ;;
-          *) echo "::error::flakewatch: $DECISION"; exit 1 ;;
+          *) echo "::error::greenlight: $DECISION"; exit 1 ;;
         esac

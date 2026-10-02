@@ -1,17 +1,17 @@
-# flakewatch
+# greenlight
 
 Local flaky-test tracking for a personal project. Replaces "rerun the whole regression every time something goes red" with a gate that knows which failures are flaky. Built in a claude.ai chat, moved here to keep going.
 
 ## Layout
 
-- `flakewatch/schema.sql`: SQLite schema (runs, results, quarantine). WAL mode.
-- `flakewatch/db.py`: connections. DB path is `--db`, then `$FLAKEWATCH_DB`, then `~/.flakewatch/flakewatch.db`.
-- `flakewatch/ingest.py`: JUnit XML parser. Handles duplicate testcases as retries and Surefire `flakyFailure`/`rerunFailure`.
-- `flakewatch/analysis.py`: flake stats, `triage_run` (the gate), quarantine, sweep, read-only SQL.
-- `flakewatch/forecast.py`: Toto 2.0 forecasting (duration regressions, suite metrics). Optional dependency.
-- `flakewatch/dashboard.py` + `web.py` + `ui/index.html`: local dashboard and `--export` snapshot.
-- `flakewatch/server.py`: MCP server (stdio), 9 tools prefixed `flakewatch_`.
-- `flakewatch/cli.py`: `ingest`, `gate`, `flaky`, `sweep`, `trends`, `ui`.
+- `greenlight/schema.sql`: SQLite schema (runs, results, quarantine). WAL mode.
+- `greenlight/db.py`: connections. DB path is `--db`, then `$GREENLIGHT_DB`, then `~/.greenlight/greenlight.db`.
+- `greenlight/ingest.py`: JUnit XML parser. Handles duplicate testcases as retries and Surefire `flakyFailure`/`rerunFailure`.
+- `greenlight/analysis.py`: flake stats, `triage_run` (the gate), quarantine, sweep, read-only SQL.
+- `greenlight/forecast.py`: Toto 2.0 forecasting (duration regressions, suite metrics). Optional dependency.
+- `greenlight/dashboard.py` + `web.py` + `ui/index.html`: local dashboard and `--export` snapshot.
+- `greenlight/server.py`: MCP server (stdio), 9 tools prefixed `greenlight_`.
+- `greenlight/cli.py`: `ingest`, `gate`, `flaky`, `sweep`, `trends`, `ui`.
 - `examples/seed_demo.py`: 60 days of synthetic runs.
 
 ## Commands
@@ -19,8 +19,8 @@ Local flaky-test tracking for a personal project. Replaces "rerun the whole regr
 ```
 pip install -e ".[toto]"          # Toto needs Python 3.12+
 python examples/seed_demo.py --db demo.db
-flakewatch --db demo.db gate      # exit 0 PASS, 2 RERUN_TARGETED, 1 REAL_FAILURE, 3 error
-flakewatch --db demo.db ui
+greenlight --db demo.db gate      # exit 0 PASS, 2 RERUN_TARGETED, 1 REAL_FAILURE, 3 error
+greenlight --db demo.db ui
 ```
 
 There is no automated test suite yet. Everything was verified by hand in a sandbox: CLI, MCP over stdio, every UI view at desktop and phone widths, and the quarantine flows.
@@ -33,7 +33,7 @@ There is no automated test suite yet. Everything was verified by hand in a sandb
 - Toto 2.0: `pip install toto-models`, `from toto2 import Toto2Model`, default checkpoint `Datadog/Toto-2.0-22m` (fine on CPU). Context length must be a multiple of the patch size (32), so series are left-padded with masked values.
 - MCP SDK 2.x renamed FastMCP to `mcp.server.mcpserver.MCPServer`. `server.py` imports that and falls back to FastMCP for 1.x.
 - `ui/index.html` is one file, vanilla JS, hand-rolled SVG charts. Snapshot keys built by `snapKey()` in the page must match `snap_key()` in `web.py`.
-- The UI server binds to 127.0.0.1, rejects foreign Host headers, and requires an `X-Flakewatch: 1` header on writes. There is no other auth.
+- The UI server binds to 127.0.0.1, rejects foreign Host headers, and requires an `X-Greenlight: 1` header on writes. There is no other auth.
 
 ## Known limits
 

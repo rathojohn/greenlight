@@ -1,5 +1,5 @@
-"""flakewatch MCP server (stdio). Register with:
-    claude mcp add flakewatch -- python -m flakewatch.server
+"""greenlight MCP server (stdio). Register with:
+    claude mcp add greenlight -- python -m greenlight.server
 """
 from __future__ import annotations
 
@@ -20,16 +20,16 @@ except ImportError:  # mcp 1.x
 from mcp.types import ToolAnnotations
 
 mcp = _Server(
-    "flakewatch_mcp",
+    "greenlight_mcp",
     instructions=(
         "Flaky-test history, CI pipelines and delivery metrics for this project. After any test run, call "
-        "flakewatch_triage_run (or flakewatch_playtest_gate for a playtest ledger) before deciding to rerun "
+        "greenlight_triage_run (or greenlight_playtest_gate for a playtest ledger) before deciding to rerun "
         "anything. Only run a full regression when the decision is REAL_FAILURE. For RERUN_TARGETED, rerun only "
         "the listed rerun_tests. Never quarantine a test or apply issue changes without telling the user why."
     ),
 )
 
-try:  # flakewatch.toml in the folder the server starts in (or a parent) sets the DB and the repo
+try:  # greenlight.toml in the folder the server starts in (or a parent) sets the DB and the repo
     CFG = config.load()
 except (ValueError, FileNotFoundError):
     CFG = config.Config()
@@ -49,10 +49,10 @@ def _run(fn: Callable[[sqlite3.Connection], Any], readonly: bool = True) -> str:
     except (LookupError, ValueError, FileNotFoundError, RuntimeError) as e:
         return f"Error: {e}"
     except sqlite3.Error as e:
-        return f"Error: SQLite: {e}. Check the SQL or table names (see flakewatch_query)."
+        return f"Error: SQLite: {e}. Check the SQL or table names (see greenlight_query)."
 
 
-@mcp.tool(name="flakewatch_triage_run", annotations=READ)
+@mcp.tool(name="greenlight_triage_run", annotations=READ)
 def triage_run(
     run_id: Annotated[int | None, Field(description="Run to triage. Omit to use the latest run.")] = None,
     commit_sha: Annotated[str | None, Field(description="Commit SHA or prefix; picks that SHA's latest run.")] = None,
@@ -67,7 +67,7 @@ def triage_run(
     return _run(lambda c: analysis.triage_run(c, run_id, commit_sha, window_days))
 
 
-@mcp.tool(name="flakewatch_list_flaky", annotations=READ)
+@mcp.tool(name="greenlight_list_flaky", annotations=READ)
 def list_flaky(
     window_days: WindowDays = analysis.DEFAULT_WINDOW_DAYS,
     min_flips: Annotated[int, Field(ge=1, le=50, description="Minimum SHAs where the test both passed and failed.")] = 1,
@@ -79,7 +79,7 @@ def list_flaky(
     return _run(lambda c: analysis.list_flaky(c, window_days, min_flips, include_quarantined, limit))
 
 
-@mcp.tool(name="flakewatch_test_history", annotations=READ)
+@mcp.tool(name="greenlight_test_history", annotations=READ)
 def test_history(
     test_id: Annotated[str, Field(min_length=1, description="Exact id 'classname::name' or a unique substring.")],
     limit: Annotated[int, Field(ge=1, le=500)] = 30,
@@ -88,7 +88,7 @@ def test_history(
     return _run(lambda c: analysis.test_history(c, test_id, limit))
 
 
-@mcp.tool(name="flakewatch_quarantine", annotations=WRITE)
+@mcp.tool(name="greenlight_quarantine", annotations=WRITE)
 def quarantine_test(
     test_id: Annotated[str, Field(min_length=1)],
     reason: Annotated[str, Field(min_length=3, max_length=300, description="Why. Shows up in triage output.")],
@@ -97,13 +97,13 @@ def quarantine_test(
     return _run(lambda c: {"quarantined": analysis.quarantine(c, test_id, reason)}, readonly=False)
 
 
-@mcp.tool(name="flakewatch_unquarantine", annotations=WRITE)
+@mcp.tool(name="greenlight_unquarantine", annotations=WRITE)
 def unquarantine_test(test_id: Annotated[str, Field(min_length=1)]) -> str:
     """Remove a test from quarantine so its failures block again."""
     return _run(lambda c: {"removed": analysis.unquarantine(c, test_id)}, readonly=False)
 
 
-@mcp.tool(name="flakewatch_sweep", annotations=WRITE)
+@mcp.tool(name="greenlight_sweep", annotations=WRITE)
 def sweep(
     apply: Annotated[bool, Field(description="False = dry run. True = quarantine the listed tests.")] = False,
     window_days: WindowDays = analysis.DEFAULT_WINDOW_DAYS,
@@ -111,11 +111,11 @@ def sweep(
     min_rate: Annotated[float, Field(ge=0, le=1, description="Minimum flip rate to auto-quarantine.")] = 0.05,
 ) -> str:
     """Find flaky tests that should be quarantined, plus quarantined tests that have been clean
-    long enough to release. Releases are suggestions only; use flakewatch_unquarantine to act."""
+    long enough to release. Releases are suggestions only; use greenlight_unquarantine to act."""
     return _run(lambda c: analysis.sweep(c, window_days, min_flips, min_rate, apply=apply), readonly=not apply)
 
 
-@mcp.tool(name="flakewatch_duration_regressions", annotations=READ)
+@mcp.tool(name="greenlight_duration_regressions", annotations=READ)
 def duration_regressions(
     holdout_days: Annotated[int, Field(ge=1, le=14, description="Recent days to check against the forecast.")] = 3,
     lookback_days: Annotated[int, Field(ge=21, le=365)] = 90,
@@ -126,7 +126,7 @@ def duration_regressions(
     return _run(lambda c: forecast.duration_regressions(c, holdout_days, lookback_days, min_ratio=min_ratio))
 
 
-@mcp.tool(name="flakewatch_suite_forecast", annotations=READ)
+@mcp.tool(name="greenlight_suite_forecast", annotations=READ)
 def suite_forecast(
     metric: Literal["failure_rate", "suite_duration_ms", "runs", "reruns"] = "reruns",
     horizon_days: Annotated[int, Field(ge=1, le=30)] = 7,
@@ -137,7 +137,7 @@ def suite_forecast(
     return _run(lambda c: forecast.suite_forecast(c, metric, lookback_days, horizon_days))
 
 
-@mcp.tool(name="flakewatch_query", annotations=READ)
+@mcp.tool(name="greenlight_query", annotations=READ)
 def query(
     sql: Annotated[str, Field(min_length=6, description="Single SELECT. Tables: runs, results, quarantine, metrics, "
                                                         "pipelines, jobs, steps, deployments, deploy_commits, "
@@ -146,18 +146,18 @@ def query(
 ) -> str:
     """Read-only SQL escape hatch for questions the other tools don't cover. Connection is opened
     read-only. results.outcome is pass|fail|error|skip and results.flags may hold inferred, slower or known;
-    timestamps are ISO 8601 UTC; issues.labels is a JSON array; issues.fw_key marks the issues flakewatch manages."""
+    timestamps are ISO 8601 UTC; issues.labels is a JSON array; issues.managed_key marks the issues greenlight manages."""
     return _run(lambda c: analysis.run_query(c, sql, limit))
 
 
-@mcp.tool(name="flakewatch_playtest_gate", annotations=WRITE)
+@mcp.tool(name="greenlight_playtest_gate", annotations=WRITE)
 def playtest_gate(
     repo_path: Annotated[str | None, Field(description="The game's clone. Default: [git] path or the server's folder.")] = None,
     window_days: WindowDays = analysis.DEFAULT_WINDOW_DAYS,
 ) -> str:
     """For a playtest ledger (tools/playtest/runs records in git, like survive-project): read every record on
     every branch, then triage the run just made in this checkout. Returns the same decision as
-    flakewatch_triage_run plus rerun_command, the exact command that reruns only the flaky suites."""
+    greenlight_triage_run plus rerun_command, the exact command that reruns only the flaky suites."""
     from . import playtest
 
     def go(c: sqlite3.Connection) -> dict:
@@ -172,11 +172,11 @@ def playtest_gate(
     return _run(go, readonly=False)
 
 
-@mcp.tool(name="flakewatch_sync", annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False,
+@mcp.tool(name="greenlight_sync", annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False,
                                                                idempotentHint=True, openWorldHint=True))
 def sync_sources(
     only: Annotated[list[Literal["playtest", "records", "pulls", "issues", "actions", "deployments"]] | None,
-                    Field(description="Sources to sync. Default: everything flakewatch.toml configures.")] = None,
+                    Field(description="Sources to sync. Default: everything greenlight.toml configures.")] = None,
 ) -> str:
     """Pull git and GitHub data into the local DB: playtest records, CI run records from the data branch,
     pull requests, issues, GitHub Actions runs and deployments. Reads GitHub only; writes only the local DB."""
@@ -184,7 +184,7 @@ def sync_sources(
     return _run(lambda c: sync.run(c, CFG, set(only) if only else None), readonly=False)
 
 
-@mcp.tool(name="flakewatch_pipelines", annotations=READ)
+@mcp.tool(name="greenlight_pipelines", annotations=READ)
 def pipelines(window_days: WindowDays = 30) -> str:
     """GitHub Actions health: per-workflow runs, success rate, p50/p95 duration, queue time and reruns;
     flaky jobs (failed and passed on the same commit); slowest jobs; recent runs."""
@@ -197,7 +197,7 @@ def pipelines(window_days: WindowDays = 30) -> str:
     return _run(go)
 
 
-@mcp.tool(name="flakewatch_delivery", annotations=READ)
+@mcp.tool(name="greenlight_delivery", annotations=READ)
 def delivery_metrics(
     window_days: WindowDays = 30,
     environment: Annotated[str | None, Field(description="Deployment environment. Default: the busiest one.")] = None,
@@ -219,7 +219,7 @@ def delivery_metrics(
     return _run(go)
 
 
-@mcp.tool(name="flakewatch_issues", annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False,
+@mcp.tool(name="greenlight_issues", annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False,
                                                                  idempotentHint=True, openWorldHint=True))
 def manage_issues(
     apply: Annotated[bool, Field(description="False = plan only. True = create, update and reopen the issues on GitHub.")] = False,

@@ -1,4 +1,4 @@
-# flakewatch
+# greenlight
 
 Local flaky-test history in SQLite, a triage gate that decides whether a red run actually needs a regression, a local dashboard, an MCP server so Claude Code and Codex can query it, and Toto 2.0 forecasting for duration and rerun trends.
 
@@ -10,26 +10,26 @@ No hosted platform, no retention limits. The DB is one file.
 py -3.12 -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e ".[toto]"     # drop [toto] if you only want flake tracking
-$env:FLAKEWATCH_DB = "$HOME\.flakewatch\flakewatch.db"   # optional, this is the default
+$env:GREENLIGHT_DB = "$HOME\.greenlight\greenlight.db"   # optional, this is the default
 ```
 
-Toto 2.0 needs Python 3.12+. The default checkpoint is `Datadog/Toto-2.0-22m`, which downloads once (small) and runs on CPU in well under a second for a few hundred series. Set `FLAKEWATCH_TOTO_MODEL` to try a bigger one.
+Toto 2.0 needs Python 3.12+. The default checkpoint is `Datadog/Toto-2.0-22m`, which downloads once (small) and runs on CPU in well under a second for a few hundred series. Set `GREENLIGHT_TOTO_MODEL` to try a bigger one.
 
 Try it on fake data first:
 
 ```powershell
 python examples\seed_demo.py --db demo.db
-flakewatch --db demo.db flaky
-flakewatch --db demo.db gate
-flakewatch --db demo.db trends
-flakewatch --db demo.db ui
+greenlight --db demo.db flaky
+greenlight --db demo.db gate
+greenlight --db demo.db trends
+greenlight --db demo.db ui
 ```
 
 ## Dashboard
 
 ```powershell
-flakewatch ui                           # http://127.0.0.1:8765, opens your browser
-flakewatch ui --export snapshot.html    # read-only, self-contained file you can share
+greenlight ui                           # http://127.0.0.1:8765, opens your browser
+greenlight ui --export snapshot.html    # read-only, self-contained file you can share
 ```
 
 - **Overview** leads with the latest gate decision, then rerun share, time spent rerunning, and a grid of the most unstable tests across recent commits. Height means a failure, amber means the same commit both passed and failed.
@@ -48,8 +48,8 @@ The server binds to 127.0.0.1 only, rejects requests with a foreign Host header,
 
 ```powershell
 $sha = git rev-parse HEAD
-flakewatch ingest reports\*.xml --sha $sha --branch (git branch --show-current) --source codex
-flakewatch gate --sha $sha
+greenlight ingest reports\*.xml --sha $sha --branch (git branch --show-current) --source codex
+greenlight gate --sha $sha
 ```
 
 Gate exit codes:
@@ -69,7 +69,7 @@ Paste into `CLAUDE.md` and `AGENTS.md`:
 
 ```
 ## Test failures
-After any test run, run `flakewatch ingest` then `flakewatch gate` (or call flakewatch_triage_run).
+After any test run, run `greenlight ingest` then `greenlight gate` (or call greenlight_triage_run).
 - PASS: continue.
 - RERUN_TARGETED: rerun only the listed tests, once. Do not start a full regression.
 - REAL_FAILURE: investigate the blocking tests. Full regression only after a fix.
@@ -81,30 +81,30 @@ Never quarantine a test without telling me why. Never unquarantine on your own.
 Claude Code:
 
 ```powershell
-claude mcp add flakewatch -e FLAKEWATCH_DB=$HOME\.flakewatch\flakewatch.db -- C:\path\to\.venv\Scripts\python.exe -m flakewatch.server
+claude mcp add greenlight -e GREENLIGHT_DB=$HOME\.greenlight\greenlight.db -- C:\path\to\.venv\Scripts\python.exe -m greenlight.server
 ```
 
 Codex (`~/.codex/config.toml`):
 
 ```toml
-[mcp_servers.flakewatch]
+[mcp_servers.greenlight]
 command = "C:\\path\\to\\.venv\\Scripts\\python.exe"
-args = ["-m", "flakewatch.server"]
-env = { FLAKEWATCH_DB = "C:\\Users\\you\\.flakewatch\\flakewatch.db" }
+args = ["-m", "greenlight.server"]
+env = { GREENLIGHT_DB = "C:\\Users\\you\\.greenlight\\greenlight.db" }
 ```
 
 Tools:
 
 | Tool | Writes | Purpose |
 | --- | --- | --- |
-| flakewatch_triage_run | no | Same decision as `gate`, with per-failure detail |
-| flakewatch_list_flaky | no | Ranked flaky tests |
-| flakewatch_test_history | no | One test's recent runs, stats, quarantine status |
-| flakewatch_quarantine / _unquarantine | yes | Manage quarantine |
-| flakewatch_sweep | only with apply=true | Quarantine candidates, plus quarantined tests clean enough to release |
-| flakewatch_duration_regressions | no | Toto: tests whose recent durations broke above forecast |
-| flakewatch_suite_forecast | no | Toto: forecast failure_rate, suite_duration_ms, runs, or reruns |
-| flakewatch_query | no | Read-only SQL over runs, results, quarantine |
+| greenlight_triage_run | no | Same decision as `gate`, with per-failure detail |
+| greenlight_list_flaky | no | Ranked flaky tests |
+| greenlight_test_history | no | One test's recent runs, stats, quarantine status |
+| greenlight_quarantine / _unquarantine | yes | Manage quarantine |
+| greenlight_sweep | only with apply=true | Quarantine candidates, plus quarantined tests clean enough to release |
+| greenlight_duration_regressions | no | Toto: tests whose recent durations broke above forecast |
+| greenlight_suite_forecast | no | Toto: forecast failure_rate, suite_duration_ms, runs, or reruns |
+| greenlight_query | no | Read-only SQL over runs, results, quarantine |
 
 ## How the decision works
 

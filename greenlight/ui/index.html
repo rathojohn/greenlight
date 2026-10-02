@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>flakewatch</title>
+<title>greenlight</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=JetBrains+Mono:wght@400;600&display=swap">
@@ -247,7 +247,7 @@ details.steps li span { color: var(--ink); }
 <body>
 <header class="top">
   <div class="top-inner">
-    <a class="mark" href="#/">flakewatch</a>
+    <a class="mark" href="#/">greenlight</a>
     <nav id="nav" aria-label="Views">
       <a href="#/" data-nav="overview">Overview</a>
       <a href="#/flaky" data-nav="flaky">Flaky tests</a>
@@ -273,7 +273,7 @@ const SNAP = JSON.parse(document.getElementById("snapshot").textContent || "null
 const LIVE = !SNAP;
 const NOW = SNAP ? new Date(SNAP.generated_at) : new Date();
 const view = document.getElementById("view");
-let DAYS = SNAP ? SNAP.days : (() => { try { return Number(localStorage.getItem("fw-days")) || 30; } catch { return 30; } })();
+let DAYS = SNAP ? SNAP.days : (() => { try { return Number(localStorage.getItem("greenlight-days")) || 30; } catch { return 30; } })();
 let renderToken = 0;
 let animatedField = false;
 
@@ -286,7 +286,7 @@ async function api(path, params = {}) {
   const p = Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)]));
   if (SNAP) {
     const r = SNAP.responses[snapKey(path, p)];
-    if (!r) throw new ApiError("This view isn't in the snapshot. Run flakewatch ui locally to see it.", 404);
+    if (!r) throw new ApiError("This view isn't in the snapshot. Run greenlight ui locally to see it.", 404);
     if (r.__status) throw new ApiError(r.error, r.__status);
     return r;
   }
@@ -298,7 +298,7 @@ async function api(path, params = {}) {
   return data;
 }
 async function post(path, body) {
-  const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Flakewatch": "1" }, body: JSON.stringify(body) });
+  const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Greenlight": "1" }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(data.error || res.statusText, res.status);
   return data;
@@ -365,8 +365,8 @@ function fieldLegend() {
 }
 function errorBox(e) {
   let hint = "";
-  if (e.status === 503) hint = `<p>Record a run first: <code>flakewatch ingest reports/*.xml --sha &lt;commit&gt;</code></p>`;
-  if (e.status === 501) hint = `<p>Install Toto with <code>pip install toto-models</code> (Python 3.12+), then restart <code>flakewatch ui</code>.</p>`;
+  if (e.status === 503) hint = `<p>Record a run first: <code>greenlight ingest reports/*.xml --sha &lt;commit&gt;</code></p>`;
+  if (e.status === 501) hint = `<p>Install Toto with <code>pip install toto-models</code> (Python 3.12+), then restart <code>greenlight ui</code>.</p>`;
   return `<div class="err"><p>${esc(e.message)}</p>${hint}</div>`;
 }
 const loading = text => `<p class="loading">${esc(text || "Loading")}</p>`;
@@ -477,7 +477,7 @@ function legend(items) { return `<div class="legend">${items.map(([c, t]) => `<s
 
 /* ---------- verdict (overview + run page) ---------- */
 function verdictBlock(t, { withLink } = {}) {
-  if (!t) return `<section class="verdict" style="margin-top:0"><h1>No runs yet</h1><p class="detail">Record a test run and refresh: <code>flakewatch ingest reports/*.xml --sha &lt;commit&gt;</code></p></section>`;
+  if (!t) return `<section class="verdict" style="margin-top:0"><h1>No runs yet</h1><p class="detail">Record a test run and refresh: <code>greenlight ingest reports/*.xml --sha &lt;commit&gt;</code></p></section>`;
   const ids = list => `<ul class="idlist">${list.slice(0, 5).map(id => `<li><a href="${testHref(id)}"><code>${esc(id)}</code></a></li>`).join("")}${list.length > 5 ? `<li class="muted">and ${list.length - 5} more</li>` : ""}</ul>`;
   let head, detail;
   if (t.decision === "REAL_FAILURE") {
@@ -600,7 +600,7 @@ async function testView(tok, id) {
     <div class="tid-class">${esc(cls)}</div>
     <div class="tid-name">${esc(name)}</div>
     <div class="tags" style="margin-bottom:12px">${tag(s.classification)}</div>
-    ${(d.issues || []).length ? `<p class="issue-links">${d.issues.map(i => `${i.url && /^https:\/\//.test(i.url) ? `<a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">#${i.number}</a>` : `#${i.number}`} <span class="muted">${esc(i.fw_key.split(":")[0] === "perf" ? "perf regression" : "flaky test")} issue, ${esc(i.state)}</span>`).join(" ")}</p>` : ""}
+    ${(d.issues || []).length ? `<p class="issue-links">${d.issues.map(i => `${i.url && /^https:\/\//.test(i.url) ? `<a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">#${i.number}</a>` : `#${i.number}`} <span class="muted">${esc(i.managed_key.split(":")[0] === "perf" ? "perf regression" : "flaky test")} issue, ${esc(i.state)}</span>`).join(" ")}</p>` : ""}
     <p style="max-width:70ch">In the last ${DAYS} days it flipped on ${s.flip_shas} of the ${plural(s.eligible_shas, "commit")} it ran on more than once, and failed ${plural(s.failures, "time")} in ${plural(s.executions, "execution")} with ${plural(s.distinct_failure_sigs, "distinct failure message")}.</p>
     ${qblock}
     <section>
@@ -685,7 +685,7 @@ async function runsView(tok) {
         <span><span class="lbl">Source</span>${esc(r.source || "n/a")}</span>
         <span><span class="lbl">Failed</span>${r.failing} of ${r.tests}</span>
         <span class="c-wide">${tag(r.decision, label[r.decision])}</span></a>`).join("")}
-    </div>` : `<p class="empty">No runs recorded yet. Run <code>flakewatch ingest reports/*.xml --sha &lt;commit&gt;</code> after a test run.</p>`}`;
+    </div>` : `<p class="empty">No runs recorded yet. Run <code>greenlight ingest reports/*.xml --sha &lt;commit&gt;</code> after a test run.</p>`}`;
 }
 
 const WHY = {
@@ -835,7 +835,7 @@ async function pipelinesView(tok) {
   if (tok !== renderToken) return;
   if (!d.recent.length) {
     view.innerHTML = `<h1>Pipelines</h1>${noData(`No GitHub Actions runs in the last ${DAYS} days.`,
-      "Set <code>[github] repo</code> in <code>flakewatch.toml</code> and run <code>flakewatch sync</code>. Every workflow run, attempt, job and step lands here, with flaky jobs called out the same way flaky tests are.")}`;
+      "Set <code>[github] repo</code> in <code>greenlight.toml</code> and run <code>greenlight sync</code>. Every workflow run, attempt, job and step lands here, with flaky jobs called out the same way flaky tests are.")}`;
     return;
   }
   const t = d.totals;
@@ -936,7 +936,7 @@ async function deliveryView(tok) {
   const envSwitch = envs.length > 1 ? `<div class="seg" id="envs" role="group" aria-label="Environment">${envs.map(e => `<button type="button" data-env="${esc(e.environment)}" aria-pressed="${e.environment === o.environment}">${esc(e.environment)}</button>`).join("")}</div>` : "";
   const synced = Object.entries(d.synced || {}).map(([k, v]) => `${k} ${rel(v)}`).join(", ");
   const doraBlock = !envs.length ? noData("No deployments recorded yet.",
-      "Tell flakewatch what a release is in <code>flakewatch.toml</code> under <code>[delivery]</code>: pushes to a branch (<code>deploy_branch = \"release\"</code>), files added in git such as patch notes (<code>deploy_files</code>), GitHub Deployments (<code>deploy_environment</code>) or GitHub Releases (<code>deploy_releases = true</code>). Then run <code>flakewatch sync</code>.")
+      "Tell greenlight what a release is in <code>greenlight.toml</code> under <code>[delivery]</code>: pushes to a branch (<code>deploy_branch = \"release\"</code>), files added in git such as patch notes (<code>deploy_files</code>), GitHub Deployments (<code>deploy_environment</code>) or GitHub Releases (<code>deploy_releases = true</code>). Then run <code>greenlight sync</code>.")
     : `
     <section class="stats" style="margin-top:20px" aria-label="DORA metrics for ${esc(o.environment)}">
       <div class="stat"><div class="k">Deployment frequency</div><div class="v">${m.deploys_per_day}<small>a day</small></div><div class="s">${plural(m.deployments, "deployment")} on ${plural(m.deploy_days, "day")}</div></div>
@@ -980,7 +980,7 @@ async function deliveryView(tok) {
         <div><h2>Open pull requests</h2>${pr.open.length ? `<div class="list">${pr.open.slice(0, 8).map(x => `<div class="row pr-grid">
           <span>#${x.number}</span><span class="c-wide">${x.url && /^https:\/\//.test(x.url) ? `<a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title)}</a>` : esc(x.title)}</span>
           <span class="muted">${esc(x.head || "")}</span><span>${hrs(x.age_h)}</span></div>`).join("")}</div>` : `<p class="empty">Nothing open.</p>`}</div>
-      </div>` : noData("No pull requests synced.", "Run <code>flakewatch sync</code> with a <code>[github] repo</code> set.")}
+      </div>` : noData("No pull requests synced.", "Run <code>greenlight sync</code> with a <code>[github] repo</code> set.")}
     </section>
     <section>
       <h2>Issues</h2>
@@ -989,7 +989,7 @@ async function deliveryView(tok) {
         <div class="stat"><div class="k">Open</div><div class="v">${is.metrics.open}</div><div class="s">Median age ${hrs(is.metrics.open_age_p50_h)}</div></div>
         <div class="stat"><div class="k">Opened</div><div class="v">${is.metrics.opened}</div><div class="s">In ${DAYS} days</div></div>
         <div class="stat"><div class="k">Closed</div><div class="v">${is.metrics.closed}</div><div class="s">Median ${hrs(is.metrics.time_to_close_p50_h)} to close</div></div>
-        <div class="stat"><div class="k">Tracked by flakewatch</div><div class="v">${is.managed.filter(i => i.state === "open").length}</div><div class="s">Flaky tests and perf regressions</div></div>
+        <div class="stat"><div class="k">Tracked by greenlight</div><div class="v">${is.managed.filter(i => i.state === "open").length}</div><div class="s">Flaky tests and perf regressions</div></div>
       </section>
       <div class="two" style="margin-top:28px">
         <div><h2>Open issues</h2><p class="note">How many were open at the end of each day.</p><div class="chart" id="c-iss"></div></div>
@@ -998,12 +998,12 @@ async function deliveryView(tok) {
           <span>${i.kind === "flaky" ? tag("flaky", "flaky") : tag("perf", "perf")}</span>
           <span class="c-wide"><a href="${testHref(i.test_id)}"><code>${esc(i.test_id)}</code></a></span>
           <span>${i.state === "open" ? tag("open-ok", "open") : tag("closed", "closed")}</span></div>`).join("")}</div>`
-          : `<p class="empty">None yet. <code>flakewatch issues</code> shows what it would open.</p>`}</div>
+          : `<p class="empty">None yet. <code>greenlight issues</code> shows what it would open.</p>`}</div>
       </div>
       ${is.oldest_open.length ? `<h2 style="margin-top:32px">Oldest open issues</h2><div class="list">${is.oldest_open.slice(0, 8).map(i => `<div class="row pr-grid">
         <span>#${i.number}</span><span class="c-wide">${i.url && /^https:\/\//.test(i.url) ? `<a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">${esc(i.title)}</a>` : esc(i.title)}</span>
         <span class="muted">${esc((i.labels || []).slice(0, 2).join(", "))}</span><span>${hrs(i.age_h)}</span></div>`).join("")}</div>` : ""}`
-      : noData("No issues synced.", "Run <code>flakewatch sync</code> with a <code>[github] repo</code> set.")}
+      : noData("No issues synced.", "Run <code>greenlight sync</code> with a <code>[github] repo</code> set.")}
     </section>`;
   if (envs.length) {
     chart(document.getElementById("c-dep"), { days: o.days, label: "Deployments per day", bars: [{ values: o.deploys_per_day, color: "var(--quar)", label: "Deployments" }] });
@@ -1055,7 +1055,7 @@ if (SNAP) {
   win.addEventListener("click", ev => {
     const b = ev.target.closest("button"); if (!b) return;
     DAYS = Number(b.dataset.days);
-    try { localStorage.setItem("fw-days", String(DAYS)); } catch { /* storage unavailable */ }
+    try { localStorage.setItem("greenlight-days", String(DAYS)); } catch { /* storage unavailable */ }
     syncWindow(); render();
   });
 }

@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from flakewatch import cli, github
+from greenlight import cli, github
 from tests.fakegithub import FakeGitHub
 from tests.test_playtest import game, record, sh, write_record  # noqa: F401 - fixture
 
@@ -11,8 +11,8 @@ from tests.test_playtest import game, record, sh, write_record  # noqa: F401 - f
 def no_token(monkeypatch, tmp_path):
     for var in github.TOKEN_VARS:
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.delenv("FLAKEWATCH_CONFIG", raising=False)
-    monkeypatch.delenv("FLAKEWATCH_DB", raising=False)
+    monkeypatch.delenv("GREENLIGHT_CONFIG", raising=False)
+    monkeypatch.delenv("GREENLIGHT_DB", raising=False)
     monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
 
@@ -20,11 +20,11 @@ def no_token(monkeypatch, tmp_path):
 def test_init_writes_a_config_the_loader_accepts(game, no_token, capsys):  # noqa: F811
     repo, _ = game
     assert cli.main(["init", str(repo)]) == 0
-    text = (repo / "flakewatch.toml").read_text()
-    assert "enabled = true" in text and 'db = "~/.flakewatch/game.db"' in text
+    text = (repo / "greenlight.toml").read_text()
+    assert "enabled = true" in text and 'db = "~/.greenlight/game.db"' in text
     assert cli.main(["init", str(repo)]) == 3  # refuses to overwrite
-    from flakewatch import config
-    cfg = config.load(str(repo / "flakewatch.toml"))
+    from greenlight import config
+    cfg = config.load(str(repo / "greenlight.toml"))
     assert cfg.playtest_enabled and cfg.git_path == str(repo)
 
 
@@ -53,7 +53,7 @@ def test_sync_reports_each_source_and_keeps_going(game, no_token, tmp_path, caps
         fake.pages("GET", "{repo}/pulls", [])
         fake.route("GET", "{repo}/issues", lambda q, b: (500, {"message": "boom"}))
         fake.pages("GET", "{repo}/actions/runs", [], key="workflow_runs")
-        cfg = tmp_path / "flakewatch.toml"
+        cfg = tmp_path / "greenlight.toml"
         cfg.write_text(f'db = "{tmp_path}/s.db"\n[github]\nrepo = "o/r"\napi_url = "{fake.url}"\n'
                        f'[git]\npath = "{repo}"\n[playtest]\nenabled = true\n')
         code = cli.main(["--config", str(cfg), "sync"])
@@ -71,7 +71,7 @@ def test_auth_never_prints_the_token(no_token, monkeypatch, tmp_path, capsys):
         fake.route("GET", "/repos/o/r", {"private": True, "permissions": {"admin": False, "push": True, "pull": True}})
         fake.route("GET", "/rate_limit", {"resources": {"core": {"remaining": 4990, "limit": 5000}}})
         monkeypatch.setenv("GH_TOKEN", "ghp_supersecret")
-        cfg = tmp_path / "flakewatch.toml"
+        cfg = tmp_path / "greenlight.toml"
         cfg.write_text(f'[github]\nrepo = "o/r"\napi_url = "{fake.url}"\n')
         assert cli.main(["--config", str(cfg), "auth"]) == 0
         out = capsys.readouterr().out
@@ -82,7 +82,7 @@ def test_auth_never_prints_the_token(no_token, monkeypatch, tmp_path, capsys):
 
 
 def test_bad_config_is_a_clean_error(tmp_path, capsys, no_token):
-    cfg = tmp_path / "flakewatch.toml"
+    cfg = tmp_path / "greenlight.toml"
     cfg.write_text("[nope]\nx = 1\n")
     assert cli.main(["--config", str(cfg), "flaky"]) == 3
     assert "unknown section" in capsys.readouterr().err

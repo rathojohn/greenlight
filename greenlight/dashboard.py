@@ -171,7 +171,7 @@ def test_detail(conn: sqlite3.Connection, test_id: str, days: int = 30) -> dict[
         per_day[day].append(ms)
 
     issues = [dict(r) for r in conn.execute(
-        "SELECT number, title, state, url, fw_key FROM issues WHERE fw_key IN (?, ?) ORDER BY state = 'open' DESC, number DESC",
+        "SELECT number, title, state, url, managed_key FROM issues WHERE managed_key IN (?, ?) ORDER BY state = 'open' DESC, number DESC",
         (f"flaky:{tid}", f"perf:{tid}"))]
     from .delivery import test_metrics
     return {

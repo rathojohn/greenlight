@@ -1,8 +1,8 @@
 import json
 from datetime import timedelta
 
-from flakewatch import delivery
-from flakewatch.db import iso, utcnow
+from greenlight import delivery
+from greenlight.db import iso, utcnow
 
 
 def at(hours_ago: float) -> str:
@@ -46,7 +46,7 @@ def add_deploy(conn, did, sha, hours_ago, status="success", env="production", co
 
 
 def add_issue(conn, n, labels, created_hours_ago, closed_hours_ago=None, key=None):
-    conn.execute("INSERT INTO issues (number, title, state, labels, created_at, closed_at, fw_key) VALUES (?,?,?,?,?,?,?)",
+    conn.execute("INSERT INTO issues (number, title, state, labels, created_at, closed_at, managed_key) VALUES (?,?,?,?,?,?,?)",
                  (n, f"i{n}", "closed" if closed_hours_ago is not None else "open", json.dumps(labels),
                   at(created_hours_ago), at(closed_hours_ago) if closed_hours_ago is not None else None, key))
 

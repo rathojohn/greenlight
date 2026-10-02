@@ -17,7 +17,7 @@ from .github import GitHub, GitHubError
 from .gitrepo import Repo
 from .ingest import assign_retries, parse_junit, record_run
 
-MARKER = re.compile(r"<!--\s*flakewatch:(flaky|perf):(.+?)\s*-->")
+MARKER = re.compile(r"<!--\s*greenlight:(flaky|perf):(.+?)\s*-->")
 FINISHED = {"success", "failure", "cancelled", "skipped", "timed_out", "neutral", "action_required", "stale",
             "startup_failure"}
 FAILED = {"failure", "timed_out", "startup_failure"}
@@ -68,7 +68,7 @@ def sync_pulls(conn: sqlite3.Connection, gh: GitHub, days: int = 90) -> dict[str
 
 
 # ---------- issues ----------
-def fw_key(body: str | None) -> str | None:
+def managed_key(body: str | None) -> str | None:
     m = MARKER.search(body or "")
     return f"{m.group(1)}:{m.group(2)}" if m else None
 
@@ -77,10 +77,10 @@ def upsert_issue(conn: sqlite3.Connection, it: dict[str, Any]) -> None:
     labels = [lb["name"] if isinstance(lb, dict) else str(lb) for lb in it.get("labels") or []]
     conn.execute(
         """INSERT OR REPLACE INTO issues (number, title, state, state_reason, labels, author, created_at, closed_at,
-           updated_at, comments, fw_key, url) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+           updated_at, comments, managed_key, url) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
         (it["number"], it.get("title"), it.get("state", "open"), it.get("state_reason"), json.dumps(labels),
          (it.get("user") or {}).get("login"), norm_time(it.get("created_at")), norm_time(it.get("closed_at")),
-         norm_time(it.get("updated_at")), it.get("comments"), fw_key(it.get("body")), it.get("html_url")))
+         norm_time(it.get("updated_at")), it.get("comments"), managed_key(it.get("body")), it.get("html_url")))
 
 
 def sync_issues(conn: sqlite3.Connection, gh: GitHub, quarantine_label: str = "quarantined",
@@ -102,9 +102,9 @@ def mirror_issue_quarantine(conn: sqlite3.Connection, label: str) -> int:
     """An open flaky-test issue carrying `label` quarantines its test. Remove the label or close the
     issue and the next sync releases it. Only rows this mirror added ("github#<n>") are touched."""
     wanted: dict[str, tuple[int, str]] = {}
-    for r in conn.execute("SELECT number, title, labels, fw_key FROM issues WHERE state = 'open' AND fw_key LIKE 'flaky:%'"):
+    for r in conn.execute("SELECT number, title, labels, managed_key FROM issues WHERE state = 'open' AND managed_key LIKE 'flaky:%'"):
         if label in json.loads(r["labels"] or "[]"):
-            wanted[r["fw_key"].split(":", 1)[1]] = (r["number"], r["title"] or "")
+            wanted[r["managed_key"].split(":", 1)[1]] = (r["number"], r["title"] or "")
     with conn:
         for row in conn.execute("SELECT test_id, added_by FROM quarantine WHERE added_by LIKE 'github#%'").fetchall():
             if row["test_id"] not in wanted:

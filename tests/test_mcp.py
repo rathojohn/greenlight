@@ -24,26 +24,26 @@ def test_tools_over_stdio(demo):
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
     d, db = demo
-    env = {"FLAKEWATCH_DB": str(db), "PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(ROOT)}
+    env = {"GREENLIGHT_DB": str(db), "PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(ROOT)}
 
     async def go():
-        params = StdioServerParameters(command=sys.executable, args=["-m", "flakewatch.server"], env=env, cwd=str(d))
+        params = StdioServerParameters(command=sys.executable, args=["-m", "greenlight.server"], env=env, cwd=str(d))
         async with stdio_client(params) as (r, w), ClientSession(r, w) as s:
             await s.initialize()
             names = {t.name for t in (await s.list_tools()).tools}
             out = {}
-            for tool, args in (("flakewatch_triage_run", {}), ("flakewatch_pipelines", {}), ("flakewatch_delivery", {}),
-                               ("flakewatch_issues", {}), ("flakewatch_query", {"sql": "SELECT COUNT(*) AS n FROM pipelines"})):
+            for tool, args in (("greenlight_triage_run", {}), ("greenlight_pipelines", {}), ("greenlight_delivery", {}),
+                               ("greenlight_issues", {}), ("greenlight_query", {"sql": "SELECT COUNT(*) AS n FROM pipelines"})):
                 res = await s.call_tool(tool, args)
                 out[tool] = res.content[0].text
             return names, out
 
     names, out = asyncio.run(go())
-    assert {"flakewatch_triage_run", "flakewatch_playtest_gate", "flakewatch_sync", "flakewatch_pipelines",
-            "flakewatch_delivery", "flakewatch_issues", "flakewatch_query"} <= names
-    assert json.loads(out["flakewatch_triage_run"])["decision"] == "REAL_FAILURE"
-    assert json.loads(out["flakewatch_pipelines"])["totals"]["runs"] > 0
-    assert json.loads(out["flakewatch_delivery"])["dora"]["metrics"]["deployments"] > 0
-    plan = json.loads(out["flakewatch_issues"])
+    assert {"greenlight_triage_run", "greenlight_playtest_gate", "greenlight_sync", "greenlight_pipelines",
+            "greenlight_delivery", "greenlight_issues", "greenlight_query"} <= names
+    assert json.loads(out["greenlight_triage_run"])["decision"] == "REAL_FAILURE"
+    assert json.loads(out["greenlight_pipelines"])["totals"]["runs"] > 0
+    assert json.loads(out["greenlight_delivery"])["dora"]["metrics"]["deployments"] > 0
+    plan = json.loads(out["greenlight_issues"])
     assert plan["applied"] is False and isinstance(plan["actions"], list)
-    assert json.loads(out["flakewatch_query"])["rows"][0][0] > 0
+    assert json.loads(out["greenlight_query"])["rows"][0][0] > 0

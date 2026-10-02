@@ -1,7 +1,7 @@
 """Toto 2.0 forecasting over daily test metrics.
 
 Optional dependency: `pip install toto-models` (Python 3.12+). Defaults to Toto-2.0-22m, which
-runs fine on CPU. Set FLAKEWATCH_TOTO_MODEL to try a larger checkpoint.
+runs fine on CPU. Set GREENLIGHT_TOTO_MODEL to try a larger checkpoint.
 
 Toto is used for continuous signals (durations, rerun volume, suite failure rate). Flake
 classification itself stays in analysis.py, because pass/fail on the same SHA is a counting
@@ -21,7 +21,7 @@ from typing import Any
 
 from .db import day_range, since, utcnow
 
-MODEL_ID = os.environ.get("FLAKEWATCH_TOTO_MODEL", "Datadog/Toto-2.0-22m")
+MODEL_ID = os.environ.get("GREENLIGHT_TOTO_MODEL", "Datadog/Toto-2.0-22m")
 BATCH_SIZE = 64
 SUITE_METRICS = ("failure_rate", "suite_duration_ms", "runs", "reruns")
 _COUNT_METRICS = {"runs", "reruns"}  # a day with no rows is a real zero, not missing data

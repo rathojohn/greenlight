@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from flakewatch import web
+from greenlight import web
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -56,7 +56,7 @@ def test_loopback_mode_rejects_foreign_hosts_and_unmarked_writes(demo_db):
     try:
         assert req(port, "GET", "/api/overview", host="evil.example:80")[0] == 403
         assert req(port, "POST", "/api/sweep", body={})[0] == 403
-        status, _, data = req(port, "POST", "/api/sweep", headers={"X-Flakewatch": "1", "Content-Type": "application/json"}, body={})
+        status, _, data = req(port, "POST", "/api/sweep", headers={"X-Greenlight": "1", "Content-Type": "application/json"}, body={})
         assert status == 200 and "to_quarantine" in json.loads(data)
     finally:
         server.shutdown()
@@ -71,8 +71,8 @@ def test_token_mode(demo_db):
         status, headers, _ = req(port, "GET", "/?token=s3cret", host="192.168.1.20:8765")
         assert status == 303 and headers["Location"] == "/"
         cookie = headers["Set-Cookie"]
-        assert cookie.startswith("fw_token=s3cret;") and "HttpOnly" in cookie and "SameSite=Strict" in cookie
-        ok = {"Cookie": "fw_token=s3cret"}
+        assert cookie.startswith("greenlight_token=s3cret;") and "HttpOnly" in cookie and "SameSite=Strict" in cookie
+        ok = {"Cookie": "greenlight_token=s3cret"}
         assert req(port, "GET", "/api/overview", host="192.168.1.20:8765", headers=ok)[0] == 200
         assert req(port, "GET", "/api/overview", headers={"Authorization": "Bearer s3cret"})[0] == 200
         # the token doesn't replace the write header

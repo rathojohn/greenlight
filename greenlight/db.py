@@ -1,5 +1,5 @@
-"""SQLite connection helpers. The DB path comes from --db, then FLAKEWATCH_DB, then the config file,
-then ~/.flakewatch/flakewatch.db."""
+"""SQLite connection helpers. The DB path comes from --db, then GREENLIGHT_DB, then the config file,
+then ~/.greenlight/greenlight.db."""
 from __future__ import annotations
 
 import os
@@ -25,13 +25,13 @@ _config_db: str | None = None
 
 
 def set_config_db(path: str | None) -> None:
-    """The db path from flakewatch.toml, used when neither --db nor FLAKEWATCH_DB is set."""
+    """The db path from greenlight.toml, used when neither --db nor GREENLIGHT_DB is set."""
     global _config_db
     _config_db = path
 
 
 def default_db_path() -> str:
-    return os.environ.get("FLAKEWATCH_DB") or _config_db or str(Path.home() / ".flakewatch" / "flakewatch.db")
+    return os.environ.get("GREENLIGHT_DB") or _config_db or str(Path.home() / ".greenlight" / "greenlight.db")
 
 
 def migrate(conn: sqlite3.Connection) -> None:
@@ -52,7 +52,7 @@ def connect(path: str | None = None, readonly: bool = False) -> sqlite3.Connecti
     db = Path(os.path.expanduser(path or default_db_path()))
     if readonly:
         if not db.exists():
-            raise FileNotFoundError(f"No flakewatch DB at {db}. Run `flakewatch ingest` or `flakewatch sync` first, or set FLAKEWATCH_DB.")
+            raise FileNotFoundError(f"No greenlight DB at {db}. Run `greenlight ingest` or `greenlight sync` first, or set GREENLIGHT_DB.")
         conn = sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True, timeout=10)
         if conn.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
             conn.close()
@@ -88,7 +88,7 @@ def parse_time(value: str | None) -> datetime | None:
 
 
 def norm_time(value: str | None) -> str | None:
-    """Any ISO 8601 timestamp as flakewatch stores it: UTC, seconds, +00:00."""
+    """Any ISO 8601 timestamp as greenlight stores it: UTC, seconds, +00:00."""
     dt = parse_time(value)
     return iso(dt) if dt else None
 

@@ -1,7 +1,7 @@
-"""flakewatch.toml: which repo to read, and from where.
+"""greenlight.toml: which repo to read, and from where.
 
-Looked up in this order: --config, $FLAKEWATCH_CONFIG, flakewatch.toml in this folder or any parent,
-~/.flakewatch/config.toml. Every key is optional. Paths are relative to the file. Tokens never go
+Looked up in this order: --config, $GREENLIGHT_CONFIG, greenlight.toml in this folder or any parent,
+~/.greenlight/config.toml. Every key is optional. Paths are relative to the file. Tokens never go
 here: see github.resolve_token().
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-FILE_NAME = "flakewatch.toml"
+FILE_NAME = "greenlight.toml"
 _REMOTE = re.compile(r"github\.com[:/]+([\w.-]+)/([\w.-]+?)(?:\.git)?/?$")
 
 DEFAULTS: dict[str, dict[str, Any]] = {
@@ -27,7 +27,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
                  "deploy_files": None, "deploy_files_ref": None, "incident_labels": ["incident", "hotfix", "bug"]},
     "issues": {"flaky_label": "flaky-test", "perf_label": "perf-regression", "quarantine_label": "quarantined",
                "min_flips": 2, "window_days": 30, "healed_runs": 10, "healed_days": 14},
-    "ci": {"data_branch": "flakewatch-data"},
+    "ci": {"data_branch": "greenlight-data"},
     "sync": {"days": 90},
 }
 
@@ -91,14 +91,14 @@ def remote_repo(git_path: str) -> str | None:
 
 
 def find(start: Path | None = None) -> Path | None:
-    env = os.environ.get("FLAKEWATCH_CONFIG")
+    env = os.environ.get("GREENLIGHT_CONFIG")
     if env:
         return Path(os.path.expanduser(env))
     here = (start or Path.cwd()).resolve()
     for d in (here, *here.parents):
         if (d / FILE_NAME).is_file():
             return d / FILE_NAME
-    home = Path.home() / ".flakewatch" / "config.toml"
+    home = Path.home() / ".greenlight" / "config.toml"
     return home if home.is_file() else None
 
 
