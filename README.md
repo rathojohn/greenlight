@@ -154,7 +154,7 @@ docker compose up -d
 docker compose logs greenlight
 ```
 
-Use your repo instead of `rathojohn/greenlight`. The token line needs the GitHub CLI logged in; for a public repo you can leave `GITHUB_TOKEN` empty. The logs print the server's links. The server reads the repo from GitHub (a small clone of its own, refreshed every 10 minutes), so it needs no copy of your code.
+Use your repo instead of `rathojohn/greenlight`. The token line needs the GitHub CLI logged in; for a public repo you can leave `GITHUB_TOKEN` empty. The logs print the server's links, with `$GREENLIGHT_TOKEN` where your token goes (the token itself never lands in a log). The server reads the repo from GitHub (a small clone of its own, refreshed every 10 minutes), so it needs no copy of your code.
 
 Then point everything at it. Set these wherever greenlight runs (your shell profile, the cloud agent environment's settings, CI secrets), with your server's HTTPS address and the token from `.env`:
 

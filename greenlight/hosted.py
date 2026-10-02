@@ -249,8 +249,9 @@ def http_app(token: str | None, host: str = "127.0.0.1") -> Any:
 def serve_http(host: str = "127.0.0.1", port: int = 8000, token: str | None = None, no_auth: bool = False) -> None:
     import uvicorn
     token = None if no_auth else (token or _token())
+    shown_token = "$GREENLIGHT_TOKEN"  # a token you set stays out of the log: hosts keep logs, and logs get shared
     if not token and not no_auth and host not in LOOPBACK:
-        token = secrets.token_urlsafe(24)
+        token = shown_token = secrets.token_urlsafe(24)
         print("No GREENLIGHT_TOKEN set, so this run uses a random token. Set one to keep the URLs across "
               "restarts.", file=sys.stderr)
     server._prune_tools()
@@ -263,8 +264,8 @@ def serve_http(host: str = "127.0.0.1", port: int = 8000, token: str | None = No
     what = server.STATE.repo or server.STATE.cfg.repo or server.STATE.project
     lines = [f"greenlight for {what} on {base}"]
     if token:
-        lines += [f"  dashboard   {base}/?token={token}  (once per browser)",
-                  f"  MCP         {base}/{token}/mcp  (claude.ai, ChatGPT), or {base}/mcp with Authorization: Bearer",
+        lines += [f"  dashboard   {base}/?token={shown_token}  (once per browser)",
+                  f"  MCP         {base}/{shown_token}/mcp  (claude.ai, ChatGPT), or {base}/mcp with Authorization: Bearer",
                   f"  runs        {base}  with GREENLIGHT_URL and GREENLIGHT_TOKEN set for the CLI and the Action"]
     else:
         lines += [f"  dashboard   {base}/", f"  MCP         {base}/mcp"]
