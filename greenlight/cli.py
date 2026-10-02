@@ -10,7 +10,7 @@
   greenlight gate --sha $SHA                   exit 0 PASS, 2 RERUN_TARGETED, 1 REAL_FAILURE
   greenlight playtest gate                     sync the playtest ledger, then gate the run just made
   greenlight issues [--apply]                  one GitHub issue per flaky test and perf regression
-  greenlight ci record|report|restore          GitHub Actions: data-branch history, gate, PR comment
+  greenlight ci record|report                  GitHub Actions: record a job, gate it, comment on the PR
   greenlight otel export|receive|import        OpenTelemetry: OTLP traces and metrics out, test and CI/CD spans in
   greenlight flaky                             ranked flaky tests
   greenlight sweep [--apply]                   quarantine candidates / release candidates
@@ -123,10 +123,15 @@ def cmd_setup(a: argparse.Namespace) -> int:
     if importlib.util.find_spec("mcp") is None:
         print("MCP: the mcp package isn't installed here, so the server can't start. Reinstall greenlight with its "
               "dependencies (no --no-deps).")
+    url = a.url or os.environ.get("GREENLIGHT_URL")
     if a.project:
-        for line in setup.project_files(target, a.dry_run):
+        for line in setup.project_files(target, a.dry_run, url):
             print("project: " + line)
-        if not a.dry_run:
+        if not a.dry_run and url:
+            print(f"project: commit .mcp.json, .claude/settings.json and .codex/config.toml. Sessions connect to {url} "
+                  "with $GREENLIGHT_TOKEN: set GREENLIGHT_URL and GREENLIGHT_TOKEN where they run (your shell, or "
+                  "the cloud environment's settings).")
+        elif not a.dry_run:
             print("project: commit .mcp.json, .claude/settings.json and .codex/config.toml, and every Claude Code "
                   "session on this repo (web included) and every Codex session starts greenlight. They need uv.")
     elif not a.no_claude:
@@ -183,11 +188,12 @@ def _with_pytest_report(cmd: list[str], out_dir: str) -> tuple[list[str], str | 
 
 
 def cmd_run(a: argparse.Namespace) -> int:
-    import os
     import shutil
     import subprocess
     import tempfile
     import time
+    import uuid
+    from . import ci, client
     from .ingest import ingest_checkout
     cmd = a.command[1:] if a.command[:1] == ["--"] else a.command
     if not cmd:
@@ -211,13 +217,20 @@ def cmd_run(a: argparse.Namespace) -> int:
             print(f"error: the tests exited {code} but wrote no new JUnit XML greenlight could find. Point --junit at "
                   "the report, or turn on the runner's JUnit reporter.", file=sys.stderr)
             return code or 3
-        with closing(connect(a.db)) as conn:
-            run_id, _, n = ingest_checkout(conn, files, ".", a.sha, a.branch, source=a.source)
-            t = analysis.triage_run(conn, run_id=run_id, window_days=a.window_days)
+        remote = client.configured()
+        ext = f"run:{uuid.uuid4().hex}" if remote else None
+        # with a server, the run is recorded in a throwaway DB, sent, and judged there against all its history
+        with closing(connect(os.path.join(tmp, "run.db") if remote else a.db)) as conn:
+            run_id, _, n = ingest_checkout(conn, files, ".", a.sha, a.branch, source=a.source, external_id=ext)
+            rec = ci.export_run(conn, run_id) if remote else None
+            t = None if remote else analysis.triage_run(conn, run_id=run_id, window_days=a.window_days)
+    if remote:
+        t = client.submit([rec], gate=ext, window_days=a.window_days)["triage"]
+        run_id = t["run"]["run_id"]
     if a.json:
         print(json.dumps({**t, "recorded": {"run_id": run_id, "results": n, "command_exit": code}}, indent=2, default=str))
         return t["exit_code"]
-    print(f"greenlight: recorded run {run_id} ({n} results)")
+    print(f"greenlight: recorded run {run_id} ({n} results)" + (f" on {remote[0]}" if remote else ""))
     _print_triage(t)
     if t["rerun_tests"]:
         print("rerun only:", " ".join(t["rerun_tests"]))
@@ -293,13 +306,27 @@ def cmd_playtest_sync(a: argparse.Namespace) -> int:
 
 
 def cmd_playtest_gate(a: argparse.Namespace) -> int:
+    import tempfile
+    from . import ci, client
     repo = _playtest_repo(a)
-    with closing(connect(a.db)) as conn:
+    remote = client.configured()
+    with tempfile.TemporaryDirectory(prefix="greenlight-") as tmp, \
+            closing(connect(os.path.join(tmp, "playtest.db") if remote else a.db)) as conn:
         playtest.sync(conn, repo)
         run_id = playtest.latest_local_run(conn, repo)
         if run_id is None:
             raise LookupError("No playtest record in this checkout yet. Run `npm run test:changed` first.")
-        t = analysis.triage_run(conn, run_id=run_id, window_days=a.window_days)
+        if remote:  # send this checkout's records (the server may not have them yet) and let it judge
+            local = Path(repo) / playtest.RUNS_DIR
+            ids = {playtest.external_id(f.name) for f in local.glob("*.json")} if local.is_dir() else set()
+            ids.add(conn.execute("SELECT external_id FROM runs WHERE run_id = ?", (run_id,)).fetchone()[0])
+            rows = conn.execute(f"SELECT run_id FROM runs WHERE external_id IN ({','.join('?' * len(ids))})", sorted(ids))
+            records = [ci.export_run(conn, r[0]) for r in rows]
+            gate = conn.execute("SELECT external_id FROM runs WHERE run_id = ?", (run_id,)).fetchone()[0]
+        else:
+            t = analysis.triage_run(conn, run_id=run_id, window_days=a.window_days)
+    if remote:
+        t = client.submit(records, gate=gate, window_days=a.window_days)["triage"]
     t["rerun_command"] = playtest.rerun_command(t["rerun_tests"])
     if a.json:
         print(json.dumps(t, indent=2, default=str))
@@ -359,22 +386,10 @@ def cmd_issues_link(a: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_ci_restore(a: argparse.Namespace) -> int:
-    from . import ci
-    from .gitrepo import Repo
-    with closing(connect(a.db)) as conn:
-        if a.dir:
-            res = ci.restore_dir(conn, a.dir)
-        else:
-            res = ci.restore_branch(conn, Repo(a.cfg.git_path or "."), a.branch or a.cfg.get("ci", "data_branch"))
-    print(json.dumps(res))
-    return 0
-
-
 def cmd_ci_record(a: argparse.Namespace) -> int:
     from . import ci
     with closing(connect(a.db)) as conn:
-        res = ci.record_junit(conn, _expand(a.junit), a.name, a.sha, a.branch, a.dir)
+        res = ci.record_junit(conn, _expand(a.junit), a.name, a.sha, a.branch)
     print(json.dumps(res))
     return 0
 
@@ -389,9 +404,19 @@ def cmd_ci_report(a: argparse.Namespace) -> int:
             gh = github.client(a.cfg.repo or env["repo"], a.cfg.api_url, require_token=True)
         except ValueError as e:
             print(f"note: no PR comment: {e}", file=sys.stderr)
-    with closing(connect(a.db, readonly=gh is None)) as conn:
+    from . import client
+    remote = client.configured()
+    with closing(connect(a.db, readonly=gh is None and not remote)) as conn:
         run_id = a.run_id or (None if a.sha else ci.this_job_run(conn, a.name))
-        res = ci.report(conn, run_id, None if run_id else (a.sha or env["sha"]), a.name, gh, pr, a.window_days)
+        if remote:  # the server holds the history: send this job's run and use its decision
+            if run_id is None:
+                raise LookupError("no run recorded by this job: run `greenlight ci record` first")
+            rec = ci.export_run(conn, run_id)
+            sent = client.submit([rec], gate=rec["external_id"], window_days=a.window_days)
+            res = ci.report(conn, gh=gh, pr=pr, name=a.name, triage=sent["triage"],
+                            links={k: int(v) for k, v in (sent.get("issue_links") or {}).items()})
+        else:
+            res = ci.report(conn, run_id, None if run_id else (a.sha or env["sha"]), a.name, gh, pr, a.window_days)
     if not res["summary_written"]:
         print(res["markdown"])
     if res.get("pr_comment_error"):
@@ -475,7 +500,9 @@ def cmd_mcp(a: argparse.Namespace) -> int:
 
 
 def cmd_serve(a: argparse.Namespace) -> int:
-    _server(a).serve_http(a.host, a.port, a.token, a.no_auth)
+    _server(a)
+    from . import hosted
+    hosted.serve_http(a.host, a.port, a.token, a.no_auth)
     return 0
 
 
@@ -525,6 +552,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--claude-desktop", action="store_true", help="add the server to Claude Desktop, reading this repo "
                    "from GitHub")
     s.add_argument("--repo", help="owner/name for --claude-desktop (default: this clone's GitHub repo)")
+    s.add_argument("--url", help="your greenlight server, for --project: sessions connect to it instead of starting "
+                                 "their own copy (default: $GREENLIGHT_URL)")
     s.add_argument("--codex", action="store_true", help="also add the server to ~/.codex/config.toml (Codex CLI, IDE "
                    "and ChatGPT desktop)")
     s.add_argument("--agent-rules", action="store_true", help="append the gate rule to CLAUDE.md / AGENTS.md")
@@ -574,20 +603,16 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--kind", choices=["flaky", "perf"], default="flaky")
     t.set_defaults(fn=cmd_issues_link)
 
-    s = sub.add_parser("ci", help="history on a data branch, gate and PR report for GitHub Actions")
+    s = sub.add_parser("ci", help="GitHub Actions: record a job's results, then gate and report on the PR")
     csub = s.add_subparsers(dest="ci_cmd", required=True)
-    t = csub.add_parser("restore", help="load run records from a data-branch checkout, or the branch in this clone")
-    t.add_argument("--dir", help="a checkout of the data branch")
-    t.add_argument("--branch", help="read this branch from the local clone instead (default: [ci] data_branch)")
-    t.set_defaults(fn=cmd_ci_restore)
-    t = csub.add_parser("record", help="record JUnit results and write a record file for the data branch")
+    t = csub.add_parser("record", help="record this job's JUnit results")
     t.add_argument("--junit", nargs="+", required=True, help="JUnit XML files or globs")
     t.add_argument("--name", help="tells matrix jobs apart, e.g. py3.12")
     t.add_argument("--sha", help="default: $GITHUB_SHA")
     t.add_argument("--branch")
-    t.add_argument("--dir", help="data-branch checkout to write the record into")
     t.set_defaults(fn=cmd_ci_record)
-    t = csub.add_parser("report", help="gate, then write the step summary, outputs and PR comment")
+    t = csub.add_parser("report", help="gate (on the server, with GREENLIGHT_URL set), then write the step summary, "
+                                       "outputs and PR comment")
     t.add_argument("--sha", help="default: $GITHUB_SHA")
     t.add_argument("--run-id", type=int)
     t.add_argument("--name")
@@ -660,13 +685,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--project", help="the checkout to work in (default: $CLAUDE_PROJECT_DIR, else here)")
     s.set_defaults(fn=cmd_mcp)
 
-    s = sub.add_parser("serve", help="the MCP server over HTTP, for claude.ai and ChatGPT connectors")
+    s = sub.add_parser("serve", help="the hosted server: MCP over HTTP, the dashboard and the ingest API on one port")
     s.add_argument("--repo", help="owner/name to read from GitHub (default: $GREENLIGHT_REPO, else the checkout you're in)")
     s.add_argument("--host", default="127.0.0.1", help="bind address; 0.0.0.0 in a container or behind a host")
     s.add_argument("--port", type=int, default=int(os.environ.get("PORT") or 8000),
                    help="default: $PORT (hosts like Render and Cloud Run set it), else 8000")
-    s.add_argument("--token", help="secret for the URL (/<token>/mcp) or an Authorization: Bearer header "
-                                   "(default: $GREENLIGHT_MCP_TOKEN, else a random one off loopback)")
+    s.add_argument("--token", help="the one secret for everything: Authorization: Bearer, the URL path (/<token>/mcp) "
+                                   "or the dashboard's sign-in link (default: $GREENLIGHT_TOKEN, else a random one "
+                                   "off loopback)")
     s.add_argument("--no-auth", action="store_true", help="no token at all. Only for a public repo you don't mind "
                                                           "anyone reading through this server")
     s.set_defaults(fn=cmd_serve)

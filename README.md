@@ -8,8 +8,8 @@ It runs on macOS, Linux and Windows (CI tests all three) and in a container.
 
 - [How it works](#how-it-works)
 - [Set up](#set-up)
+- [Run a server](#run-a-server)
 - [Use it from Claude or ChatGPT](#use-it-from-claude-or-chatgpt)
-- [Run it in a container](#run-it-in-a-container)
 - [OpenTelemetry](#opentelemetry)
 - [How auth works](#how-auth-works)
 - [GitHub: sync, issues and CI](#github-sync-issues-and-ci)
@@ -23,13 +23,13 @@ It runs on macOS, Linux and Windows (CI tests all three) and in a container.
 ```
  sources                         greenlight                          out
  ───────                         ──────────                          ───
- JUnit XML (any runner)   ─┐                                  ┌─> OTLP traces + metrics
- OTLP test / CI spans     ─┤     SQLite index                 │   (Grafana, Tempo, Jaeger,
+ JUnit XML (any runner)   ─┐     one database:                ┌─> OTLP traces + metrics
+ OTLP test / CI spans     ─┤     your machine, or a server    │   (Grafana, Tempo, Jaeger,
  GitHub API: Actions,     ─┼──>  gate: PASS / RERUN / REAL ───┤    Honeycomb, SigNoz, ...)
-   PRs, issues, deploys    │     flake stats, quarantine      ├─> local dashboard
- git: run records on a    ─┤     pipelines, DORA              ├─> MCP server (agents)
-   data branch, release    │                                  ├─> GitHub issues per flaky test
-   notes, a test ledger   ─┘                                  └─> PR comment + CI step summary
+   PRs, issues, deploys    │     flake stats, quarantine      ├─> dashboard
+ git: release notes,      ─┘     pipelines, DORA              ├─> MCP server (agents)
+   a test ledger                                              ├─> GitHub issues per flaky test
+                                                              └─> PR comment + CI step summary
 ```
 
 The core idea: **a flaky test is one that both passed and failed on the same code.** That's counting, not machine learning. Every rerun of the same commit is evidence, so greenlight keeps every run and decides what a new failure means from that history.
@@ -121,9 +121,59 @@ Record passing runs too. A test only counts as flaky once the same code has both
 
 Any runner that writes JUnit XML works: pytest, vitest `--reporter=junit`, jest with jest-junit, Playwright's junit reporter, `go test` through go-junit-report, Maven Surefire. `greenlight ingest` and `greenlight gate` are the same thing in two steps, for scripts that already have the report.
 
-### 5. Add it to CI
+### 5. Share the history
 
-See [CI with the GitHub Action](#ci-with-the-github-action). CI runs land in the same history, so a test that flaked in CI is known to be flaky on your laptop too, once you `sync`.
+On its own, each machine keeps its own history in `~/.greenlight`. To share one between CI, your laptop, cloud agent sessions, claude.ai and ChatGPT, [run a server](#run-a-server) and point them at it. Then a test that flaked in CI is known to be flaky everywhere.
+
+## Run a server
+
+A greenlight server is one container holding one database. Everything sends it runs and asks it questions: the GitHub Action, `greenlight run`, agents over MCP, and you through the dashboard. Any host that runs a container with a persistent disk works. It sits idle almost all the time, so the smallest size a host offers is plenty.
+
+| It needs | |
+| --- | --- |
+| Image | `ghcr.io/rathojohn/greenlight` (amd64 and arm64) |
+| Port | 8000, or `$PORT` when the host sets one |
+| Disk | a persistent volume at `/data`, for the database (a few hundred MB at most) |
+| Environment | `GREENLIGHT_REPO` (owner/name), `GREENLIGHT_TOKEN` (any long random string, the one password for everything), `GITHUB_TOKEN` (reads the repo; required for a private one) |
+| HTTPS | from the host, or a reverse proxy in front |
+| Health check | `GET /healthz` |
+| Copies | exactly one: the database is SQLite on that disk |
+
+On any machine with Docker, this writes the `.env` file and starts it with `deploy/server/docker-compose.yml`:
+
+```bash
+mkdir greenlight-server
+cd greenlight-server
+curl -fsSLO https://raw.githubusercontent.com/rathojohn/greenlight/main/deploy/server/docker-compose.yml
+cat > .env <<EOF
+GREENLIGHT_REPO=rathojohn/greenlight
+GREENLIGHT_TOKEN=$(openssl rand -hex 32)
+GITHUB_TOKEN=$(gh auth token)
+EOF
+docker compose up -d
+docker compose logs greenlight
+```
+
+Use your repo instead of `rathojohn/greenlight`. The token line needs the GitHub CLI logged in; for a public repo you can leave `GITHUB_TOKEN` empty. The logs print the server's links. The server reads the repo from GitHub (a small clone of its own, refreshed every 10 minutes), so it needs no copy of your code.
+
+Then point everything at it. Set these wherever greenlight runs (your shell profile, the cloud agent environment's settings, CI secrets), with your server's HTTPS address and the token from `.env`:
+
+```bash
+export GREENLIGHT_URL=https://greenlight.example.com
+export GREENLIGHT_TOKEN=paste-the-token-from-.env
+```
+
+| Client | How it uses the server |
+| --- | --- |
+| `greenlight run`, `greenlight playtest gate` | send each run there and print the decision it makes against all its history |
+| The GitHub Action | `server-url` and `server-token` inputs, from secrets: see [CI with the GitHub Action](#ci-with-the-github-action) |
+| Claude Code, Codex | `greenlight setup --project --url "$GREENLIGHT_URL"` in the repo, then commit the files: sessions connect with `$GREENLIGHT_TOKEN` instead of starting their own copy |
+| claude.ai, ChatGPT | a custom connector with the URL `$GREENLIGHT_URL/<token>/mcp`: see [claude.ai and ChatGPT](#claudeai-and-chatgpt-web-and-phone) |
+| The dashboard | open `$GREENLIGHT_URL/?token=<token>` once in each browser; it keeps a cookie after that |
+
+The database is `/data/<owner>-<name>.db`. To back it up, copy it while the container is stopped, or with `sqlite3 <db> ".backup copy.db"` while it runs.
+
+The same image runs any CLI command in place of the server, like `docker run --rm ghcr.io/rathojohn/greenlight --version`, or the stdio MCP server with `docker run -i --rm ghcr.io/rathojohn/greenlight mcp --repo rathojohn/greenlight`.
 
 ## Use it from Claude or ChatGPT
 
@@ -131,10 +181,10 @@ greenlight is an MCP server, so any Claude or ChatGPT app that takes MCP servers
 
 | Where | Do this once | Data comes from |
 | --- | --- | --- |
-| Claude Code (terminal, desktop, or claude.ai/code on the web) and Codex, in a repo | `greenlight setup --project` in the repo, then commit the three files it writes | the checkout the agent works in |
+| Claude Code (terminal, desktop, or claude.ai/code on the web) and Codex, in a repo | `greenlight setup --project` in the repo (add `--url "$GREENLIGHT_URL"` with a [server](#run-a-server)), then commit the three files it writes | the checkout, or the server |
 | Claude Code or Codex, in every project on your machine | `greenlight setup` (Claude Code), `greenlight setup --codex` (Codex CLI, IDE and the ChatGPT desktop app) | the checkout the agent works in |
 | Claude Desktop chat | `greenlight setup --claude-desktop` | GitHub, no clone |
-| claude.ai or ChatGPT, on the web or your phone | run `greenlight serve` (or the container) where they can reach it, then add its URL as a connector | GitHub, no clone |
+| claude.ai or ChatGPT, on the web or your phone | add your [server](#run-a-server)'s MCP URL as a connector | the server |
 | Codex cloud tasks | no MCP servers there yet: install the CLI in the environment's setup script and use `greenlight run` | the task's checkout |
 
 ### Claude Code and Codex in a repo
@@ -175,37 +225,12 @@ For a private repo, greenlight needs a token Claude Desktop can see. It asks the
 
 ### claude.ai and ChatGPT (web and phone)
 
-These connect to MCP servers by URL from their own servers, so greenlight has to run somewhere on the internet with HTTPS. It reads the repo from GitHub and refreshes it every 10 minutes, so wherever it runs needs no clone.
+These connect to MCP servers by URL, from their own servers, so they need a [greenlight server](#run-a-server) on the internet with HTTPS. Neither can send an API key header, so the token goes in the URL: `$GREENLIGHT_URL/<token>/mcp`, like `https://greenlight.example.com/9f2c4e.../mcp`.
 
-1. Run it. With Docker on macOS or Linux:
+- claude.ai: Settings, Connectors, Add custom connector. It shows up in Claude Desktop too. Free plans get one custom connector.
+- ChatGPT: turn on Developer mode (Settings, Security and login), then add it at chatgpt.com/plugins with the plus button. Developer mode is on paid plans, and ChatGPT asks before running a tool that changes something.
 
-   ```bash
-   docker run -d --name greenlight -p 8000:8000 -v greenlight-data:/data \
-     -e GREENLIGHT_REPO=rathojohn/greenlight \
-     -e GREENLIGHT_MCP_TOKEN=$(openssl rand -hex 16) \
-     ghcr.io/rathojohn/greenlight
-   docker logs greenlight
-   ```
-
-   Windows PowerShell:
-
-   ```powershell
-   docker run -d --name greenlight -p 8000:8000 -v greenlight-data:/data `
-     -e GREENLIGHT_REPO=rathojohn/greenlight `
-     -e GREENLIGHT_MCP_TOKEN=$([guid]::NewGuid().ToString("N")) `
-     ghcr.io/rathojohn/greenlight
-   docker logs greenlight
-   ```
-
-   Use your repo instead of `rathojohn/greenlight`. For a private one, also pass a token: add `-e GITHUB_TOKEN=$(gh auth token)` (the same in PowerShell). `docker logs` prints the path to connect to, like `http://localhost:8000/9f2c4e.../mcp`. Without Docker, `greenlight serve --repo rathojohn/greenlight --host 0.0.0.0` does the same.
-
-2. Give it an HTTPS address. To try it from your own machine, a Cloudflare quick tunnel is free and needs no account: `cloudflared tunnel --url http://localhost:8000` prints an `https://...trycloudflare.com` address. It changes every run, and your machine has to stay on. To keep it up, run the same container on any host that runs containers; it listens on `$PORT` when the host sets one.
-
-3. Add the connector. The URL is the address from step 2 plus the path from `docker logs`: with `https://abc.trycloudflare.com` and `/9f2c4e.../mcp`, it's `https://abc.trycloudflare.com/9f2c4e.../mcp`.
-   - claude.ai: Settings, Connectors, Add custom connector. It shows up in Claude Desktop too. Free plans get one custom connector.
-   - ChatGPT: turn on Developer mode (Settings, Security and login), then add it at chatgpt.com/plugins with the plus button. Developer mode is on paid plans, and ChatGPT asks before running a tool that changes something.
-
-The token in that URL is the password: anyone with the URL can read the repo's test and CI history through it, quarantine tests, and, if the server's GitHub token can write issues, open flaky-test issues. Start the container with a new token to revoke it. Clients that can send headers (Claude Code with `--header`, Codex with `bearer_token_env_var`) can use `/mcp` with `Authorization: Bearer <token>` instead. `--no-auth` turns the token off, which only makes sense for a public repo.
+That URL is a password: anyone with it can read the repo's test and CI history, quarantine tests, and, if the server's GitHub token can write issues, open flaky-test issues. Restart the server with a new `GREENLIGHT_TOKEN` to revoke it. Clients that can send headers (Claude Code, Codex, the CLI, the Action) use `Authorization: Bearer` on `/mcp` and `/api` instead.
 
 ### Codex cloud and other cloud agents
 
@@ -223,8 +248,9 @@ This is the rule `setup` prints (and `--agent-rules` writes):
 ## Test failures (greenlight)
 Record every test run with greenlight, passing or not (passes are the history that tells a flaky test
 from a broken one), and on a failure follow its decision before rerunning anything. In a shell:
-`greenlight run -- <test command>`. With the MCP server: call greenlight_gate_junit with the run's
-JUnit report (or greenlight_playtest_gate for a playtest ledger).
+`greenlight run -- <test command>` (with GREENLIGHT_URL set, it sends the run to the shared server).
+If the MCP server offers greenlight_gate_junit, calling it with the run's JUnit report does the same
+(greenlight_playtest_gate for a playtest ledger).
 - PASS: nothing that counts failed. Carry on.
 - RERUN_TARGETED: only tests with a flake history failed. Rerun just those, once. No full regression.
 - REAL_FAILURE: a test with no flake history failed. Investigate it; a full regression only after a fix.
@@ -249,32 +275,6 @@ In practice: the agent runs the tests through greenlight, reruns only the flaky 
 | greenlight_query | no | read-only SQL over every table |
 
 Read from GitHub (Claude Desktop with `--repo`, claude.ai and ChatGPT connectors, the container), there's no checkout of yours, so the two tools that record a local test run (`greenlight_gate_junit`, `greenlight_playtest_gate`) aren't offered.
-
-## Run it in a container
-
-The image is `ghcr.io/rathojohn/greenlight`, for amd64 and arm64 (Apple Silicon too), built from this repo's `Dockerfile` on every push to main. CI starts it and checks the MCP server against GitHub before publishing.
-
-```bash
-docker run --rm ghcr.io/rathojohn/greenlight --version
-```
-
-- With no command it serves MCP over HTTP: see [claude.ai and ChatGPT](#claudeai-and-chatgpt-web-and-phone).
-- Any CLI command works in place of that, like `--version` above, or `mcp --repo <owner/name>` for the stdio server (run with `docker run -i`, as in the Claude Desktop example below).
-- Cache clones and the database live in `/data`. Mount a volume there (`-v greenlight-data:/data`) to keep them across restarts.
-
-Claude Desktop can run it too, in its config file:
-
-```json
-{
-  "mcpServers": {
-    "greenlight": {
-      "command": "docker",
-      "args": ["run", "-i", "--rm", "-v", "greenlight-data:/data", "ghcr.io/rathojohn/greenlight",
-               "mcp", "--repo", "rathojohn/greenlight"]
-    }
-  }
-}
-```
 
 ## OpenTelemetry
 
@@ -339,7 +339,7 @@ If your tests already emit OpenTelemetry, skip JUnit. `greenlight otel receive` 
 | Dashboard | none on `127.0.0.1`; with `--host`, a token traded once for an HttpOnly, SameSite=Strict cookie | in memory, printed once at start |
 | OTLP receiver | none on loopback; `--token` (Bearer) when it listens elsewhere | in memory |
 | MCP server over stdio | none: it's a local process your agent starts | |
-| MCP server over HTTP | a token in the URL path (`/<token>/mcp`) or an `Authorization: Bearer` header | `$GREENLIGHT_MCP_TOKEN`; never logged |
+| greenlight server | `GREENLIGHT_TOKEN`: an `Authorization: Bearer` header, the URL path (`/<token>/mcp`), or a cookie the dashboard's sign-in link sets | the server's environment; never logged |
 | Clones greenlight keeps itself | the GitHub token above, handed to git in its environment for each call | never written to disk |
 
 `greenlight auth` prints where the token came from (never the token), the access it has and the rate limit left. Public repos sync without a token at 60 requests an hour.
@@ -351,7 +351,6 @@ A fine-grained token scoped to just the repo needs:
 | `sync` | Metadata, Contents, Pull requests, Issues, Actions, Deployments: read |
 | `issues --apply` | Issues: read and write |
 | `ci report --pr-comment` | Pull requests: read and write |
-| `ci record` to the data branch | Contents: read and write |
 
 The dashboard binds to 127.0.0.1 by default and rejects requests whose Host header isn't local (DNS rebinding), and writes need an `X-Greenlight` header that a cross-site form can't send. To open it from your phone, run `greenlight ui --host 0.0.0.0` on a network you trust (home LAN, Tailscale): it prints a link with a token, and every request then needs it. It's plain HTTP, so don't expose it to the internet.
 
@@ -367,7 +366,6 @@ The dashboard binds to 127.0.0.1 by default and rejects requests whose Host head
 | `issues` | issues, plus the markers on the ones greenlight manages and their labels | same |
 | `actions` | every workflow run attempt with its jobs and steps; JUnit reports from artifacts named like `junit*` | same |
 | `deployments` | pushes to a branch (repository activity API), GitHub Deployments, GitHub Releases, or files added in git (release notes) | token, except git files |
-| `records` | run records on the `greenlight-data` branch, written by the Action | a clone |
 | `playtest` | a test ledger committed to git (see [Configuration](#configuration)) | a clone |
 | `otel` | exports everything new, last, if an endpoint is set | an endpoint |
 
@@ -387,9 +385,8 @@ Add the `quarantined` label to a flaky-test issue and the next sync quarantines 
 
 ```yaml
 permissions:
-  contents: write        # run records on the greenlight-data branch
+  contents: read
   pull-requests: write   # one comment per job on the PR
-  issues: read           # quarantine labels
 
 jobs:
   test:
@@ -403,6 +400,8 @@ jobs:
         with:
           junit: reports/junit.xml
           name: unit                       # tells matrix jobs apart
+          server-url: ${{ secrets.GREENLIGHT_URL }}
+          server-token: ${{ secrets.GREENLIGHT_TOKEN }}
           # otlp-endpoint: https://...     # also send this run to your OTel backend
       # only flaky tests failed: rerun just those, and record the rerun as a second attempt on this commit
       - if: steps.greenlight.outputs.decision == 'RERUN_TARGETED'
@@ -415,11 +414,13 @@ jobs:
         with:
           junit: reports/rerun.xml
           name: unit
+          server-url: ${{ secrets.GREENLIGHT_URL }}
+          server-token: ${{ secrets.GREENLIGHT_TOKEN }}
 ```
 
 The rerun lands as a second attempt on the same commit, so a pass there is a recorded flip and the second report (and the PR comment) says PASS.
 
-Actions jobs start with an empty disk, so the history lives in your repo: each job restores every record from the `greenlight-data` branch into a fresh DB, adds its own run, gates, and pushes its record back (records have unique names, so parallel jobs never conflict). It writes the verdict to the job summary and edits a single comment on the pull request. `fail-on` decides what fails the job: `real` (default, only REAL_FAILURE), `any`, or `never`. A matrix entry counts as its own environment, so a test that always fails on one Python and passes on another isn't called flaky.
+Each job sends its run to your [greenlight server](#run-a-server), which judges it against everything it has seen and answers with the decision. The Action writes that to the job summary, its outputs and a single comment on the pull request. Add the server's address and token as the repo's `GREENLIGHT_URL` and `GREENLIGHT_TOKEN` secrets. Without them, each job is judged on its own results, with no flake history to go on. `fail-on` decides what fails the job: `real` (default, only REAL_FAILURE), `any`, or `never`. A matrix entry counts as its own environment, so a test that always fails on one Python and passes on another isn't called flaky.
 
 Use either the Action or JUnit artifact sync (`[actions] junit_artifacts`) for a given workflow, not both, or each run is counted twice.
 
@@ -460,7 +461,7 @@ db = "~/.greenlight/your-repo.db"
 repo = "owner/name"              # default: parsed from the clone's origin
 
 [git]
-path = "."                       # the local clone: data branch, release notes, lead time
+path = "."                       # the local clone: release notes, lead time, a test ledger
 
 [actions]
 enabled = true
@@ -484,8 +485,6 @@ min_flips = 2
 endpoint = "http://localhost:4318"
 # service_name = "your-repo"
 
-[ci]
-data_branch = "greenlight-data"
 
 [run]
 junit = "reports/*.xml"          # what `greenlight run` records (default: any JUnit XML the tests write)
@@ -501,7 +500,8 @@ Environment variables:
 | Variable | What |
 | --- | --- |
 | `GREENLIGHT_REPO` | `owner/name` for `greenlight mcp` and `greenlight serve` to read from GitHub |
-| `GREENLIGHT_MCP_TOKEN` | the HTTP server's token |
+| `GREENLIGHT_URL` | a greenlight server for `greenlight run`, `playtest gate` and `ci report` to send runs to |
+| `GREENLIGHT_TOKEN` | that server's token: the server reads it, and so do the clients |
 | `GREENLIGHT_HOME` | where greenlight keeps its clones, databases and `config.toml` (default `~/.greenlight`; `/data` in the container) |
 | `GREENLIGHT_DB` | one database file, overriding everything else |
 | `GREENLIGHT_CONFIG` | one `greenlight.toml`, overriding the lookup |
@@ -517,8 +517,8 @@ Some projects run tests outside CI (in coding-agent sessions, on a laptop) and c
 
 - Polling, not streaming: data is as fresh as the last `sync`.
 - Read from GitHub (Claude Desktop, connectors, the container), data is up to 10 minutes old, and a fresh server's first answer waits on its first sync (a few seconds for a small repo; a busy one can take a minute, and the tool says to try again).
-- Test runs recorded with `greenlight run` stay in the database of the machine that ran them. CI runs are shared through the data branch, and playtest ledgers through git.
-- The repo is the backup. The data branch grows by a few KB per CI job.
+- Without a server, runs recorded with `greenlight run` stay in the database of the machine that ran them, and CI jobs are judged on their own results.
+- A server is one container with SQLite on its disk: one copy, no failover. Back up the database file.
 - The OTel CI/CD conventions are still in development upstream, so attribute names may change in later releases.
 - One repo per DB. Point `db` at a different file per project.
 - `greenlight otel receive` takes JSON only (set `encoding: json` on the Collector's otlphttp exporter); protobuf would need a dependency the CLI otherwise avoids.

@@ -1,5 +1,5 @@
-"""CI smoke test for the container: the HTTP MCP server answers with the token, refuses without it,
-and reads the repo from GitHub. Usage: smoke_mcp.py <base url> <token> <owner/name>"""
+"""CI smoke test for the container: the server answers MCP and the dashboard API with the token, refuses
+without it, and reads the repo from GitHub. Usage: smoke_mcp.py <base url> <token> <owner/name>"""
 import asyncio
 import json
 import sys
@@ -29,6 +29,9 @@ for _ in range(60):
     except OSError:
         time.sleep(1)
 assert status(base + "/mcp") == 401, "a request without the token got in"
+dash = urllib.request.Request(base + "/api/runs", headers={"Authorization": f"Bearer {token}"})
+with urllib.request.urlopen(dash, timeout=30) as r:  # the dashboard API on the same port
+    assert r.status == 200 and "runs" in json.loads(r.read()), "dashboard API"
 
 
 async def overview() -> str:

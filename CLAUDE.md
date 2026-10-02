@@ -11,11 +11,12 @@ CI/CD observability on OpenTelemetry, built from git, GitHub and test reports. I
 - `github.py`: stdlib REST client and token resolution. `ghsync.py`: PRs, issues, Actions, deployments. `sync.py`: runs every configured source, each isolated.
 - `delivery.py`: pipeline, DORA, PR and issue analytics.
 - `issues.py`: plans and applies one GitHub issue per flaky test and perf regression.
-- `ci.py` + `action.yml`: GitHub Actions history on the `greenlight-data` branch, gate, step summary, PR comment.
+- `ci.py` + `action.yml`: record a job's JUnit results, gate (on the server when `server-url` is set), step summary, outputs, PR comment.
 - `otel.py`: OTLP/HTTP JSON export (traces and metrics, semantic conventions) and receive/import.
-- `config.py`: `greenlight.toml`. `cli.py`: every command. `server.py`: MCP over stdio (`greenlight mcp`) and streamable HTTP (`greenlight serve`). Checkout mode reads the project the agent works in (a user-scoped Claude Code server starts in `~/.claude`, so it finds the project from `CLAUDE_PROJECT_DIR`); repo mode (`--repo`, `GREENLIGHT_REPO`) reads a GitHub repo through `remote.py`. `setup.py`: `greenlight setup` (config, Claude Code user scope, `--project` files, `--claude-desktop`, `--codex`, agent rules).
+- `config.py`: `greenlight.toml`. `cli.py`: every command. `server.py`: the MCP tools, over stdio (`greenlight mcp`) or inside `hosted.py`. Checkout mode reads the project the agent works in (a user-scoped Claude Code server starts in `~/.claude`, so it finds the project from `CLAUDE_PROJECT_DIR`); repo mode (`--repo`, `GREENLIGHT_REPO`) reads a GitHub repo through `remote.py`. `setup.py`: `greenlight setup` (config, Claude Code user scope, `--project` files, `--claude-desktop`, `--codex`, agent rules).
+- `hosted.py`: `greenlight serve`, the hosted server: MCP, the dashboard and its `/api`, `POST /api/records` (runs sent by clients, answered with the gate's decision) and OTLP, on one port behind one token (Bearer header, URL path, or a cookie from `/?token=`). `client.py`: `GREENLIGHT_URL` + `GREENLIGHT_TOKEN`; `greenlight run`, `playtest gate` and `ci report` record into a throwaway DB, send the run as a record (`ci.export_run`), and print the server's decision.
 - `remote.py`: repo mode. A cache clone per repo under `GREENLIGHT_HOME` (blobless, no checkout), the config for it (a committed greenlight.toml, else guesses), and the `Refresher` that syncs it in the background.
-- `Dockerfile` + the `container` CI job: the image on ghcr.io, smoke-tested with `.github/scripts/smoke_mcp.py` before it's published. `web.py` + `dashboard.py` + `ui/index.html`: dashboard and `--export` snapshot.
+- `Dockerfile` + `docker-entrypoint.sh` + the `container` CI job: the image on ghcr.io, smoke-tested with `.github/scripts/smoke_mcp.py` before it's published. `deploy/server/docker-compose.yml`: the one deploy example. Nothing host-specific goes in this repo: the README documents what any host needs. `web.py` + `dashboard.py` + `ui/index.html`: dashboard and `--export` snapshot.
 - `forecast.py`: optional Toto 2.0 forecasts.
 - `deploy/otel/`: local Grafana (otel-lgtm) behind a Collector. `integrations/survive-project/`: worked example.
 - `demo.py`: synthetic history for every view (`greenlight demo`).
@@ -32,6 +33,7 @@ Tests use a fake GitHub (`tests/fakegithub.py`), a fake OTLP collector and a loc
 
 ## Decisions worth knowing
 
+- History lives in a database: one on each machine, or one shared server. Nothing greenlight records is written to git or GitHub. It only reads from them (records a project commits itself, like survive-project's playtest ledger, are that project's choice). Clients send runs to the server as records keyed by external id, so resending or later syncing the same run adds nothing, and the server recomputes the attempt number against its own history.
 - A run's `commit_sha` is the identity of the code tested, not always a plain commit: `<sha>+<hash>` when it had uncommitted edits (playtest records), `<sha>@<name>` for a matrix entry in CI. The plain commit is in `git_commit`. Flips only count on identical code.
 - Gate: quarantined failures are ignored, known/suspect flaky failures get a targeted rerun, new tests and tests without flake history block. A flaky test that fails 3+ times on one commit without passing is treated as real. `new_test` only applies to runs that name every result (`total_tests IS NULL`).
 - GitHub tokens come from `GREENLIGHT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` or `gh auth token`, and are never stored or printed. Artifact downloads drop the token on the redirect off GitHub.
@@ -43,7 +45,7 @@ Tests use a fake GitHub (`tests/fakegithub.py`), a fake OTLP collector and a loc
 - The CLI imports only the standard library (the Action installs with `--no-deps`); `mcp`/`pydantic` are for the MCP server, Toto is optional.
 - Project MCP config (`setup --project`) starts the server with `uvx`, never a binary a SessionStart hook installs: Claude Code starts project MCP servers before hooks run (measured in a cloud session: the servers started 0.1 s before the hook, which took 13 s to install).
 - Partial clones fetch blobs one round trip each in `cat-file`, so `Repo.read_blobs` prefetches them in one `git fetch` (68 playtest records: 33 s down to under 1 s). Git calls go through `gitrepo.run_git`, which carries a cache clone's token in the environment, never in a config file.
-- The HTTP server takes its token in the URL path because claude.ai and ChatGPT connectors can't send an API key header; access logs are off so the token never lands in a log.
+- The server takes its token in the URL path too because claude.ai and ChatGPT connectors can't send an API key header; access logs are off so the token never lands in a log. A cookie-authenticated POST also needs `X-Greenlight: 1`, which a cross-site form can't send. The image starts as root only to hand a root-owned `/data` volume to the `greenlight` user, then drops root (`setpriv`).
 - Windows: paths handed to git are made relative with forward slashes (`gitrepo._rel`), JSON files are read as `utf-8-sig`, and the Action converts `RUNNER_TEMP` to forward slashes and uses `python` (`python3` can be the Store stub). Subprocesses the server starts get `stdin=DEVNULL`: a stdio server's stdin is the protocol pipe, and on Windows a child inheriting it hangs while another thread reads it. Paths in test TOML go through `as_posix()`, since TOML strings treat a backslash as an escape.
 
 ## Writing conventions

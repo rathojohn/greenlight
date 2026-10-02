@@ -1,8 +1,7 @@
-# greenlight in a container. By default it serves MCP over HTTP for claude.ai and ChatGPT connectors:
-#   docker run -p 8000:8000 -e GREENLIGHT_REPO=owner/name -e GREENLIGHT_MCP_TOKEN=<secret> \
-#     -e GITHUB_TOKEN=<token, for a private repo> ghcr.io/rathojohn/greenlight
-# Any CLI command works too, like the stdio server for Claude Desktop:
-#   docker run -i --rm -e GITHUB_TOKEN ghcr.io/rathojohn/greenlight mcp --repo owner/name
+# greenlight in a container. By default it's the server: MCP, the dashboard and the ingest API on port
+# 8000 (or $PORT), with its database in /data. Mount a volume there to keep the history. It needs
+# GREENLIGHT_REPO, GREENLIGHT_TOKEN, and GITHUB_TOKEN for a private repo. Any CLI command works in place
+# of the default, like `mcp --repo owner/name` (with `docker run -i`) for the stdio server.
 FROM python:3.12-slim
 
 LABEL org.opencontainers.image.source="https://github.com/rathojohn/greenlight" \
@@ -20,7 +19,8 @@ COPY greenlight /src/greenlight
 RUN pip install --no-cache-dir /src && rm -rf /src
 
 RUN useradd --create-home --uid 10001 greenlight && mkdir /data && chown greenlight /data
-USER greenlight
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
 WORKDIR /home/greenlight
 
 # Cache clones and the DB live in /data: mount a volume there to keep them across restarts.
@@ -28,5 +28,5 @@ ENV GREENLIGHT_HOME=/data PYTHONUNBUFFERED=1
 VOLUME /data
 EXPOSE 8000
 
-ENTRYPOINT ["greenlight"]
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["serve", "--host", "0.0.0.0"]

@@ -1,20 +1,16 @@
-"""greenlight in CI: keep history on a data branch, gate on it, and report on the pull request.
+"""greenlight in CI: record a job's results, gate on them, and report on the pull request.
 
-GitHub Actions jobs start with an empty disk, so each run's results are saved as a small record file
-(runs/YYYY/MM/<id>.json.gz) on a branch in the same repo, `greenlight-data` by default. A job restores
-every record into a fresh DB, adds its own, gates, and pushes its record back. Records have unique
-names, so concurrent jobs never conflict. `greenlight sync` reads the same branch on your machine.
+Jobs start with an empty disk, so the history lives on a greenlight server (`greenlight serve`): with
+GREENLIGHT_URL and GREENLIGHT_TOKEN set, `report` sends the job's run there and uses its decision. Without
+a server, the job is judged on its own results alone.
 
-  greenlight ci restore --dir DIR                      ingest every record under DIR
-  greenlight ci record --junit 'reports/*.xml' --dir DIR [--name py3.12]
+  greenlight ci record --junit 'reports/*.xml' [--name py3.12]
   greenlight ci report [--pr-comment] [--name py3.12]  step summary, outputs, PR comment
 """
 from __future__ import annotations
 
-import gzip
 import json
 import os
-import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -22,12 +18,9 @@ from typing import Any
 from . import analysis
 from .db import parse_time
 from .github import GitHub, GitHubError
-from .gitrepo import Repo
 from .ingest import TestResult, assign_retries, parse_junit, record_run
 
 RECORD_VERSION = 1
-RECORDS_DIR = "runs"
-_SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def actions_env() -> dict[str, Any]:
@@ -58,10 +51,6 @@ def actions_env() -> dict[str, Any]:
 
 
 # ---------- records ----------
-def record_path(external_id: str, started_at: str) -> str:
-    return f"{RECORDS_DIR}/{started_at[:4]}/{started_at[5:7]}/{_SAFE.sub('_', external_id)}.json.gz"
-
-
 def export_run(conn: sqlite3.Connection, run_id: int) -> dict[str, Any]:
     run = dict(conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone())
     results = [[r["test_id"], r["file"], r["outcome"], r["duration_ms"], r["retry"], r["failure_sig"], r["message"],
@@ -71,17 +60,6 @@ def export_run(conn: sqlite3.Connection, run_id: int) -> dict[str, Any]:
     keep = ("external_id", "commit_sha", "branch", "source", "started_at", "duration_ms", "git_commit", "total_tests",
             "session", "command", "url")
     return {"greenlight_record": RECORD_VERSION, **{k: run[k] for k in keep}, "results": results, "metrics": metrics}
-
-
-def write_record(conn: sqlite3.Connection, run_id: int, out_dir: str) -> str:
-    rec = export_run(conn, run_id)
-    if not rec["external_id"]:
-        raise ValueError("only runs with an external id can be saved as records")
-    rel = record_path(rec["external_id"], rec["started_at"])
-    path = Path(out_dir) / rel
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(gzip.compress(json.dumps(rec, separators=(",", ":")).encode(), mtime=0))
-    return rel
 
 
 def load_record(conn: sqlite3.Connection, data: dict[str, Any]) -> bool:
@@ -97,47 +75,8 @@ def load_record(conn: sqlite3.Connection, data: dict[str, Any]) -> bool:
     return created
 
 
-def _decode(raw: bytes) -> dict[str, Any] | None:
-    try:
-        return json.loads(gzip.decompress(raw) if raw[:2] == b"\x1f\x8b" else raw)
-    except (OSError, ValueError):
-        return None
-
-
-def restore_dir(conn: sqlite3.Connection, directory: str) -> dict[str, int]:
-    root = Path(directory) / RECORDS_DIR
-    files = sorted(root.rglob("*.json.gz")) + sorted(root.rglob("*.json")) if root.is_dir() else []
-    known = {r[0] for r in conn.execute("SELECT external_id FROM runs WHERE external_id IS NOT NULL")}
-    added = 0
-    for f in files:
-        data = _decode(f.read_bytes())
-        if data and data.get("external_id") not in known and load_record(conn, data):
-            added += 1
-    return {"records": len(files), "added": added}
-
-
-def restore_branch(conn: sqlite3.Connection, repo: Repo, branch: str, remote: str = "origin",
-                   fetch: bool = True) -> dict[str, Any]:
-    """Read records straight from the data branch in a local clone, without checking it out."""
-    fetched = repo.fetch(remote, branch) if fetch else False
-    ref = f"refs/remotes/{remote}/{branch}"
-    if not repo.resolve(ref):
-        return {"records": 0, "added": 0, "fetched": fetched, "note": f"no {branch} branch yet"}
-    tree = {p: b for p, b in repo.ls_tree(ref, RECORDS_DIR).items() if p.endswith((".json.gz", ".json"))}
-    known = {r[0] for r in conn.execute("SELECT external_id FROM runs WHERE external_id IS NOT NULL")}
-    have = {_SAFE.sub("_", k) for k in known}  # file names come from external ids, so skip those unread
-    wanted = {p: b for p, b in tree.items() if Path(p).name.split(".json")[0] not in have}
-    blobs = repo.read_blobs(sorted(set(wanted.values())))
-    added = 0
-    for path in sorted(wanted):
-        data = _decode(blobs.get(wanted[path], b""))
-        if data and data.get("external_id") not in known and load_record(conn, data):
-            added += 1
-    return {"records": len(tree), "added": added, "fetched": fetched}
-
-
 def record_junit(conn: sqlite3.Connection, files: list[str], name: str | None = None, sha: str | None = None,
-                 branch: str | None = None, out_dir: str | None = None) -> dict[str, Any]:
+                 branch: str | None = None) -> dict[str, Any]:
     env = actions_env()
     results: list[TestResult] = []
     for f in files:
@@ -161,10 +100,7 @@ def record_junit(conn: sqlite3.Connection, files: list[str], name: str | None = 
     run_id, created = record_run(conn, assign_retries(results), commit_sha=code, branch=branch or env["branch"],
                                  source="ci", external_id=ext, session=session, url=env["url"],
                                  git_commit=sha if name else None)
-    out = {"run_id": run_id, "created": created, "results": len(results), "external_id": ext}
-    if out_dir:
-        out["record"] = write_record(conn, run_id, out_dir)
-    return out
+    return {"run_id": run_id, "created": created, "results": len(results), "external_id": ext}
 
 
 def job_external_id(env: dict[str, Any], name: str | None) -> str:
@@ -259,9 +195,14 @@ def upsert_pr_comment(gh: GitHub, pr: int, body: str, name: str | None = None) -
 
 
 def report(conn: sqlite3.Connection, run_id: int | None = None, sha: str | None = None, name: str | None = None,
-           gh: GitHub | None = None, pr: int | None = None, window_days: int = analysis.DEFAULT_WINDOW_DAYS) -> dict[str, Any]:
-    t = analysis.triage_run(conn, run_id=run_id, commit_sha=sha, window_days=window_days)
-    md = report_markdown(t, name, issue_links(conn, [f["test_id"] for f in t["failures"]]), gh.repo if gh else None)
+           gh: GitHub | None = None, pr: int | None = None, window_days: int = analysis.DEFAULT_WINDOW_DAYS,
+           triage: dict[str, Any] | None = None, links: dict[str, int] | None = None) -> dict[str, Any]:
+    """Gate a run and write the step summary, outputs and PR comment. triage and links: a decision a
+    greenlight server already made (it holds the history; this job's database only has this run)."""
+    t = triage or analysis.triage_run(conn, run_id=run_id, commit_sha=sha, window_days=window_days)
+    if links is None:
+        links = issue_links(conn, [f["test_id"] for f in t["failures"]])
+    md = report_markdown(t, name, links, gh.repo if gh else None)
     out = {"triage": t, "markdown": md, "summary_written": write_step_summary(md),
            "outputs_written": write_outputs({"decision": t["decision"], "exit-code": t["exit_code"],
                                              "rerun-tests": " ".join(t["rerun_tests"]),

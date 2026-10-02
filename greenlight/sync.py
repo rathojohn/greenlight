@@ -7,12 +7,12 @@ from typing import Any, Callable
 
 import os
 
-from . import ci, ghsync, otel, playtest
+from . import ghsync, otel, playtest
 from .config import Config
 from .github import GitHub, GitHubError, resolve_token
 from .gitrepo import Repo
 
-SOURCES = ("playtest", "records", "pulls", "issues", "actions", "deployments", "otel")
+SOURCES = ("playtest", "pulls", "issues", "actions", "deployments", "otel")
 
 
 def plan(cfg: Config, only: set[str] | None = None) -> list[str]:
@@ -20,8 +20,6 @@ def plan(cfg: Config, only: set[str] | None = None) -> list[str]:
     out = []
     if "playtest" in want and cfg.playtest_enabled:
         out.append("playtest")
-    if "records" in want and cfg.git_path:
-        out.append("records")
     if cfg.repo:
         out += [s for s in ("pulls", "issues") if s in want]
         if "actions" in want and cfg.get("actions", "enabled"):
@@ -57,8 +55,6 @@ def run(conn: sqlite3.Connection, cfg: Config, only: set[str] | None = None,
                 res = playtest.sync(conn, cfg.git_path, cfg.get("playtest", "runs_dir"),
                                     cfg.get("playtest", "known_failures"),
                                     cfg.resolve_path(cfg.sections.get("playtest", {}).get("report")))
-            elif source == "records":
-                res = ci.restore_branch(conn, git, cfg.get("ci", "data_branch")) if git else {"records": 0}
             elif source == "pulls":
                 res = ghsync.sync_pulls(conn, gh, days)
             elif source == "issues":

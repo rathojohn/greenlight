@@ -6,9 +6,8 @@ on:
   pull_request:
 
 permissions:
-  contents: write        # greenlight saves each run's record to the greenlight-data branch
-  pull-requests: write   # and keeps one comment on the pull request
-  issues: read           # quarantine labels on flaky-test issues
+  contents: read
+  pull-requests: write   # greenlight keeps one comment on the pull request
 
 jobs:
   test:
@@ -35,6 +34,9 @@ jobs:
           junit: reports/junit.xml
           name: ${{ matrix.name }}
           pr-comment: ${{ matrix.comment && 'true' || 'false' }}
+          # where the history lives; with these unset, each job is judged on its own results
+          server-url: ${{ secrets.GREENLIGHT_URL }}
+          server-token: ${{ secrets.GREENLIGHT_TOKEN }}
 
   container:
     runs-on: ubuntu-latest
@@ -55,13 +57,13 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install "mcp>=2.2"
-      - name: Smoke test the image (CLI, then the HTTP MCP server reading this repo from GitHub)
+      - name: Smoke test the image (CLI, then the server reading this repo from GitHub)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           docker run --rm greenlight:test --version
           docker run -d --name gl -p 8000:8000 -e GREENLIGHT_REPO="$GITHUB_REPOSITORY" \
-            -e GREENLIGHT_MCP_TOKEN=ci-token -e GITHUB_TOKEN="$GH_TOKEN" greenlight:test
+            -e GREENLIGHT_TOKEN=ci-token -e GITHUB_TOKEN="$GH_TOKEN" greenlight:test
           python .github/scripts/smoke_mcp.py http://127.0.0.1:8000 ci-token "$GITHUB_REPOSITORY" || { docker logs gl; exit 1; }
       - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/setup-qemu-action@v3

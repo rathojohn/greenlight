@@ -1,0 +1,23 @@
+# A greenlight server on any machine with Docker. Needs a .env file next to this one with
+# GREENLIGHT_REPO, GREENLIGHT_TOKEN and GITHUB_TOKEN (the README has a command that writes it).
+# `docker compose up -d`, then put HTTPS in front: your host's, or a reverse proxy you run.
+services:
+  greenlight:
+    image: ghcr.io/rathojohn/greenlight:latest
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      GREENLIGHT_REPO: ${GREENLIGHT_REPO}
+      GREENLIGHT_TOKEN: ${GREENLIGHT_TOKEN}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    volumes:
+      - greenlight-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  greenlight-data:
