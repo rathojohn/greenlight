@@ -1,11 +1,11 @@
 # greenlight
 
-CI/CD observability on OpenTelemetry for people who won't pay for a platform. Its core is a gate that decides whether a red test run is a real failure or a known flaky test, built on the rule that a test which both passed and failed on the same code is flaky. Around that: GitHub sync (Actions, PRs, issues, deployments), DORA metrics, OTLP export and receive, a local dashboard, an MCP server, a GitHub Action, and issues per flaky test. The README is the user-facing doc.
+CI/CD observability on OpenTelemetry, built from git, GitHub and test reports. Its core is a gate that decides whether a red test run is a real failure or a known flaky test, built on the rule that a test which both passed and failed on the same code is flaky. Around that: GitHub sync (Actions, PRs, issues, deployments), DORA metrics, OTLP export and receive, a local dashboard, an MCP server, a GitHub Action, and issues per flaky test. The README is the user-facing doc.
 
 ## Layout
 
 - `greenlight/schema.sql` + `db.py`: SQLite schema (v3) and migrations. Columns added after a table first shipped go in both `schema.sql` and `db.MIGRATIONS`, and `SCHEMA_VERSION` goes up. Read-only opens upgrade an old DB first.
-- `ingest.py`: JUnit XML parsing and `record_run`, the one way runs get written.
+- `ingest.py`: JUnit XML parsing and `record_run`, the one way runs get written. `ingest_checkout` keys a local run by `gitrepo.Repo.identity` (HEAD plus a hash of uncommitted edits, reports excluded); `greenlight run` and the `greenlight_gate_junit` MCP tool both use it.
 - `analysis.py`: flake stats, `triage_run` (the gate), quarantine, sweep, read-only SQL.
 - `playtest.py`: adapter for a test ledger committed to git (survive-project's `tools/playtest/runs`). Infers passes for watched checks; a crashed suite infers nothing.
 - `github.py`: stdlib REST client and token resolution. `ghsync.py`: PRs, issues, Actions, deployments. `sync.py`: runs every configured source, each isolated.
@@ -13,7 +13,7 @@ CI/CD observability on OpenTelemetry for people who won't pay for a platform. It
 - `issues.py`: plans and applies one GitHub issue per flaky test and perf regression.
 - `ci.py` + `action.yml`: GitHub Actions history on the `greenlight-data` branch, gate, step summary, PR comment.
 - `otel.py`: OTLP/HTTP JSON export (traces and metrics, semantic conventions) and receive/import.
-- `config.py`: `greenlight.toml`. `cli.py`: every command. `server.py`: MCP (stdio). `web.py` + `dashboard.py` + `ui/index.html`: dashboard and `--export` snapshot.
+- `config.py`: `greenlight.toml`. `cli.py`: every command. `server.py`: MCP (stdio); a user-scoped server starts in `~/.claude`, so it finds the project from `CLAUDE_PROJECT_DIR`. `setup.py`: `greenlight setup` (config, `claude mcp add` at user scope with this install's interpreter, Codex config, agent rules). `web.py` + `dashboard.py` + `ui/index.html`: dashboard and `--export` snapshot.
 - `forecast.py`: optional Toto 2.0 forecasts.
 - `deploy/otel/`: local Grafana (otel-lgtm) behind a Collector. `integrations/survive-project/`: worked example.
 - `demo.py`: synthetic history for every view (`greenlight demo`).

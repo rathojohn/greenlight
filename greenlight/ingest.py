@@ -7,6 +7,7 @@ Retries are picked up two ways:
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import sqlite3
 import xml.etree.ElementTree as ET
@@ -166,3 +167,15 @@ def ingest_files(conn: sqlite3.Connection, paths: list[str | Path], **run_fields
     assign_retries(results)
     run_id, created = record_run(conn, results, **run_fields)
     return run_id, created, len(results)
+
+
+def ingest_checkout(conn: sqlite3.Connection, paths: list[str], repo_path: str, commit_sha: str | None = None,
+                    branch: str | None = None, **run_fields) -> tuple[int, bool, int]:
+    """Record reports as a run of the code in a local checkout: HEAD, plus a hash of any uncommitted
+    edits (the reports themselves left out), so reruns of the same code can flip and edits can't."""
+    from .gitrepo import Repo
+    here = Repo(repo_path).identity(exclude={os.path.abspath(p) for p in paths}) if not commit_sha else None
+    if not commit_sha and not here:
+        raise ValueError(f"{repo_path} is not a git checkout: pass the commit SHA")
+    code, sha, head_branch = here or (commit_sha, commit_sha, None)
+    return ingest_files(conn, paths, commit_sha=code, branch=branch or head_branch, git_commit=sha, **run_fields)

@@ -1,5 +1,4 @@
-"""Keep one GitHub issue per flaky test and per perf regression, the way Datadog's flaky test
-management keeps a case per test.
+"""Keep one GitHub issue per flaky test and per perf regression.
 
 `greenlight issues` plans; `--apply` does it:
   create   a flaky test (flipped on min_flips+ commits) or a slower-than-base check with no issue yet

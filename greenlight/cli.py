@@ -1,7 +1,9 @@
 """greenlight CLI.
 
   greenlight demo --db demo.db                 synthetic history to try every view on
-  greenlight init                              write greenlight.toml for the repo you're in
+  greenlight setup                             greenlight.toml, plus the MCP server in Claude Code (--codex too)
+  greenlight run -- <test command>             run tests, record the JUnit report, gate it
+  greenlight init                              just write greenlight.toml for the repo you're in
   greenlight auth                              where the GitHub token comes from, and what it can do
   greenlight sync                              pull git and GitHub data into the DB (greenlight.toml)
   greenlight ingest --sha $SHA reports/*.xml   record a run
@@ -91,54 +93,124 @@ def cmd_trends(a: argparse.Namespace) -> int:
 
 
 def cmd_init(a: argparse.Namespace) -> int:
-    from .gitrepo import Repo
+    from .setup import config_text
     target = Path(a.path or ".").resolve()
     out = target / config.FILE_NAME
     if out.exists() and not a.force:
         print(f"{out} already exists (--force to overwrite)")
         return 3
-    repo = Repo(str(target))
-    gh_repo = config.remote_repo(str(target)) if repo.ok() else None
-    has_playtest = (target / "tools/playtest/runs").is_dir()
-    has_release = bool(repo.ok() and (repo.resolve("refs/remotes/origin/release") or repo.resolve("refs/heads/release")))
-    has_notes = (target / "docs/patch-notes").is_dir()
-    name = (gh_repo or target.name).split("/")[-1]
-    lines = [
-        "# greenlight config. Every key is optional; `greenlight sync` reads this.",
-        "# The GitHub token never goes here: see `greenlight auth`.",
-        f'db = "~/.greenlight/{name}.db"',
-        "",
-        "[github]",
-        f'repo = "{gh_repo}"' if gh_repo else '# repo = "owner/name"',
-        "",
-        "[playtest]",
-        f"enabled = {'true' if has_playtest else 'false'}   # tools/playtest/runs records in git",
-        "",
-        "[actions]",
-        "enabled = true",
-        'junit_artifacts = "junit*"   # artifact names to ingest as test runs',
-        "days = 30",
-        "",
-        "[delivery]",
-        "# Pick the one that marks a release in this repo.",
-        (f'deploy_files = "docs/patch-notes/20??-??-??-*.md"   # each one added on main is a release (git only)'
-         if has_notes else '# deploy_files = "CHANGELOG/*.md"   # each file added on the default branch is a release'),
-        (f'{"# " if has_notes or not has_release else ""}deploy_branch = "release"   # every push to it is a deployment '
-         "(needs a token)"),
-        '# deploy_environment = "production"   # GitHub Deployments API',
-        "# deploy_releases = true               # GitHub Releases",
-        'incident_labels = ["incident", "hotfix", "bug"]',
-        "",
-        "[issues]",
-        'flaky_label = "flaky-test"',
-        'perf_label = "perf-regression"',
-        'quarantine_label = "quarantined"   # label a flaky-test issue with it to quarantine the test',
-        "",
-    ]
-    out.write_text("\n".join(lines), encoding="utf-8")
+    out.write_text(config_text(target), encoding="utf-8")
     print(f"wrote {out}")
     print("next: `greenlight auth` to check GitHub access, then `greenlight sync` and `greenlight ui`")
     return 0
+
+
+def cmd_setup(a: argparse.Namespace) -> int:
+    import importlib.util
+    from . import setup
+    target = Path(a.path or ".").resolve()
+    out = target / config.FILE_NAME
+    if out.exists():
+        print(f"config: {out} already exists; left it alone")
+    elif a.dry_run:
+        print(f"config: would write {out}")
+    else:
+        out.write_text(setup.config_text(target), encoding="utf-8")
+        print(f"config: wrote {out}")
+    if importlib.util.find_spec("mcp") is None:
+        print("MCP: the mcp package isn't installed here, so the server can't start. Reinstall greenlight with its "
+              "dependencies (no --no-deps).")
+    if not a.no_claude:
+        print("Claude Code: " + setup.claude_mcp(a.dry_run))
+    if a.codex:
+        print("Codex: " + (f"would add to ~/.codex/config.toml:\n{setup.codex_snippet()}" if a.dry_run else setup.codex_mcp()))
+    has_rules = any(setup.RULES_MARKER in (target / n).read_text(encoding="utf-8")
+                    for n in ("CLAUDE.md", "AGENTS.md") if (target / n).is_file())
+    if a.agent_rules and not a.dry_run:
+        for line in setup.write_agent_rules(target):
+            print("agent rules: " + line)
+    elif not has_rules:
+        print("agent rules: add this to CLAUDE.md or AGENTS.md (or rerun with --agent-rules to append it):\n")
+        print(setup.AGENT_RULES)
+    note = setup.env_note()
+    if note:
+        print(note)
+    print("next: `greenlight auth`, `greenlight sync`, then `greenlight ui`. Tests: `greenlight run -- <test command>`")
+    return 0
+
+
+JUNIT_SKIP = {".git", "node_modules", ".venv", "venv", "__pycache__", ".tox", ".mypy_cache", ".pytest_cache"}
+
+
+def _fresh_reports(root: str, since: float) -> list[str]:
+    """JUnit XML files written under root since the run started, when no --junit was given."""
+    import os
+    found = []
+    for d, dirs, files in os.walk(root):
+        dirs[:] = [x for x in dirs if x not in JUNIT_SKIP]
+        for f in files:
+            path = os.path.join(d, f)
+            if not f.endswith(".xml") or os.path.getmtime(path) < since:
+                continue
+            with open(path, "rb") as fh:
+                if b"<testsuite" in fh.read(4096):
+                    found.append(path)
+    return sorted(found)
+
+
+def _with_pytest_report(cmd: list[str], out_dir: str) -> tuple[list[str], str | None]:
+    """pytest writes JUnit XML only when asked; ask, unless the command already does."""
+    import os
+    is_pytest = any(os.path.basename(c) == "pytest" for c in cmd[:4])  # pytest, python -m pytest, uv run pytest
+    if not is_pytest or any(c.startswith("--junitxml") or c.startswith("--junit-xml") for c in cmd):
+        return cmd, None
+    report = os.path.join(out_dir, "junit.xml")
+    return [*cmd, f"--junitxml={report}"], report
+
+
+def cmd_run(a: argparse.Namespace) -> int:
+    import os
+    import shutil
+    import subprocess
+    import tempfile
+    import time
+    from .ingest import ingest_checkout
+    cmd = a.command[1:] if a.command[:1] == ["--"] else a.command
+    if not cmd:
+        raise ValueError("give the test command after --, e.g. greenlight run -- npm test")
+    junit = a.junit
+    if not junit and a.cfg.get("run", "junit"):  # [run] junit, relative to greenlight.toml
+        conf = a.cfg.get("run", "junit")
+        junit = [str(a.cfg.base / g) for g in ([conf] if isinstance(conf, str) else conf)]
+    with tempfile.TemporaryDirectory(prefix="greenlight-") as tmp:
+        cmd, pytest_report = _with_pytest_report(cmd, tmp) if not junit else (cmd, None)
+        before = {f: os.path.getmtime(f) for f in _expand(junit) if os.path.isfile(f)} if junit else {}
+        started = time.time() - 1  # coarse mtimes on some filesystems
+        code = subprocess.run([shutil.which(cmd[0]) or cmd[0], *cmd[1:]]).returncode
+        if junit:  # only reports this run wrote, never the last run's
+            files = [f for f in _expand(junit) if os.path.isfile(f) and before.get(f) != os.path.getmtime(f)]
+        elif pytest_report:
+            files = [pytest_report] if os.path.isfile(pytest_report) else []
+        else:
+            files = _fresh_reports(".", started)
+        if not files:
+            print(f"error: the tests exited {code} but wrote no new JUnit XML greenlight could find. Point --junit at "
+                  "the report, or turn on the runner's JUnit reporter.", file=sys.stderr)
+            return code or 3
+        with closing(connect(a.db)) as conn:
+            run_id, _, n = ingest_checkout(conn, files, ".", a.sha, a.branch, source=a.source)
+            t = analysis.triage_run(conn, run_id=run_id, window_days=a.window_days)
+    if a.json:
+        print(json.dumps({**t, "recorded": {"run_id": run_id, "results": n, "command_exit": code}}, indent=2, default=str))
+        return t["exit_code"]
+    print(f"greenlight: recorded run {run_id} ({n} results)")
+    _print_triage(t)
+    if t["rerun_tests"]:
+        print("rerun only:", " ".join(t["rerun_tests"]))
+    if code and t["decision"] == "PASS":
+        print(f"note: the command exited {code} with no failing tests in the report; check its output")
+        return code
+    return t["exit_code"]
 
 
 def cmd_auth(a: argparse.Namespace) -> int:
@@ -402,6 +474,25 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--force", action="store_true")
     s.set_defaults(fn=cmd_init)
 
+    s = sub.add_parser("setup", help="greenlight.toml, plus the MCP server in Claude Code (and Codex) for this repo")
+    s.add_argument("path", nargs="?", help="repo folder (default: here)")
+    s.add_argument("--codex", action="store_true", help="also add the server to ~/.codex/config.toml")
+    s.add_argument("--agent-rules", action="store_true", help="append the gate rule to CLAUDE.md / AGENTS.md")
+    s.add_argument("--no-claude", action="store_true", help="skip registering with Claude Code")
+    s.add_argument("--dry-run", action="store_true", help="say what would change, change nothing")
+    s.set_defaults(fn=cmd_setup)
+
+    s = sub.add_parser("run", help="run tests, record the JUnit report and gate it: greenlight run -- <test command>")
+    s.add_argument("--junit", nargs="+", help="report files or globs (default: [run] junit, else any JUnit XML the "
+                                              "command writes; pytest gets --junitxml added)")
+    s.add_argument("--sha", help="default: HEAD, plus a hash of uncommitted edits")
+    s.add_argument("--branch")
+    s.add_argument("--source", default="local", help="local, agent, ci...")
+    s.add_argument("--window-days", type=int, default=analysis.DEFAULT_WINDOW_DAYS)
+    s.add_argument("--json", action="store_true")
+    s.add_argument("command", nargs=argparse.REMAINDER)
+    s.set_defaults(fn=cmd_run)
+
     s = sub.add_parser("auth", help="show where the GitHub token comes from and what it can do")
     s.set_defaults(fn=cmd_auth)
 
@@ -526,7 +617,7 @@ def main(argv: list[str] | None = None) -> int:
 
     a = p.parse_args(argv)
     try:
-        a.cfg = config.load(a.config) if a.cmd != "init" else config.Config()
+        a.cfg = config.load(a.config) if a.cmd not in ("init", "setup") else config.Config()
         set_config_db(a.cfg.db)
         return a.fn(a)
     except (LookupError, ValueError, FileNotFoundError, RuntimeError) as e:

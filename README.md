@@ -1,18 +1,17 @@
 # greenlight
 
-CI/CD observability on OpenTelemetry, for when you can't (or won't) pay for a platform.
+CI/CD observability on OpenTelemetry, built from git, GitHub and your test reports.
 
 greenlight answers one question after every red test run: is this real, or is it the same flaky test again? Around that it tracks flaky tests, CI pipelines, deployments and DORA metrics from git and GitHub, sends all of it to any OpenTelemetry backend as traces and metrics, and gives you a local dashboard and an MCP server so Claude Code or Codex can ask it before rerunning anything.
 
 - [How it works](#how-it-works)
-- [Quick start](#quick-start)
+- [Set up](#set-up)
+- [Claude Code, Codex and other agents](#claude-code-codex-and-other-agents)
 - [OpenTelemetry](#opentelemetry)
 - [How auth works](#how-auth-works)
 - [GitHub: sync, issues and CI](#github-sync-issues-and-ci)
 - [The gate](#the-gate)
 - [Dashboard](#dashboard)
-- [MCP server for coding agents](#mcp-server-for-coding-agents)
-- [Datadog feature map](#datadog-feature-map)
 - [Configuration](#configuration)
 - [Limits](#limits)
 
@@ -23,7 +22,7 @@ greenlight answers one question after every red test run: is this real, or is it
  ───────                         ──────────                          ───
  JUnit XML (any runner)   ─┐                                  ┌─> OTLP traces + metrics
  OTLP test / CI spans     ─┤     SQLite index                 │   (Grafana, Tempo, Jaeger,
- GitHub API: Actions,     ─┼──>  gate: PASS / RERUN / REAL ───┤    Honeycomb, Datadog, ...)
+ GitHub API: Actions,     ─┼──>  gate: PASS / RERUN / REAL ───┤    Honeycomb, SigNoz, ...)
    PRs, issues, deploys    │     flake stats, quarantine      ├─> local dashboard
  git: run records on a    ─┤     pipelines, DORA              ├─> MCP server (agents)
    data branch, release    │                                  ├─> GitHub issues per flaky test
@@ -32,63 +31,151 @@ greenlight answers one question after every red test run: is this real, or is it
 
 The core idea: **a flaky test is one that both passed and failed on the same code.** That's counting, not machine learning. Every rerun of the same commit is evidence, so greenlight keeps every run and decides what a new failure means from that history.
 
-## Quick start
+## Set up
 
-Needs Python 3.11 or newer. The `python3` that ships with macOS is 3.9, which is too old (pip then fails with "No matching distribution found for mcp"). [uv](https://docs.astral.sh/uv/) fetches a current Python for you.
+### 1. Install it once
+
+Needs Python 3.11 or newer. The easy way is [uv](https://docs.astral.sh/uv/): it fetches a current Python for you (the `python3` on macOS is 3.9, which is too old) and puts `greenlight` on your PATH for every folder, so there's one install for all your repos.
 
 macOS or Linux:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source $HOME/.local/bin/env
-uv venv -p 3.12 .venv
-source .venv/bin/activate
-uv pip install "greenlight @ git+https://github.com/rathojohn/greenlight"
+uv tool install --python 3.12 "greenlight @ git+https://github.com/rathojohn/greenlight"
 ```
 
-Windows PowerShell:
+Windows PowerShell (open a new terminal after the first line so PATH picks up uv):
 
 ```powershell
-py -3.12 -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install "greenlight @ git+https://github.com/rathojohn/greenlight"
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+uv tool install --python 3.12 "greenlight @ git+https://github.com/rathojohn/greenlight"
 ```
 
-If you already have Python 3.11 or newer, a plain venv and `pip install` work too. The CLI and dashboard use only the standard library; the MCP server needs `mcp`, which installs with it.
+It doesn't update itself. To get the latest:
 
-Try it on fake data first. `greenlight demo` writes 60 days of runs, pipelines, releases, pull requests and issues into a separate file:
+```bash
+uv tool upgrade greenlight
+```
+
+Then restart any open Claude Code or Codex sessions so they load the new MCP server. Nothing else needs redoing.
+
+Already installed it into a venv with pip? That still works; `greenlight setup` registers whichever install you run it from. `uv tool install` just means one copy instead of one per folder.
+
+### 2. Try it on fake data (optional)
+
+`greenlight demo` writes 60 days of runs, pipelines, releases, pull requests and issues into a separate file:
 
 ```bash
 greenlight demo --db demo.db
 greenlight --db demo.db gate
-greenlight --db demo.db flaky
 greenlight --db demo.db ui
 ```
 
 `gate` reports REAL_FAILURE (one stable test broke on the last commit) and exits 1. `ui` opens the dashboard at http://127.0.0.1:8765.
 
-On a real repo:
+### 3. Point it at a repo
 
 ```bash
 cd your-repo
-greenlight init
+greenlight setup
 greenlight auth
 greenlight sync
 greenlight ui
 ```
 
-`init` writes a `greenlight.toml` with what it can guess, `auth` shows where the GitHub token comes from and what it can do, and `sync` pulls runs, PRs, issues, Actions and deployments (and exports to OTel if an endpoint is set).
+`setup` is safe to run again. It:
 
-After a local test run, record it and gate on it:
+- writes `greenlight.toml` with what it can guess from the clone (GitHub repo, release branch or notes, a test ledger), unless there is one already. It has no secrets, so commit it or ignore it, either works.
+- registers the MCP server with Claude Code for every project on this machine (`--codex` adds it to Codex too, `--no-claude` skips it).
+- prints a short rule for `CLAUDE.md` / `AGENTS.md` that tells agents to record test runs and follow the gate (`--agent-rules` appends it for you).
+
+`auth` shows where the GitHub token comes from and what it can do, `sync` pulls PRs, issues, Actions runs and deployments (and exports to OTel if an endpoint is set), and `ui` opens the dashboard.
+
+### 4. Record your test runs
+
+Put `greenlight run --` in front of your test command:
 
 ```bash
-greenlight ingest reports/*.xml --sha $(git rev-parse HEAD) --branch $(git branch --show-current)
-greenlight gate --sha $(git rev-parse HEAD)
+greenlight run -- pytest
+greenlight run -- npm test
 ```
 
-`gate` exits 0 for PASS, 2 for RERUN_TARGETED, 1 for REAL_FAILURE and 3 for an error.
+It runs the tests, records the JUnit report and gates it, then exits 0 for PASS, 2 for RERUN_TARGETED, 1 for REAL_FAILURE, or 3 if something went wrong (like no report). It picks up any JUnit XML the command writes, and adds `--junitxml` for pytest by itself. If the report lands somewhere odd, pass `--junit "reports/*.xml"` or set `[run] junit` in `greenlight.toml`.
 
-Any runner that writes JUnit XML works: pytest `--junitxml`, vitest `--reporter=junit`, jest-junit, Playwright's junit reporter, go-junit-report, Surefire.
+Record passing runs too. A test only counts as flaky once the same code has both passed and failed, so the passes are half the evidence. "The same code" is your commit plus any uncommitted edits: rerun without touching anything and a flip shows up, edit a file and that's new code with no history yet.
+
+Any runner that writes JUnit XML works: pytest, vitest `--reporter=junit`, jest with jest-junit, Playwright's junit reporter, `go test` through go-junit-report, Maven Surefire. `greenlight ingest` and `greenlight gate` are the same thing in two steps, for scripts that already have the report.
+
+### 5. Add it to CI
+
+See [CI with the GitHub Action](#ci-with-the-github-action). CI runs land in the same history, so a test that flaked in CI is known to be flaky on your laptop too, once you `sync`.
+
+## Claude Code, Codex and other agents
+
+`greenlight setup` covers the usual case. Here's what it does, if you'd rather do it by hand.
+
+Claude Code, available in every project:
+
+```bash
+claude mcp add --transport stdio --scope user greenlight -- ~/.local/share/uv/tools/greenlight/bin/python -m greenlight.server
+```
+
+That path is where `uv tool install` puts it on macOS and Linux. `greenlight setup --dry-run` prints the exact command for your install, Windows included.
+
+Codex, in `~/.codex/config.toml` (what `greenlight setup --codex` adds):
+
+```toml
+[mcp_servers.greenlight]
+command = "/Users/you/.local/share/uv/tools/greenlight/bin/python"
+args = ["-m", "greenlight.server"]
+```
+
+One server covers every repo. Claude Code tells it which project the session is in, and Codex starts it in the project folder, so it reads that repo's `greenlight.toml` for the DB and settings. Restart open sessions after `setup` or an upgrade.
+
+For a team, a project-scoped `.mcp.json` in the repo works too, as long as everyone has greenlight installed (`uv tool install` puts `greenlight-mcp` on PATH). Claude Code asks each person once before starting it:
+
+```json
+{
+  "mcpServers": {
+    "greenlight": { "type": "stdio", "command": "greenlight-mcp" }
+  }
+}
+```
+
+Claude Code on the web and other cloud sessions start from a fresh container every time, so the server registered on your laptop isn't there. Install greenlight in a SessionStart hook and have the agent use the CLI (`greenlight run -- <test command>`). `integrations/survive-project/` has a working hook and skill.
+
+### What agents should do
+
+This is the rule `setup` prints (and `--agent-rules` writes):
+
+```
+## Test failures (greenlight)
+Record every test run with greenlight, passing or not (passes are the history that tells a flaky test
+from a broken one), and on a failure follow its decision before rerunning anything. In a shell:
+`greenlight run -- <test command>`. With the MCP server: call greenlight_gate_junit with the run's
+JUnit report (or greenlight_playtest_gate for a playtest ledger).
+- PASS: nothing that counts failed. Carry on.
+- RERUN_TARGETED: only tests with a flake history failed. Rerun just those, once. No full regression.
+- REAL_FAILURE: a test with no flake history failed. Investigate it; a full regression only after a fix.
+Never quarantine or release a test, or apply issue changes, without saying why.
+```
+
+In practice: the agent runs the tests through greenlight, reruns only the flaky ones when that's all that broke, and digs in when something real broke. You can also just ask it things like "what's flaky this week?", "why did CI go red on main?" or "how are deploys looking?" and it answers from the tools below.
+
+| Tool | Writes | Purpose |
+| --- | --- | --- |
+| greenlight_gate_junit | local DB | record a JUnit report from the project and return the decision, in one call |
+| greenlight_triage_run | no | the gate's decision for a run already recorded, with per-failure detail |
+| greenlight_playtest_gate | local DB | sync a test ledger in git, then gate the run just made |
+| greenlight_list_flaky, greenlight_test_history | no | ranked flaky tests; one test's history |
+| greenlight_quarantine / _unquarantine, greenlight_sweep | local DB | manage quarantine |
+| greenlight_pipelines | no | workflow health, flaky and slow jobs |
+| greenlight_delivery | no | DORA, PR flow, issue backlog |
+| greenlight_issues | GitHub, only with apply=true | plan or apply the flaky-test and perf issues |
+| greenlight_sync | local DB, reads GitHub | pull everything configured |
+| greenlight_duration_regressions, greenlight_suite_forecast | no | Toto forecasts |
+| greenlight_query | no | read-only SQL over every table |
 
 ## OpenTelemetry
 
@@ -229,7 +316,7 @@ jobs:
           name: unit
 ```
 
-That's Datadog-style auto test retries without the agent: the rerun lands as a second attempt on the same commit, so a pass there is a recorded flip and the second report (and the PR comment) says PASS.
+The rerun lands as a second attempt on the same commit, so a pass there is a recorded flip and the second report (and the PR comment) says PASS.
 
 Actions jobs start with an empty disk, so the history lives in your repo: each job restores every record from the `greenlight-data` branch into a fresh DB, adds its own run, gates, and pushes its record back (records have unique names, so parallel jobs never conflict). It writes the verdict to the job summary and edits a single comment on the pull request. `fail-on` decides what fails the job: `real` (default, only REAL_FAILURE), `any`, or `never`. A matrix entry counts as its own environment, so a test that always fails on one Python and passes on another isn't called flaky.
 
@@ -248,16 +335,7 @@ Use either the Action or JUnit artifact sync (`[actions] junit_artifacts`) for a
 - `new_signature: true` means a flaky test failed with a message it hasn't produced before. It still reruns, but look at it.
 - `sweep` lists quarantine candidates and quarantined tests with 10+ clean runs in 14 days. It never releases anything by itself.
 
-Tell your agents, in `CLAUDE.md` and `AGENTS.md`:
-
-```
-## Test failures
-After any test run, record it (`greenlight ingest`) and run `greenlight gate`, or call greenlight_triage_run.
-- PASS: continue.
-- RERUN_TARGETED: rerun only the listed tests, once. No full regression.
-- REAL_FAILURE: investigate the blocking tests. Full regression only after a fix.
-Never quarantine a test or apply issue changes without telling me why.
-```
+Agents follow the same rules: see [What agents should do](#what-agents-should-do).
 
 ## Dashboard
 
@@ -267,61 +345,12 @@ Never quarantine a test or apply issue changes without telling me why.
 - **Flaky tests**, **test pages** (results by commit, duration, failure messages, measured numbers against a baseline, linked issues, quarantine controls), **Runs** and **run pages** (why each failure did or didn't block).
 - **Pipelines**: runs per day, per-workflow success rate, p50/p95 duration and queue time, flaky and slow jobs, and a job waterfall per run.
 - **Delivery**: the four DORA numbers, the deployments behind them, pull request flow and the issue backlog.
-- **Trends**: forecasts from [Toto 2.0](https://github.com/DataDog/toto) (optional, `pip install "greenlight[toto]"`, Python 3.12+): rerun churn, failure rate and suite duration with a 7-day band, and tests running slower than forecast.
+- **Trends**: forecasts from the Toto 2.0 time series model (optional, `pip install "greenlight[toto]"`, Python 3.12+): rerun churn, failure rate and suite duration with a 7-day band, and tests running slower than forecast.
 - **Quarantine**: suggestions, what's quarantined, what's clean enough to release.
-
-## MCP server for coding agents
-
-```bash
-claude mcp add greenlight -e GREENLIGHT_DB=$HOME/.greenlight/your-repo.db -- /path/to/.venv/bin/python -m greenlight.server
-```
-
-Codex (`~/.codex/config.toml`):
-
-```toml
-[mcp_servers.greenlight]
-command = "/path/to/.venv/bin/python"
-args = ["-m", "greenlight.server"]
-env = { GREENLIGHT_DB = "/home/you/.greenlight/your-repo.db" }
-```
-
-Started in a repo with a `greenlight.toml`, the server picks up that config.
-
-| Tool | Writes | Purpose |
-| --- | --- | --- |
-| greenlight_triage_run | no | the gate's decision with per-failure detail |
-| greenlight_playtest_gate | local DB | sync a test ledger in git, then gate the run just made |
-| greenlight_list_flaky, greenlight_test_history | no | ranked flaky tests; one test's history |
-| greenlight_quarantine / _unquarantine, greenlight_sweep | local DB | manage quarantine |
-| greenlight_pipelines | no | workflow health, flaky and slow jobs |
-| greenlight_delivery | no | DORA, PR flow, issue backlog |
-| greenlight_issues | GitHub, only with apply=true | plan or apply the flaky-test and perf issues |
-| greenlight_sync | local DB, reads GitHub | pull everything configured |
-| greenlight_duration_regressions, greenlight_suite_forecast | no | Toto forecasts |
-| greenlight_query | no | read-only SQL over every table |
-
-## Datadog feature map
-
-Built against what Datadog's CI/CD products do, with the gaps stated plainly.
-
-| Datadog | greenlight | Gap |
-| --- | --- | --- |
-| CI Pipeline Visibility | Pipelines view; every attempt, job and step as OTel traces | polls after the fact (or the Collector's webhook receiver); no live in-progress view; no log search |
-| Test Optimization: flaky test management | the gate, flake scores, quarantine, one issue per flaky test, quarantine by label | no per-test ownership |
-| Auto test retries | the Action's `rerun-names` output and a second record step; retried passes count as flips | you wire the rerun step |
-| Early flake detection | `new_test` blocks, `new_signature` flags | new tests aren't run several times automatically |
-| Test impact analysis | not built | |
-| Quality gates | `gate` and the Action's `fail-on` | one rule set, not configurable per repo |
-| DORA metrics | Delivery view and `greenlight.dora.*` metrics | incidents come from issue labels, not an incident tool |
-| Code coverage | not built | |
-| Monitors and alerts | not built here | alert on the exported metrics in your backend |
-| Bits AI | MCP server for Claude Code and Codex | |
-
-If you need several of the gaps, the honest answer is a paid tool. For one person or a small team, this covers the part that wastes the most time: rerunning everything because one test is flaky.
 
 ## Configuration
 
-`greenlight.toml` is looked up in this folder or a parent, then `~/.greenlight/config.toml`; `--config` and `$GREENLIGHT_CONFIG` override. Every key is optional. `greenlight init` writes one.
+`greenlight.toml` is looked up in this folder or a parent (for the MCP server, the project the agent is working in), then `~/.greenlight/config.toml`; `--config` and `$GREENLIGHT_CONFIG` override. Every key is optional. `greenlight setup` (or just `greenlight init`) writes one.
 
 ```toml
 db = "~/.greenlight/your-repo.db"
@@ -357,6 +386,9 @@ endpoint = "http://localhost:4318"
 [ci]
 data_branch = "greenlight-data"
 
+[run]
+junit = "reports/*.xml"          # what `greenlight run` records (default: any JUnit XML the tests write)
+
 [playtest]                       # a test ledger committed to git, see below
 enabled = false
 ```
@@ -373,6 +405,10 @@ Some projects run tests outside CI (in coding-agent sessions, on a laptop) and c
 - One repo per DB. Point `db` at a different file per project.
 - `greenlight otel receive` takes JSON only (set `encoding: json` on the Collector's otlphttp exporter); protobuf would need a dependency the CLI otherwise avoids.
 - Toto forecasts need about two weeks of daily data before they mean anything.
+- No live view of runs in progress, and no log search.
+- New tests aren't run several times up front to shake out flakes; a new test that fails just blocks.
+- Change failure rate counts incidents from issue labels, not an incident tool.
+- Not built: test impact analysis, code coverage, per-test ownership, alerting. For alerts, alert on the exported metrics in your OTel backend.
 
 ## License
 
