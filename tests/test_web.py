@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.fixture(scope="module")
 def demo_db(tmp_path_factory):
     db = tmp_path_factory.mktemp("demo") / "demo.db"
-    subprocess.run([sys.executable, str(ROOT / "examples" / "seed_demo.py"), "--db", str(db), "--days", "21"],
+    subprocess.run([sys.executable, "-m", "greenlight.demo", "--db", str(db), "--days", "21"],
                    check=True, capture_output=True, cwd=ROOT, env={"PYTHONPATH": str(ROOT), "PATH": "/usr/bin:/bin"})
     return str(db)
 

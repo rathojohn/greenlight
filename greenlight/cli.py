@@ -1,5 +1,6 @@
 """greenlight CLI.
 
+  greenlight demo --db demo.db                 synthetic history to try every view on
   greenlight init                              write greenlight.toml for the repo you're in
   greenlight auth                              where the GitHub token comes from, and what it can do
   greenlight sync                              pull git and GitHub data into the DB (greenlight.toml)
@@ -359,6 +360,20 @@ def cmd_otel_import(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_demo(a: argparse.Namespace) -> int:
+    from . import demo
+    target = a.demo_db or a.db or "demo.db"
+    if Path(target).exists():
+        with closing(connect(target, readonly=True)) as conn:
+            real = conn.execute("SELECT COUNT(*) FROM runs WHERE COALESCE(source, '') NOT IN ('demo', 'playtest-report') "
+                                "OR external_id NOT LIKE 'demo-%'").fetchone()[0]
+        if real:
+            raise ValueError(f"{target} already holds real runs; pick another file for the demo, e.g. --db demo.db")
+    demo.seed(target, a.days, a.seed)
+    print(f"next: greenlight --db {target} ui")
+    return 0
+
+
 def cmd_ui(a: argparse.Namespace) -> int:
     from . import web
     web.set_incident_labels(a.cfg.get("delivery", "incident_labels"))
@@ -375,6 +390,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--db", help="SQLite path (default: $GREENLIGHT_DB, then greenlight.toml, then ~/.greenlight/greenlight.db)")
     p.add_argument("--config", help="greenlight.toml path (default: $GREENLIGHT_CONFIG, then this folder or a parent)")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("demo", help="write 60 days of synthetic history to try every view on")
+    s.add_argument("--db", dest="demo_db", help="where to write it (default: demo.db)")
+    s.add_argument("--days", type=int, default=60)
+    s.add_argument("--seed", type=int, default=7)
+    s.set_defaults(fn=cmd_demo)
 
     s = sub.add_parser("init", help="write greenlight.toml for the repo in this folder")
     s.add_argument("path", nargs="?", help="repo folder (default: here)")

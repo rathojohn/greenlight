@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def demo(tmp_path_factory):
     d = tmp_path_factory.mktemp("mcp")
     db = d / "demo.db"
-    subprocess.run([sys.executable, str(ROOT / "examples" / "seed_demo.py"), "--db", str(db), "--days", "21"],
+    subprocess.run([sys.executable, "-m", "greenlight.demo", "--db", str(db), "--days", "21"],
                    check=True, capture_output=True, cwd=ROOT, env={"PYTHONPATH": str(ROOT), "PATH": "/usr/bin:/bin"})
     return d, db
 

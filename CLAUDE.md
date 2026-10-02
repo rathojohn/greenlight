@@ -16,14 +16,14 @@ CI/CD observability on OpenTelemetry for people who won't pay for a platform. It
 - `config.py`: `greenlight.toml`. `cli.py`: every command. `server.py`: MCP (stdio). `web.py` + `dashboard.py` + `ui/index.html`: dashboard and `--export` snapshot.
 - `forecast.py`: optional Toto 2.0 forecasts.
 - `deploy/otel/`: local Grafana (otel-lgtm) behind a Collector. `integrations/survive-project/`: worked example.
-- `examples/seed_demo.py`: synthetic history for every view.
+- `demo.py`: synthetic history for every view (`greenlight demo`).
 
 ## Commands
 
 ```
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/pytest -q
-.venv/bin/python examples/seed_demo.py --db demo.db && .venv/bin/greenlight --db demo.db ui
+.venv/bin/greenlight demo --db demo.db && .venv/bin/greenlight --db demo.db ui
 ```
 
 Tests use a fake GitHub (`tests/fakegithub.py`) and a fake OTLP collector; nothing calls real GitHub or a real backend. `tests/test_otel.py` parses every exported payload with the official OTLP protobuf messages (`opentelemetry-proto`, a dev dependency).
