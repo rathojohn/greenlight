@@ -382,14 +382,16 @@ def token_usage(
     pr: Annotated[int | None, Field(description="Just this pull request number.")] = None,
     test_id: Annotated[str | None, Field(description="Just this test (exact id).")] = None,
 ) -> str:
-    """Claude Code tokens (output, input, cache reads) per pull request, counted on its branch until it merged,
-    and per test, counted while it was failing in a session. Needs the usage hook that `greenlight setup
-    --project` adds; empty until sessions with it have run."""
+    """Claude Code tokens per pull request (on its branch until it merged) and per test (while it was failing in
+    a session), with cost (`weighted`: tokens priced as input tokens) and where context went: per category
+    (file reads, test runs, images, the conversation...) the tokens added and the cache reads that carried them,
+    cache rebuilds after idle, and new work started with an earlier task still in context. Needs the usage hook
+    that `greenlight setup --project` adds; empty until sessions with it have run."""
     from . import usage
 
     def go(c: sqlite3.Connection) -> dict:
         out = usage.summary(c, window_days, pr, test_id)
-        for k in ("days", "output_per_day", "input_per_day", "cache_read_per_day"):
+        for k in ("days", "output_per_day", "input_per_day", "cache_read_per_day", "weighted_per_day"):
             out.pop(k, None)
         if "sessions" in out:
             out["sessions"] = out["sessions"][:10]

@@ -25,10 +25,14 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from . import context
 from .db import day_range, iso, norm_time, since, utcnow
 
-FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
-_USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cache_write_1h_tokens")
+# What each kind of token costs next to an input token, from Claude's API prices: output 5x, a cache read 0.1x,
+# a cache write 1.25x, or 2x when it's written for an hour (cache_write_1h_tokens is the part that was)
+WEIGHTS = {"input_tokens": 1, "output_tokens": 5, "cache_read_tokens": 0.1, "cache_write_tokens": 1.25,
+           "cache_write_1h_tokens": 0.75}
 MAX_ROWS = 50_000  # one session's minutes; a payload bigger than this isn't usage
 
 
@@ -43,41 +47,30 @@ def agent_session(env: dict[str, str] | None = None) -> dict[str, str | None]:
             "url": f"https://claude.ai/code/{remote}" if remote else None}
 
 
-def read_transcript(path: str | Path) -> list[dict[str, Any]]:
-    """One entry per API response in a session's transcript and its subagents' transcripts. A response written
-    across several lines (one per content block) repeats the same usage, so it's counted once."""
+def transcript_files(path: str | Path) -> list[tuple[Path, str]]:
+    """A session's transcript and its subagents', each with the subagent's name ('' for the session)."""
     path = Path(path)
-    files = [path, *sorted((path.parent / path.stem / "subagents").glob("*.jsonl"))]
-    seen: set[str] = set()
-    out = []
-    for f in files:
-        try:
-            lines = f.open(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        with lines:
-            for line in lines:
-                if '"usage"' not in line:
-                    continue
-                try:
-                    e = json.loads(line)
-                except ValueError:
-                    continue
-                m = e.get("message") if isinstance(e, dict) else None
-                if e.get("type") != "assistant" or not isinstance(m, dict) or not isinstance(m.get("usage"), dict):
-                    continue
-                key = m.get("id") or e.get("requestId") or e.get("uuid")
-                model = m.get("model") or "unknown"
-                if not key or key in seen or model == "<synthetic>":
-                    continue
-                seen.add(key)
-                u = m["usage"]
-                tokens = [int(u.get(k) or 0) for k in _USAGE_KEYS]
-                ts = norm_time(e.get("timestamp"))
-                if ts and any(tokens):
-                    out.append({"at": ts, "model": model, "branch": e.get("gitBranch") or "", "session": e.get("sessionId"),
-                                **dict(zip(FIELDS, tokens))})
-    return out
+    return [(path, ""), *((p, p.stem) for p in sorted((path.parent / path.stem / "subagents").glob("*.jsonl")))]
+
+
+def read_files(path: str | Path, test: str | None = None) -> list[dict[str, Any]]:
+    return [context.read_file(p, agent, test) | {"agent": agent} for p, agent in transcript_files(path)]
+
+
+def entries(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One entry per API response (read_file counts a response written across several lines once)."""
+    return [{"at": r["at"], "model": r["model"], "branch": r["branch"], "session": r["session"],
+             **{k: r[k] for k in FIELDS}} for f in files for r in f["requests"] if any(r[k] for k in FIELDS)]
+
+
+def read_transcript(path: str | Path) -> list[dict[str, Any]]:
+    """One entry per API response in a session's transcript and its subagents' transcripts."""
+    return entries(read_files(path))
+
+
+def weighted(row: dict[str, Any]) -> int:
+    """Tokens priced as input tokens: what the row cost, in the unit every model shares."""
+    return round(sum(row.get(k, 0) * w for k, w in WEIGHTS.items()))
 
 
 def minute_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -98,48 +91,84 @@ def payload_from_hook(hook: dict[str, Any], env: dict[str, str] | None = None) -
     transcript = hook.get("transcript_path")
     if not transcript:
         return None
-    entries = read_transcript(transcript)
+    repo = test = None
+    if hook.get("cwd"):
+        from . import config
+        repo = config.remote_repo(hook["cwd"])
+        try:
+            test = config.load(start=Path(hook["cwd"])).get("usage", "test_commands")
+        except (ValueError, OSError):
+            pass
+    files = read_files(transcript, test)
     me = agent_session(env)
     session_id = hook.get("session_id") or me["session_id"] or Path(transcript).stem
     remote = me["remote_session"] if me["session_id"] in (None, session_id) else None  # only for this session
-    repo = None
-    if hook.get("cwd"):
-        from .config import remote_repo
-        repo = remote_repo(hook["cwd"])
     return {"session": {"session_id": session_id, "remote_session": remote, "repo": repo,
                         "agent": "claude-code"},
-            "rows": minute_rows(entries)}
+            "rows": minute_rows(entries(files)), "context": context.rows(files),
+            "rebuilds": [r | {"agent": f["agent"]} for f in files for r in f["rebuilds"]],
+            "switches": [r | {"agent": f["agent"]} for f in files for r in f["switches"]]}
+
+
+CONTEXT_FIELDS = ("calls", "tokens", "carried_tokens", "repeat_reads", "repeat_tokens")
+
+
+def _minute(r: Any) -> str:
+    minute = norm_time(str(r.get("minute") or r.get("at") or "")) if isinstance(r, dict) else None
+    if not minute:
+        raise ValueError("every row needs a minute (ISO 8601)")
+    return minute
 
 
 def store(conn: sqlite3.Connection, payload: dict[str, Any]) -> dict[str, Any]:
     """Replace one session's usage with what the payload says (a transcript only grows, so the latest
-    report is the whole story)."""
+    report is the whole story). A payload without context or rebuilds (an older client) leaves those alone."""
     s = payload.get("session") if isinstance(payload, dict) else None
     rows = payload.get("rows") if isinstance(payload, dict) else None
-    if not isinstance(s, dict) or not s.get("session_id") or not isinstance(rows, list) or len(rows) > MAX_ROWS:
+    extra = [payload.get(k) for k in ("context", "rebuilds", "switches")] if isinstance(payload, dict) else [None] * 3
+    if (not isinstance(s, dict) or not s.get("session_id") or not isinstance(rows, list) or len(rows) > MAX_ROWS
+            or any(not isinstance(x, (list, type(None))) or len(x or ()) > MAX_ROWS for x in extra)):
         raise ValueError("send {\"session\": {\"session_id\": ...}, \"rows\": [...]}")
-    clean = []
-    for r in rows:
-        minute = norm_time(str(r.get("minute") or "")) if isinstance(r, dict) else None
-        if not minute:
-            raise ValueError("every row needs a minute (ISO 8601)")
-        clean.append((s["session_id"], minute, str(r.get("model") or "unknown"), str(r.get("branch") or ""),
-                      int(r.get("requests") or 0), *(int(r.get(f) or 0) for f in FIELDS)))
+    ctx, rebuilds, switches = extra
+    sid = s["session_id"]
+    clean = [(sid, _minute(r), str(r.get("model") or "unknown"), str(r.get("branch") or ""),
+              int(r.get("requests") or 0), *(int(r.get(f) or 0) for f in FIELDS)) for r in rows]
+    ctx_rows = [(sid, _minute(r), str(r.get("branch") or ""), str(r.get("category") or "other")[:64],
+                 *(int(r.get(f) or 0) for f in CONTEXT_FIELDS)) for r in ctx or ()]
+    rebuild_rows = [(sid, str(r.get("agent") or "")[:200], _minute(r), str(r.get("branch") or ""),
+                     int(r.get("tokens") or 0), r.get("ttl") if r.get("ttl") in ("1h", "5m") else None,
+                     int(r["idle_seconds"]) if isinstance(r.get("idle_seconds"), (int, float)) else None,
+                     str(r.get("cause") or "other")[:32]) for r in rebuilds or ()]
+    switch_rows = [(sid, str(r.get("agent") or "")[:200], _minute(r), str(r.get("from_branch") or ""),
+                    str(r.get("to_branch") or ""), int(r.get("context_tokens") or 0), int(r.get("carried_tokens") or 0))
+                   for r in switches or ()]
     first = min((c[1] for c in clean), default=None)
     last = max((c[1] for c in clean), default=None)
     with conn:
-        conn.execute("DELETE FROM agent_usage WHERE session_id = ?", (s["session_id"],))
-        conn.executemany("INSERT OR REPLACE INTO agent_usage (session_id, minute, model, branch, requests, input_tokens, "
-                         "output_tokens, cache_read_tokens, cache_write_tokens) VALUES (?,?,?,?,?,?,?,?,?)", clean)
+        conn.execute("DELETE FROM agent_usage WHERE session_id = ?", (sid,))
+        conn.executemany(f"INSERT OR REPLACE INTO agent_usage (session_id, minute, model, branch, requests, "
+                         f"{', '.join(FIELDS)}) VALUES (?,?,?,?,?{',?' * len(FIELDS)})", clean)
+        if ctx is not None:
+            conn.execute("DELETE FROM agent_context WHERE session_id = ?", (sid,))
+            conn.executemany(f"INSERT OR REPLACE INTO agent_context (session_id, minute, branch, category, "
+                             f"{', '.join(CONTEXT_FIELDS)}) VALUES (?,?,?,?{',?' * len(CONTEXT_FIELDS)})", ctx_rows)
+        if rebuilds is not None:
+            conn.execute("DELETE FROM agent_cache_rebuilds WHERE session_id = ?", (sid,))
+            conn.executemany("INSERT OR REPLACE INTO agent_cache_rebuilds (session_id, agent, at, branch, tokens, ttl, "
+                             "idle_seconds, cause) VALUES (?,?,?,?,?,?,?,?)", rebuild_rows)
+        if switches is not None:
+            conn.execute("DELETE FROM agent_task_switches WHERE session_id = ?", (sid,))
+            conn.executemany("INSERT OR REPLACE INTO agent_task_switches (session_id, agent, at, from_branch, to_branch, "
+                             "context_tokens, carried_tokens) VALUES (?,?,?,?,?,?,?)", switch_rows)
         conn.execute(
             """INSERT INTO agent_sessions (session_id, remote_session, repo, agent, first_at, last_at, updated_at)
                VALUES (?,?,?,?,?,?,?)
                ON CONFLICT(session_id) DO UPDATE SET remote_session = COALESCE(excluded.remote_session, remote_session),
                  repo = COALESCE(excluded.repo, repo), first_at = excluded.first_at, last_at = excluded.last_at,
                  updated_at = excluded.updated_at""",
-            (s["session_id"], s.get("remote_session"), s.get("repo"), s.get("agent") or "claude-code", first, last,
+            (sid, s.get("remote_session"), s.get("repo"), s.get("agent") or "claude-code", first, last,
              iso(utcnow())))
-    return {"session_id": s["session_id"], "minutes": len(clean)}
+    return {"session_id": sid, "minutes": len(clean)}
 
 
 def _sum(rows: list) -> dict[str, int]:
@@ -148,24 +177,181 @@ def _sum(rows: list) -> dict[str, int]:
         out["requests"] += r["requests"]
         for f in FIELDS:
             out[f] += r[f]
+    return out | {"weighted": weighted(out)}
+
+
+def _write_weight(conn: sqlite3.Connection, where: str = "1", args: tuple | list = ()) -> float:
+    """What a cache write cost on average here: 1.25x, up to 2x as more of them were written for an hour."""
+    w = conn.execute(f"SELECT SUM(cache_write_tokens), SUM(cache_write_1h_tokens) FROM agent_usage WHERE {where}",
+                     args).fetchone()
+    return WEIGHTS["cache_write_tokens"] + WEIGHTS["cache_write_1h_tokens"] * ((w[1] or 0) / w[0] if w[0] else 1)
+
+
+def _context_cost(r: dict[str, Any], write_weight: float) -> int:
+    return round(r["tokens"] * write_weight + r["carried_tokens"] * WEIGHTS["cache_read_tokens"])
+
+
+def _categories(rows: list[dict[str, Any]], write_weight: float) -> list[dict[str, Any]]:
+    cats: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        c = cats.setdefault(r["category"], {"category": r["category"], "sessions": set(), **{f: 0 for f in CONTEXT_FIELDS}})
+        c["sessions"].add(r["session_id"])
+        for f in CONTEXT_FIELDS:
+            c[f] += r[f]
+    out = [c | {"sessions": len(c["sessions"]), "weighted": _context_cost(c, write_weight)} for c in cats.values()]
+    total = sum(c["weighted"] for c in out) or 1
+    return sorted((c | {"share": round(c["weighted"] / total, 3)} for c in out), key=lambda c: -c["weighted"])
+
+
+def _meta(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+    out = {}
+    for r in conn.execute("SELECT session_id, remote_session, repo FROM agent_sessions"):
+        out[r[0]] = {"session_id": r[0], "remote_session": r[1], "repo": r[2],
+                     "url": f"https://claude.ai/code/{r[1]}" if r[1] else None}
     return out
 
 
-def _by_pr(conn: sqlite3.Connection, rows: list) -> tuple[list[dict[str, Any]], dict[str, int]]:
+def detail(conn: sqlite3.Connection, days: int, kind: str, key: str) -> dict[str, Any]:
+    """One thing on the Token usage page, for its side panel: a session, a pull request, a test, a context
+    category, or one kind of context that could have been dropped (switches, idle, repeats)."""
+    start = since(days)
+    meta = _meta(conn)
+    if kind == "session":
+        sid = next((m["session_id"] for m in meta.values() if key in (m["session_id"], m["remote_session"])), None)
+        if not sid:
+            raise LookupError(f"No usage recorded for session {key}")
+        rows = [dict(r) for r in conn.execute("SELECT * FROM agent_usage WHERE session_id = ? ORDER BY minute", (sid,))]
+        first, last = (rows[0]["minute"], rows[-1]["minute"]) if rows else (None, None)
+        return {"kind": kind, "session": meta[sid] | {"first_at": first, "last_at": last,
+                                                      "branches": sorted({r["branch"] for r in rows if r["branch"]}),
+                                                      "models": sorted({r["model"] for r in rows})} | _sum(rows),
+                "context": context_summary(conn, "0", {sid}), "prs": _by_pr(conn, rows)[0],
+                "rebuilds": [dict(r) for r in conn.execute(
+                    "SELECT agent, at, branch, tokens, ttl, idle_seconds, cause FROM agent_cache_rebuilds "
+                    "WHERE session_id = ? ORDER BY at", (sid,))],
+                "switches": [dict(r) for r in conn.execute(
+                    "SELECT agent, at, from_branch, to_branch, context_tokens, carried_tokens FROM agent_task_switches "
+                    "WHERE session_id = ? ORDER BY at", (sid,))]}
+    if kind == "pr":
+        pr = conn.execute("SELECT head FROM pull_requests WHERE number = ?", (int(key),)).fetchone()
+        if not pr or not pr[0]:
+            raise LookupError(f"No pull request #{key} with a branch")
+        _, by_head = _prs(conn, pr[0])
+        mine = lambda r: (_pr_for(by_head, r["branch"], r["minute"]) or {}).get("number") == int(key)  # noqa: E731
+        rows = [r for r in map(dict, conn.execute("SELECT * FROM agent_usage WHERE branch = ? ORDER BY minute", pr))
+                if mine(r)]
+        ctx = [r for r in map(dict, conn.execute("SELECT * FROM agent_context WHERE branch = ?", pr)) if mine(r)]
+        p = next(x for x in by_head[pr[0]] if x["number"] == int(key))
+        per: dict[str, list] = defaultdict(list)
+        for r in rows:
+            per[r["session_id"]].append(r)
+        sessions = sorted((meta.get(sid, {"session_id": sid}) | {"first_at": rs[0]["minute"], "last_at": rs[-1]["minute"]}
+                           | _sum(rs) for sid, rs in per.items()), key=lambda x: -x["weighted"])
+        return {"kind": kind, "pr": {k: p[k] for k in ("number", "title", "state", "head", "created_at", "merged_at", "url")}
+                | {"sessions": len(per)} | _sum(rows),
+                "context": {"categories": _categories(ctx, _write_weight(conn))}, "sessions": sessions}
+    if kind == "test":
+        return {"kind": kind, "test": summary(conn, days, test_id=key)["test"]}
+    ww = _write_weight(conn, "minute >= ?", (start,))
+    if kind == "category":
+        rows = [dict(r) for r in conn.execute("SELECT * FROM agent_context WHERE category = ? AND minute >= ?",
+                                              (key, start))]
+        per: dict[str, list] = defaultdict(list)
+        for r in rows:
+            per[r["session_id"]].append(r)
+        _, by_head = _prs(conn)
+        prs: dict[int, list] = defaultdict(list)
+        for r in rows:
+            p = _pr_for(by_head, r["branch"], r["minute"])
+            if p:
+                prs[p["number"]].append(r)
+        titles = {p["number"]: p for heads in by_head.values() for p in heads}
+        top = lambda groups, head: sorted(  # noqa: E731
+            (head(k) | _categories(v, ww)[0] | {"last_at": max(r["minute"] for r in v)} for k, v in groups.items()),
+            key=lambda x: -x["weighted"])[:10]
+        return {"kind": kind, "category": (_categories(rows, ww) or [{"category": key, "weighted": 0}])[0],
+                "sessions": top(per, lambda sid: meta.get(sid, {"session_id": sid})),
+                "prs": top(prs, lambda n: {k: titles[n][k] for k in ("number", "title", "state", "url")})}
+    if kind == "waste":
+        if key == "switches":
+            rows = [dict(r) for r in conn.execute(
+                "SELECT * FROM agent_task_switches WHERE at >= ? ORDER BY carried_tokens DESC LIMIT 20", (start,))]
+        elif key == "idle":
+            rows = [dict(r) for r in conn.execute(
+                "SELECT * FROM agent_cache_rebuilds WHERE at >= ? AND cause = 'idle' ORDER BY tokens DESC LIMIT 20",
+                (start,))]
+        elif key == "repeats":
+            rows = [dict(r) for r in conn.execute(
+                "SELECT session_id, SUM(repeat_reads) AS repeat_reads, SUM(repeat_tokens) AS repeat_tokens, "
+                "MAX(minute) AS at FROM agent_context WHERE minute >= ? AND repeat_reads > 0 GROUP BY session_id "
+                "ORDER BY SUM(repeat_tokens) DESC LIMIT 20", (start,))]
+        else:
+            raise LookupError(f"No such kind of waste: {key}")
+        for r in rows:
+            r["weighted"] = round(r.get("carried_tokens", 0) * WEIGHTS["cache_read_tokens"] if key == "switches"
+                                  else r.get("tokens", r.get("repeat_tokens", 0)) * ww)
+            r |= {k: v for k, v in meta.get(r["session_id"], {}).items() if k != "session_id"}
+        return {"kind": kind, "key": key, "rows": rows,
+                "totals": context_summary(conn, start)["task_switches" if key == "switches" else "rebuilds"]
+                if key != "repeats" else None}
+    raise LookupError(f"No such detail: {kind}")
+
+
+def context_summary(conn: sqlite3.Connection, start: str, sessions: set[str] | None = None) -> dict[str, Any]:
+    """Where context went: per category, what tool results added and what carrying them cost, priced like
+    weighted() (added tokens at the cache write price, carried ones at the cache read price); and the cache
+    rebuilds, by cause."""
+    where, args = "minute >= ?", [start]
+    if sessions is not None:
+        where += f" AND session_id IN ({','.join('?' * len(sessions))})"
+        args += sorted(sessions)
+    write_weight = _write_weight(conn, where, args)
+    cats = _categories([dict(r) for r in conn.execute(f"SELECT * FROM agent_context WHERE {where}", args)], write_weight)
+    rb_where = where.replace("minute", "at")
+    causes = [dict(r) | {"weighted": round(r["tokens"] * write_weight)} for r in conn.execute(
+        f"SELECT cause, COUNT(*) AS rebuilds, SUM(tokens) AS tokens, COUNT(DISTINCT session_id) AS sessions, "
+        f"MAX(idle_seconds) AS longest_idle FROM agent_cache_rebuilds WHERE {rb_where} GROUP BY cause "
+        "ORDER BY SUM(tokens) DESC", args)]
+    sw = conn.execute(f"SELECT COUNT(*), SUM(context_tokens), SUM(carried_tokens), COUNT(DISTINCT session_id) "
+                      f"FROM agent_task_switches WHERE {rb_where}", args).fetchone()
+    summaries = [r[0] for r in conn.execute(f"SELECT tokens FROM agent_cache_rebuilds WHERE {rb_where} "
+                                            "AND cause = 'compaction' ORDER BY tokens", args)]
+    return {"categories": cats, "repeat_reads": sum(c["repeat_reads"] for c in cats),
+            "task_switches": {"count": sw[0], "sessions": sw[3], "context_tokens": sw[1] or 0,
+                              "carried_tokens": sw[2] or 0,
+                              "weighted": round((sw[2] or 0) * WEIGHTS["cache_read_tokens"]),
+                              "compacted_to": summaries[len(summaries) // 2] if summaries else None},
+            "repeat_tokens": sum(c["repeat_tokens"] for c in cats),
+            "rebuilds": {"count": sum(c["rebuilds"] for c in causes), "tokens": sum(c["tokens"] for c in causes),
+                         "weighted": sum(c["weighted"] for c in causes), "by_cause": causes}}
+
+
+def _prs(conn: sqlite3.Connection, head: str | None = None) -> tuple[list[dict[str, Any]], dict[str, list[dict]]]:
+    where, args = ("WHERE head = ?", (head,)) if head else ("WHERE head IS NOT NULL", ())
     prs = [dict(r) for r in conn.execute(
-        "SELECT number, title, state, head, created_at, merged_at, closed_at, url FROM pull_requests "
-        "WHERE head IS NOT NULL ORDER BY created_at")]
+        f"SELECT number, title, state, head, created_at, merged_at, closed_at, url FROM pull_requests {where} "
+        "ORDER BY created_at", args)]
     by_head: dict[str, list[dict]] = defaultdict(list)
     for p in prs:
         p["end"] = p["merged_at"] or p["closed_at"] or "9999"
         by_head[p["head"]].append(p)
     for heads in by_head.values():
         heads.sort(key=lambda p: p["end"])
+    return prs, by_head
+
+
+def _pr_for(by_head: dict[str, list[dict]], branch: str, minute: str) -> dict[str, Any] | None:
+    """The pull request a minute on a branch counts toward: the first one on that head still open then."""
+    return next((p for p in by_head.get(branch, []) if minute <= p["end"]), None)
+
+
+def _by_pr(conn: sqlite3.Connection, rows: list) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    prs, by_head = _prs(conn)
     got: dict[int, list] = defaultdict(list)
     sessions: dict[int, set] = defaultdict(set)
     loose = []
     for r in rows:
-        pr = next((p for p in by_head.get(r["branch"], []) if r["minute"] <= p["end"]), None)
+        pr = _pr_for(by_head, r["branch"], r["minute"])
         if pr:
             got[pr["number"]].append(r)
             sessions[pr["number"]].add(r["session_id"])
@@ -233,7 +419,7 @@ def _by_test(conn: sqlite3.Connection, rows: list, start: str) -> list[dict[str,
                     charge(sid, test, red.pop(test), started, False)
         for test, began in red.items():
             charge(sid, test, began, None, True)
-    tests = [t | {"sessions": len(t["sessions"])} for t in out.values()]
+    tests = [t | {"sessions": len(t["sessions"]), "weighted": weighted(t)} for t in out.values()]
     return sorted(tests, key=lambda t: -t["output_tokens"])
 
 
@@ -269,7 +455,9 @@ def summary(conn: sqlite3.Connection, days: int = 30, pr: int | None = None,
         "output_per_day": [daily[d]["output_tokens"] for d in days_],
         "input_per_day": [daily[d]["input_tokens"] + daily[d]["cache_write_tokens"] for d in days_],
         "cache_read_per_day": [daily[d]["cache_read_tokens"] for d in days_],
+        "weighted_per_day": [weighted(daily[d]) for d in days_],
         "totals": _sum(rows) | {"sessions": len(per_session)},
+        "context": context_summary(conn, start),
         "models": sorted(({"model": k} | _sum(v) for k, v in models.items()), key=lambda m: -m["output_tokens"]),
         "by_pr": by_pr, "unattributed": unattributed, "by_test": by_test, "sessions": sessions[:50],
     }

@@ -66,6 +66,7 @@ GET_ROUTES: dict[str, Callable[[sqlite3.Connection, Params], Any]] = {
         c, analysis.resolve_test_id(c, _require(p, "id"))),
     "/api/trends/durations": lambda c, p: _forecast().duration_regressions(c, include_series=30),
     "/api/usage": lambda c, p: usage.summary(c, _int(p, "days", 30)),
+    "/api/usage/detail": lambda c, p: usage.detail(c, _int(p, "days", 30), _require(p, "kind"), _require(p, "key")),
     "/api/session": lambda c, p: {"auth": "local"},  # the hosted server answers this itself (cookie, bearer...)
     "/api/trends/suite": lambda c, p: _forecast().suite_forecast(
         c, p.get("metric", "reruns"), history_days=60, lookback_days=90),
