@@ -133,7 +133,7 @@ def test_stdio_server_reads_the_repo_with_no_checkout(hosted, tmp_path):
     out = json.loads(text)
     assert "greenlight_overview" in names and not {"greenlight_gate_junit", "greenlight_playtest_gate"} & names
     assert out["repo"] == "acme/game" and out["source"] == "GitHub (acme/game)"
-    assert out["flaky_tests"][0]["test_id"] == "smoke::the Lantern points at the foe it locked on"
+    assert out["flaky_tests"][0]["test_id"] == "smoke::the cart total includes tax"
     assert out["quarantined_tests"] == 1 and "playtest" in out["synced"]
 
 
@@ -210,5 +210,5 @@ def test_checkout_mode_fills_a_fresh_db_on_first_use(game, tmp_path):  # noqa: F
     out = json.loads(text)
     assert {"greenlight_gate_junit", "greenlight_playtest_gate"} <= names  # a checkout can record runs
     assert out["source"] == f"checkout at {repo}" and "playtest" in out["synced"]
-    assert out["flaky_tests"][0]["test_id"] == "smoke::the Lantern points at the foe it locked on"
+    assert out["flaky_tests"][0]["test_id"] == "smoke::the cart total includes tax"
     assert (tmp_path / "glhome" / "greenlight.db").is_file()

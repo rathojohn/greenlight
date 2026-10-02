@@ -380,7 +380,7 @@ def playtest_gate(
     repo_path: Annotated[str | None, Field(description="The game's clone. Default: [git] path or the server's folder.")] = None,
     window_days: WindowDays = analysis.DEFAULT_WINDOW_DAYS,
 ) -> str:
-    """For a playtest ledger (tools/playtest/runs records in git, like survive-project): read every record on
+    """For a playtest ledger (tools/playtest/runs records committed to git): read every record on
     every branch, then triage the run just made in this checkout. Returns the same decision as
     greenlight_triage_run plus rerun_command, the exact command that reruns only the flaky suites."""
     from . import playtest

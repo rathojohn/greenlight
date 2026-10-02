@@ -33,13 +33,13 @@ def test_init_writes_a_config_the_loader_accepts(game, no_token, capsys):  # noq
 def test_playtest_gate_exit_codes(game, no_token, tmp_path, capsys):  # noqa: F811
     repo, head = game
     db = str(tmp_path / "x.db")
-    lantern = "the Lantern points at the foe it locked on"
+    check_id = "the cart total includes tax"
     write_record(repo, record("2026-10-02T05:00:00.000Z", head, {
-        "smoke": {"pass": False, "checks": 38, "failed": [lantern]}}, changed={"b": "2"}))
+        "smoke": {"pass": False, "checks": 38, "failed": [check_id]}}, changed={"b": "2"}))
     write_record(repo, record("2026-10-02T05:10:00.000Z", head, {"smoke": {"pass": True, "checks": 38}},
                               changed={"b": "2"}))
     write_record(repo, record("2026-10-02T06:00:00.000Z", head, {
-        "smoke": {"pass": False, "checks": 38, "failed": [lantern]}}, changed={"c": "3"}))
+        "smoke": {"pass": False, "checks": 38, "failed": [check_id]}}, changed={"c": "3"}))
     code = cli.main(["--db", db, "playtest", "gate", "--repo", str(repo)])
     out = capsys.readouterr().out
     assert code == 2, out

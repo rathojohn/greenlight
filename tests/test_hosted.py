@@ -139,13 +139,13 @@ def test_playtest_gate_is_judged_by_the_server(server, game, monkeypatch, tmp_pa
     base, db = server
     repo, head = game
     use_server(monkeypatch, base)
-    lantern = "the Lantern points at the foe it locked on"
+    check_id = "the cart total includes tax"
     write_record(repo, record("2026-10-02T05:00:00.000Z", head, {
-        "smoke": {"pass": False, "checks": 38, "failed": [lantern]}}, changed={"b": "2"}))
+        "smoke": {"pass": False, "checks": 38, "failed": [check_id]}}, changed={"b": "2"}))
     write_record(repo, record("2026-10-02T05:10:00.000Z", head, {"smoke": {"pass": True, "checks": 38}},
                               changed={"b": "2"}))
     write_record(repo, record("2026-10-02T06:00:00.000Z", head, {
-        "smoke": {"pass": False, "checks": 38, "failed": [lantern]}}, changed={"c": "3"}))
+        "smoke": {"pass": False, "checks": 38, "failed": [check_id]}}, changed={"c": "3"}))
     assert cli.main(["--db", str(tmp_path / "local.db"), "playtest", "gate", "--repo", str(repo)]) == 2
     assert "rerun only: node tools/playtest/run.cjs smoke --rerun" in capsys.readouterr().out
     with closing(connect(str(db), readonly=True)) as conn:

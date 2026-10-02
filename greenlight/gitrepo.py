@@ -74,7 +74,7 @@ class Repo:
 
     def dirty(self, exclude: set[str] | None = None) -> dict[str, str | None]:
         """{path from the repo root: content hash, or None if deleted} for every file that differs from
-        HEAD, untracked ones included (ignored ones not). Mirrors survive-project's ledger.cjs.
+        HEAD, untracked ones included (ignored ones not), the way a test ledger records them.
         exclude: files to leave out (absolute, or from the repo root), like the report being recorded."""
         top = self.git("rev-parse", "--show-toplevel", check=False).strip()
         if not top:

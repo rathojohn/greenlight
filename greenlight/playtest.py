@@ -1,5 +1,5 @@
-"""Adapter for a playtest ledger: run records committed to git, like survive-project's
-tools/playtest/runs/<time>-<commit>.json (see its tools/playtest/ledger.cjs).
+"""Adapter for a playtest ledger: run records committed to git, one JSON file per run in
+tools/playtest/runs/<time>-<commit>.json, written by the project's own test runner.
 
 A record names the commit a run started on, the files that were uncommitted then (by content
 hash), and per suite whether it passed, how many checks ran, and which failed or ran slower than
