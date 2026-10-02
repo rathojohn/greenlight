@@ -24,8 +24,8 @@ It runs on macOS, Linux and Windows (CI tests all three) and in a container.
  sources                         greenlight                          out
  ───────                         ──────────                          ───
  JUnit XML (any runner)   ─┐     one database:                ┌─> OTLP traces + metrics
- OTLP test / CI spans     ─┤     your machine, or a server    │   (Grafana, Tempo, Jaeger,
- GitHub API: Actions,     ─┼──>  gate: PASS / RERUN / REAL ───┤    Honeycomb, SigNoz, ...)
+ OTLP test / CI spans     ─┤     your machine, or a server    │   (any OTLP backend)
+ GitHub API: Actions,     ─┼──>  gate: PASS / RERUN / REAL ───┤
    PRs, issues, deploys    │     flake stats, quarantine      ├─> dashboard
  git: release notes,      ─┘     pipelines, DORA              ├─> MCP server (agents)
    a test ledger                                              ├─> GitHub issues per flaky test
@@ -325,13 +325,7 @@ Trace ids are derived from the run, so sending the same run twice gives the same
 
 The standard variables decide: `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4318`), `OTEL_EXPORTER_OTLP_HEADERS` for auth, `OTEL_SERVICE_NAME` (default: the repo name) and `OTEL_RESOURCE_ATTRIBUTES`. Or set `[otel] endpoint` in `greenlight.toml`. Keys and tokens only ever go in the environment.
 
-| Backend | Setup |
-| --- | --- |
-| Local Grafana (Tempo, Prometheus, Loki) | `docker compose -f deploy/otel/docker-compose.yml up -d`, then open http://localhost:3000. Keeps what your disk keeps. |
-| Grafana Cloud | endpoint from your stack's OTLP page; `OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic%20<base64 of instance:token>"` |
-| Honeycomb | endpoint `https://api.honeycomb.io`, `OTEL_EXPORTER_OTLP_HEADERS="x-honeycomb-team=<key>"` |
-| Datadog | an Agent with OTLP ingest enabled on 4318. The spans arrive as ordinary APM traces. |
-| Anything else | an OpenTelemetry Collector in front of it |
+Any OTLP/HTTP endpoint works. To browse it locally, `docker compose -f deploy/otel/docker-compose.yml up -d` starts Grafana with Tempo, Prometheus and Loki on http://localhost:3000, keeping what your disk keeps. For anything that doesn't take OTLP over HTTP, put an OpenTelemetry Collector in front of it.
 
 greenlight keeps its own history in SQLite either way, so a short backend retention only limits what you can browse there, not what the gate knows.
 
