@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "greenlight"
+version = "0.2.0"
+description = "CI/CD observability on OpenTelemetry: flaky-test gate, pipelines, DORA, GitHub sync, OTLP export, local dashboard and MCP server"
+requires-python = ">=3.11"
+dependencies = ["mcp>=1.9", "pydantic>=2"]
+
+[project.optional-dependencies]
+toto = ["toto-models"]  # Toto 2.0, needs Python 3.12+
+dev = ["pytest>=8", "opentelemetry-proto>=1.20"]  # the proto package checks OTLP payloads in tests
+
+[project.scripts]
+greenlight = "greenlight.cli:main"
+greenlight-mcp = "greenlight.server:main"
+
+[tool.setuptools]
+packages = ["greenlight"]
+
+[tool.setuptools.package-data]
+greenlight = ["schema.sql", "ui/index.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: write        # greenlight saves each run's record to the greenlight-data branch
+  pull-requests: write   # and keeps one comment per job on the pull request
+  issues: read           # quarantine labels on flaky-test issues
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -e ".[dev]"
+      # greenlight decides whether a red run fails the job, so the test step itself doesn't
+      - run: pytest -q --junitxml=reports/junit.xml
+        continue-on-error: true
+      - uses: ./
+        with:
+          junit: reports/junit.xml
+          name: py${{ matrix.python }}

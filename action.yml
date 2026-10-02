@@ -1,0 +1,137 @@
+name: greenlight
+description: Record test results, gate on their flake history, and report on the pull request. History lives on a branch in your own repo.
+branding:
+  icon: activity
+  color: orange
+
+inputs:
+  junit:
+    description: JUnit XML files or globs, space separated
+    required: true
+  name:
+    description: Tells matrix jobs apart (py3.12, chrome...). Each name gets its own PR comment.
+    default: ""
+  data-branch:
+    description: Branch that holds the run records. Created on first use.
+    default: greenlight-data
+  pr-comment:
+    description: Add or update a comment on the pull request
+    default: "true"
+  fail-on:
+    description: "real: fail only on REAL_FAILURE. any: also fail when only flaky tests failed. never: report only."
+    default: real
+  token:
+    description: Needs contents write (data branch), pull-requests write (comment), issues read (quarantine labels)
+    default: ${{ github.token }}
+  otlp-endpoint:
+    description: OTLP/HTTP base URL. When set, this job's test run is also sent there as a trace. Put any auth header in an OTEL_EXPORTER_OTLP_HEADERS secret.
+    default: ""
+
+outputs:
+  decision:
+    description: PASS, RERUN_TARGETED or REAL_FAILURE
+    value: ${{ steps.report.outputs.decision }}
+  rerun-tests:
+    description: Space-separated test ids (classname::name) to rerun when the decision is RERUN_TARGETED
+    value: ${{ steps.report.outputs.rerun-tests }}
+  rerun-names:
+    description: The same tests by name only, for selectors like pytest -k or jest -t
+    value: ${{ steps.report.outputs.rerun-names }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install greenlight
+      shell: bash
+      run: |
+        python3 -m venv "$RUNNER_TEMP/greenlight-venv"
+        # the CLI only needs the standard library; the MCP server's dependencies stay out of CI
+        "$RUNNER_TEMP/greenlight-venv/bin/pip" install -q --no-deps "$GITHUB_ACTION_PATH"
+        echo "$RUNNER_TEMP/greenlight-venv/bin" >> "$GITHUB_PATH"
+        echo "GREENLIGHT_DB=$RUNNER_TEMP/greenlight.db" >> "$GITHUB_ENV"
+
+    - name: Load history from ${{ inputs.data-branch }}
+      shell: bash
+      env:
+        TOKEN: ${{ inputs.token }}
+        BRANCH: ${{ inputs.data-branch }}
+      run: |
+        D="$RUNNER_TEMP/greenlight-data"
+        AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')"
+        URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+        if git -c http.extraheader="$AUTH" ls-remote --exit-code --heads "$URL" "$BRANCH" >/dev/null 2>&1; then
+          git -c http.extraheader="$AUTH" clone -q --depth 1 --branch "$BRANCH" --single-branch "$URL" "$D"
+        else
+          # first run: start the branch with no shared files, so two jobs creating it at once rebase cleanly
+          git init -q -b "$BRANCH" "$D"
+          git -C "$D" remote add origin "$URL"
+        fi
+        # commits and rebases on this clone are greenlight's, not the person who triggered the run
+        git -C "$D" config user.name greenlight
+        git -C "$D" config user.email greenlight@users.noreply.github.com
+        greenlight ci restore --dir "$D"
+
+    - name: Refresh quarantine labels
+      shell: bash
+      continue-on-error: true
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: greenlight sync --only issues || echo "::notice::greenlight could not read issues; quarantine labels were skipped"
+
+    - name: Record this run
+      shell: bash
+      env:
+        JUNIT: ${{ inputs.junit }}
+        NAME: ${{ inputs.name }}
+      run: |
+        set -f  # greenlight expands the globs itself
+        greenlight ci record --junit $JUNIT ${NAME:+--name "$NAME"} --dir "$RUNNER_TEMP/greenlight-data"
+
+    - name: Gate and report
+      id: report
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+        NAME: ${{ inputs.name }}
+        COMMENT: ${{ inputs.pr-comment }}
+      run: |
+        greenlight ci report --fail-on never ${NAME:+--name "$NAME"} $([ "$COMMENT" = "true" ] && echo --pr-comment)
+
+    - name: Send the run to OpenTelemetry
+      if: inputs.otlp-endpoint != ''
+      shell: bash
+      continue-on-error: true
+      env:
+        OTEL_EXPORTER_OTLP_ENDPOINT: ${{ inputs.otlp-endpoint }}
+        NAME: ${{ inputs.name }}
+      run: greenlight otel export --this-job ${NAME:+--name "$NAME"}
+
+    - name: Save the record to ${{ inputs.data-branch }}
+      shell: bash
+      env:
+        TOKEN: ${{ inputs.token }}
+        BRANCH: ${{ inputs.data-branch }}
+      run: |
+        cd "$RUNNER_TEMP/greenlight-data"
+        git add -A
+        git commit -q -m "Record $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" || exit 0
+        AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')"
+        for i in 1 2 3 4 5; do
+          if git -c http.extraheader="$AUTH" push -q origin "HEAD:refs/heads/$BRANCH"; then exit 0; fi
+          # another job pushed first; records have unique names, so a rebase never conflicts
+          git -c http.extraheader="$AUTH" pull -q --rebase origin "$BRANCH" || true
+          sleep $((i * 2))
+        done
+        echo "::warning::greenlight could not save this run to $BRANCH (a fork's read-only token?). The gate still ran."
+
+    - name: Apply fail-on
+      shell: bash
+      env:
+        DECISION: ${{ steps.report.outputs.decision }}
+        FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        case "$FAIL_ON:$DECISION" in
+          never:*|*:PASS) exit 0 ;;
+          real:RERUN_TARGETED) echo "::notice::Only known flaky tests failed. Rerun just: ${{ steps.report.outputs.rerun-tests }}"; exit 0 ;;
+          *) echo "::error::greenlight: $DECISION"; exit 1 ;;
+        esac
