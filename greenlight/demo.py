@@ -104,6 +104,7 @@ def seed(db: str, days: int = 60, seed_value: int = 7) -> None:
     start = utcnow() - timedelta(days=a.days)  # so the whole last simulated day is in the past
     runs = 0
     commits: list[tuple[str, object]] = []
+    last_run_at: dict[int, object] = {}  # commit number -> its last test run, for the agent sessions below
     with closing(connect(a.db)) as conn, tempfile.TemporaryDirectory() as tmp:
         for d in range(a.days):
             for k in range(3):  # three commits a day
@@ -117,7 +118,9 @@ def seed(db: str, days: int = 60, seed_value: int = 7) -> None:
                     path.write_text(junit(cases))
                     when = start + timedelta(days=d, hours=9 + 3 * k, minutes=10 * attempt)
                     ingest_files(conn, [path], commit_sha=sha, branch="main", attempt=attempt,
-                                 source="demo", external_id=f"demo-{runs}", started_at=when)
+                                 source="demo", external_id=f"demo-{runs}", started_at=when,
+                                 session=f"demo-session-{len(commits)}")
+                    last_run_at[len(commits)] = when
                     runs += 1
                     final = {}
                     for t, o, _, _ in cases:
@@ -155,12 +158,26 @@ def seed(db: str, days: int = 60, seed_value: int = 7) -> None:
                              (did, shipped[-1][0], iso(at), f"0.{d // 7}.{d % 7}"))
                 conn.executemany("INSERT OR REPLACE INTO deploy_commits VALUES (?, ?, ?)", [(did, s, iso(c)) for s, c in shipped])
             # pull requests: one per commit, opened a few hours before it merged
+            opened_at = {}
             for n, (s, c) in enumerate(commits, start=1):
-                opened = c - timedelta(hours=rng.uniform(0.5, 9))
+                opened = opened_at[n] = c - timedelta(hours=rng.uniform(0.5, 9))
                 state = "open" if n > len(commits) - 2 else "merged"
                 conn.execute("INSERT OR REPLACE INTO pull_requests (number, title, author, state, base, head, head_sha, created_at, merged_at, updated_at) "
                              "VALUES (?, ?, 'demo', ?, 'main', ?, ?, ?, ?, ?)",
                              (n, f"Change {n}", state, f"work-{n}", s, iso(opened), iso(c) if state == "merged" else None, iso(c)))
+            # a Claude Code session per pull request: its branch until it merged, then main while its tests ran
+            usage_rows = []
+            for n, (s, c) in enumerate(commits, start=1):
+                sid, t = f"demo-session-{n}", opened_at[n]
+                end = last_run_at.get(n, c) + timedelta(minutes=20)
+                while t < end:
+                    usage_rows.append((sid, iso(t.replace(second=0, microsecond=0)), "claude-opus-5-5",
+                                       f"work-{n}" if t <= c else "main", rng.randint(1, 4), rng.randint(5, 60),
+                                       rng.randint(200, 3000), rng.randint(50_000, 400_000), rng.randint(2_000, 20_000)))
+                    t += timedelta(minutes=rng.randint(2, 6))
+                conn.execute("INSERT OR REPLACE INTO agent_sessions (session_id, agent, first_at, last_at, updated_at) "
+                             "VALUES (?, 'claude-code', ?, ?, ?)", (sid, iso(opened_at[n]), iso(end), iso(end)))
+            conn.executemany("INSERT OR REPLACE INTO agent_usage VALUES (?,?,?,?,?,?,?,?,?)", usage_rows)
             # issues: two bugs after releases (incidents), the ones greenlight manages, and some plain ones
             now = utcnow()
             issues = [

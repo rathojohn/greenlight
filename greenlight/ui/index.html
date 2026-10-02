@@ -325,6 +325,7 @@ details.wj[open] > summary .wn .ic { transform: rotate(90deg); }
   <symbol id="i-trends" viewBox="0 0 16 16"><path d="M1.75 12.25 6 8l2.75 2.75 5.5-6"/><path d="M10.5 4.75h3.75V8.5"/></symbol>
   <symbol id="i-pipelines" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r="1.75"/><circle cx="12.5" cy="3.5" r="1.75"/><circle cx="12.5" cy="12.5" r="1.75"/><path d="M5.25 8h1.5c1.5 0 2-1 2.5-2.25S10 3.5 10.75 3.5M6.75 8c1.5 0 2 1 2.5 2.25s.75 2.25 1.5 2.25"/></symbol>
   <symbol id="i-delivery" viewBox="0 0 16 16"><path d="M8 10.25V2M4.75 5.25 8 2l3.25 3.25"/><path d="M2.5 9.5v4h11v-4"/></symbol>
+  <symbol id="i-tokens" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.25"/><path d="M5.5 8h5M8 5.5v5"/></symbol>
   <symbol id="i-info" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.25"/><path d="M8 7.25v3.75M8 5h.01"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13.25 8A5.25 5.25 0 1 1 11.7 4.3"/><path d="M13.25 2.25v3.5h-3.5"/></symbol>
   <symbol id="i-sun" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.75"/><path d="M8 1.5V3M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.05 1.05M11.55 11.55l1.05 1.05M3.4 12.6l1.05-1.05M11.55 4.45l1.05-1.05"/></symbol>
@@ -349,6 +350,8 @@ details.wj[open] > summary .wn .ic { transform: rotate(90deg); }
       <div class="grp">Delivery</div>
       <a href="#/pipelines" data-nav="pipelines"><svg class="ic"><use href="#i-pipelines"/></svg>Pipelines</a>
       <a href="#/delivery" data-nav="delivery"><svg class="ic"><use href="#i-delivery"/></svg>DORA and GitHub</a>
+      <div class="grp">Agents</div>
+      <a href="#/usage" data-nav="usage"><svg class="ic"><use href="#i-tokens"/></svg>Token usage</a>
     </nav>
     <div class="side-foot"><div class="sync" id="sync"><span class="pulse off"></span><span>Not synced yet</span></div><form id="signout" method="post" action="logout" hidden><button class="signout" type="submit">Sign out</button></form></div>
   </aside>
@@ -450,7 +453,12 @@ function hrs(h) {
   if (h < 48) return `${+h.toFixed(h < 10 ? 1 : 0)} h`;
   return `${+(h / 24).toFixed(1)} days`;
 }
-const FMT = { count: v => Math.round(v * 10) / 10 + "", pct: v => `${Math.round(v * 1000) / 10}%`, ms: v => dur(v), h: v => hrs(v), perf: v => `${+v.toFixed(2)} ms` };
+function tk(n) {
+  if (n == null) return "n/a";
+  const a = Math.abs(n);
+  return a >= 1e9 ? `${+(n / 1e9).toFixed(1)}B` : a >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : a >= 1e4 ? `${Math.round(n / 1e3)}k` : a >= 1e3 ? `${+(n / 1e3).toFixed(1)}k` : String(Math.round(n));
+}
+const FMT = { tok: v => tk(v), count: v => Math.round(v * 10) / 10 + "", pct: v => `${Math.round(v * 1000) / 10}%`, ms: v => dur(v), h: v => hrs(v), perf: v => `${+v.toFixed(2)} ms` };
 const AXIS = { ...FMT, pct: v => `${Math.round(v * 100)}%`, ms: v => v === 0 ? "0" : v < 1000 ? `${Math.round(v)}ms` : v < 60000 ? `${+(v / 1000).toFixed(1)}s` : v < 3600000 ? `${+(v / 60000).toFixed(1)}m` : `${+(v / 3600000).toFixed(1)}h`, h: v => v === 0 ? "0" : v < 1 ? `${Math.round(v * 60)}m` : v < 48 ? `${+v.toFixed(1)}h` : `${+(v / 24).toFixed(1)}d` };
 
 /* ---------- building blocks ---------- */
@@ -1198,6 +1206,71 @@ async function deliveryView(tok) {
   if (env) env.addEventListener("change", () => { deliveryEnv = env.value; render(); });
 }
 
+/* ---------- token usage (Claude Code) ---------- */
+async function usageView(tok) {
+  const d = await api("/api/usage", { days: DAYS });
+  if (tok !== renderToken) return;
+  const t = d.totals;
+  if (!t.requests) {
+    view.innerHTML = `<div class="grid">${noData(`No token usage in the last ${DAYS} days.`, "<code>greenlight setup --project</code> adds a hook that records each Claude Code session's token counts after every turn: counts, branches and times, never prompts or code.")}</div>`;
+    return;
+  }
+  const fresh = r => r.input_tokens + r.cache_write_tokens;
+  const tokCols = [
+    { h: "Output", cell: r => tk(r.output_tokens), sort: r => r.output_tokens, cls: "num" },
+    { h: "Input", cell: r => tk(fresh(r)), sort: r => fresh(r), cls: "num", tip: "Uncached input plus cache writes" },
+    { h: "Cache reads", cell: r => tk(r.cache_read_tokens), sort: r => r.cache_read_tokens, cls: "num hide-sm" },
+  ];
+  const prCols = [
+    { h: "#", cell: p => isUrl(p.url) ? `<a class="tl" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${p.number}</a>` : p.number, sort: p => p.number, cls: "num" },
+    { h: "Pull request", cell: p => `${esc(p.title || "")}<div class="sub">${esc(p.head || "")}</div>`, sort: p => p.title, dir: 1, cls: "wrap" },
+    { h: "Sessions", cell: p => p.sessions, sort: p => p.sessions, cls: "num hide-sm" },
+    ...tokCols,
+    { h: "State", cell: p => p.state === "merged" ? tag("success", "merged") : p.state === "open" ? tag("open-ok", "open") : tag("closed", p.state), sort: p => p.state, dir: 1, cls: "hide-sm" },
+  ];
+  const testCols = [
+    { h: "Test", cell: x => testCell(x.test_id), sort: x => x.test_id, dir: 1, cls: "wrap" },
+    { h: "Times red", cell: x => `${x.times_red}${x.still_red ? `<span class="dim">, ${x.still_red} unfixed</span>` : ""}`, sort: x => x.times_red, cls: "num", tip: "Failed in a session; unfixed means no later run in that session passed it" },
+    ...tokCols,
+  ];
+  const sessCols = [
+    { h: "Last active", cell: x => when(x.last_at), sort: x => x.last_at, cls: "nw" },
+    { h: "Session", cell: x => (isUrl(x.url) ? `<a class="tl" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.remote_session)}</a>` : `<span class="mono">${esc(String(x.session_id).slice(0, 8))}</span>`) + `<div class="sub">${esc(x.branches.slice(0, 3).join(", "))}${x.branches.length > 3 ? ", ..." : ""}</div>`, cls: "wrap" },
+    { h: "Requests", cell: x => x.requests, sort: x => x.requests, cls: "num hide-sm" },
+    ...tokCols,
+  ];
+  const un = d.unattributed;
+  view.innerHTML = `
+    <div class="grid">
+      ${stat({ cls: "s3", k: "Output tokens", v: tk(t.output_tokens), s: `${tk(t.requests)} requests`, spark: d.output_per_day })}
+      ${stat({ cls: "s3", k: "Input tokens", v: tk(fresh(t)), s: "uncached plus cache writes", spark: d.input_per_day, tip: "What the model read that wasn't already in its cache." })}
+      ${stat({ cls: "s3", k: "Cache reads", v: tk(t.cache_read_tokens), s: "context reused from cache", spark: d.cache_read_per_day, tip: "Earlier context read back from the prompt cache. Usually the biggest number and the cheapest per token." })}
+      ${stat({ cls: "s3", k: "Sessions", v: t.sessions, s: d.models.map(m => m.model).slice(0, 2).join(", ") })}
+    </div>
+    <div class="grid">
+      ${panel({ cls: "s4", title: "Output per day", body: `<div class="chart" id="c-out"></div>` })}
+      ${panel({ cls: "s4", title: "Input per day", tip: "Uncached input plus cache writes.", body: `<div class="chart" id="c-in"></div>` })}
+      ${panel({ cls: "s4", title: "Cache reads per day", body: `<div class="chart" id="c-cache"></div>` })}
+    </div>
+    <div class="grid">
+      ${panel({ title: "By pull request", tip: "Tokens spent on each PR's branch until it merged or closed. A branch name a later PR reuses counts toward that one.", flush: true,
+        actions: `<span class="dim">${d.by_pr.length}</span>`,
+        body: table("t-upr", prCols, d.by_pr, { sort: 3, limit: 15, empty: "No usage on a pull request's branch yet." }),
+        foot: un.output_tokens ? `${tk(un.output_tokens)} output tokens were on branches without a pull request, like main.` : "" })}
+    </div>
+    <div class="grid">
+      ${panel({ title: "While a test was red", tip: "Tokens a session spent from a run that failed the test to the next run in that session that passed it. Two tests red at once both count the same tokens.", flush: true,
+        body: table("t-utest", testCols, d.by_test, { sort: 2, limit: 10, href: x => testHref(x.test_id), empty: "No test failed in a session that recorded usage." }) })}
+    </div>
+    <div class="grid">
+      ${panel({ title: "Sessions", flush: true, actions: `<span class="dim">${d.sessions.length}</span>`,
+        body: table("t-usess", sessCols, d.sessions, { sort: 0, limit: 10 }) })}
+    </div>`;
+  chart(document.getElementById("c-out"), { days: d.days, label: "Output tokens per day", format: "tok", bars: [{ values: d.output_per_day, color: "var(--series)", label: "Output" }] });
+  chart(document.getElementById("c-in"), { days: d.days, label: "Input tokens per day", format: "tok", bars: [{ values: d.input_per_day, color: "var(--series)", label: "Input" }] });
+  chart(document.getElementById("c-cache"), { days: d.days, label: "Cache reads per day", format: "tok", bars: [{ values: d.cache_read_per_day, color: "var(--neutral)", label: "Cache reads" }] });
+}
+
 /* ---------- actions (quarantine, show all) ---------- */
 document.addEventListener("click", async ev => {
   const th = ev.target.closest("th[data-col]");
@@ -1287,6 +1360,7 @@ const ROUTES = [
   [/^#\/pipelines$/, "pipelines", [["Delivery"]], "Pipelines", tok => pipelinesView(tok), true],
   [/^#\/pipeline\/(.+)$/, "pipelines", [["Delivery"], ["Pipelines", "#/pipelines"]], "Pipeline run", (tok, m) => pipelineView(tok, decodeURIComponent(m[1])), false],
   [/^#\/delivery$/, "delivery", [["Delivery"]], "DORA and GitHub", tok => deliveryView(tok), true],
+  [/^#\/usage$/, "usage", [["Agents"]], "Token usage", tok => usageView(tok), true],
 ];
 let lastHash = null;
 async function render() {

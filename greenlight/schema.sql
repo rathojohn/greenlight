@@ -174,3 +174,29 @@ CREATE TABLE IF NOT EXISTS otel_exports (
     exported_at  TEXT NOT NULL,
     PRIMARY KEY (kind, key)
 );
+
+-- Claude Code token usage, per session and minute (usage.py). Sessions are Claude Code's ids; a cloud
+-- session's claude.ai id (session_...) is what runs.session holds, so remote_session joins the two.
+CREATE TABLE IF NOT EXISTS agent_usage (
+    session_id          TEXT NOT NULL,
+    minute              TEXT NOT NULL,             -- UTC, to the minute
+    model               TEXT NOT NULL,
+    branch              TEXT NOT NULL DEFAULT '',  -- the git branch the session was on
+    requests            INTEGER NOT NULL DEFAULT 0,
+    input_tokens        INTEGER NOT NULL DEFAULT 0,
+    output_tokens       INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens   INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (session_id, minute, model, branch)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_usage_minute ON agent_usage(minute);
+
+CREATE TABLE IF NOT EXISTS agent_sessions (
+    session_id      TEXT PRIMARY KEY,
+    remote_session  TEXT,
+    repo            TEXT,
+    agent           TEXT NOT NULL DEFAULT 'claude-code',
+    first_at        TEXT,
+    last_at         TEXT,
+    updated_at      TEXT NOT NULL
+);

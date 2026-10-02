@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
-from . import analysis, dashboard, delivery
+from . import analysis, dashboard, delivery, usage
 from .db import connect, iso, utcnow
 
 UI_FILE = Path(__file__).with_name("ui") / "index.html"
@@ -65,6 +65,8 @@ GET_ROUTES: dict[str, Callable[[sqlite3.Connection, Params], Any]] = {
     "/api/test/forecast": lambda c, p: _forecast().test_duration_forecast(
         c, analysis.resolve_test_id(c, _require(p, "id"))),
     "/api/trends/durations": lambda c, p: _forecast().duration_regressions(c, include_series=30),
+    "/api/usage": lambda c, p: usage.summary(c, _int(p, "days", 30)),
+    "/api/session": lambda c, p: {"auth": "local"},  # the hosted server answers this itself (cookie, bearer...)
     "/api/trends/suite": lambda c, p: _forecast().suite_forecast(
         c, p.get("metric", "reruns"), history_days=60, lookback_days=90),
 }
@@ -74,6 +76,7 @@ POST_ROUTES: dict[str, Callable[[sqlite3.Connection, dict], Any]] = {
         c, _require(b, "test_id"), b.get("reason") or "quarantined from the dashboard")},
     "/api/unquarantine": lambda c, b: {"removed": analysis.unquarantine(c, _require(b, "test_id"))},
     "/api/sweep": lambda c, b: analysis.sweep(c, apply=bool(b.get("apply"))),
+    "/api/usage": lambda c, b: usage.store(c, b),
     "/api/forget": lambda c, b: {"forgotten": analysis.forget_runs(c, _require(b, "runs"), bool(b.get("dry_run")))},
 }
 
@@ -244,6 +247,7 @@ def export_snapshot(db: str | None, out: str, days: int = 30, with_forecasts: bo
     quar = grab("/api/quarantine", {"days": d}) or {}
     pipes = grab("/api/pipelines", {"days": d}) or {}
     deliv = grab("/api/delivery", {"days": d}) or {}
+    grab("/api/usage", {"days": d})
     for env in (deliv.get("dora") or {}).get("environments", []):
         grab("/api/delivery", {"days": d, "env": env["environment"]})
     for p in pipes.get("recent", [])[:20]:

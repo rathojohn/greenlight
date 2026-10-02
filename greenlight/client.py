@@ -68,3 +68,8 @@ def login_link(timeout: float = 30) -> str:
 def forget(runs: list[str], dry_run: bool = False, timeout: float = 60) -> list[dict[str, Any]]:
     """Delete runs on the server by number or external id."""
     return _post("/api/forget", {"runs": runs, "dry_run": dry_run}, timeout)["forgotten"]
+
+
+def send_usage(payload: dict[str, Any], timeout: float = 30) -> dict[str, Any]:
+    """A session's token usage (usage.payload_from_hook) to the server, replacing what it had for it."""
+    return _post("/api/usage", payload, timeout)

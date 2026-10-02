@@ -28,7 +28,7 @@ SERVER_NAME = "greenlight"
 # that change something (quarantine, sweep with apply, issues, sync, gating a run) still ask.
 READ_TOOLS = ("greenlight_overview", "greenlight_list_flaky", "greenlight_test_history", "greenlight_triage_run",
               "greenlight_pipelines", "greenlight_delivery", "greenlight_query", "greenlight_duration_regressions",
-              "greenlight_suite_forecast")
+              "greenlight_suite_forecast", "greenlight_token_usage")
 RULES_MARKER = "## Test failures (greenlight)"
 AGENT_RULES = f"""{RULES_MARKER}
 Record every test run with greenlight, passing or not (passes are the history that tells a flaky test
@@ -120,6 +120,8 @@ def claude_mcp(dry_run: bool = False) -> str:
 # caches it, so it works in a fresh cloud session where a SessionStart hook would run too late: Claude
 # Code starts project MCP servers before the hook finishes.
 UVX_COMMAND = ["uvx", "--from", "git+https://github.com/rathojohn/greenlight", "greenlight-mcp"]
+# Runs after every Claude turn: reads the session's transcript and records its token counts (usage.py)
+USAGE_HOOK = " ".join(UVX_COMMAND[:3]) + " greenlight usage record --hook"
 
 
 def _read_json(path: Path) -> dict:
@@ -151,9 +153,10 @@ def _drop_toml_table(text: str, header: str) -> str:
     return "".join(out)
 
 
-def project_files(target: Path, dry_run: bool = False, url: str | None = None) -> list[str]:
+def project_files(target: Path, dry_run: bool = False, url: str | None = None, usage_hook: bool = True) -> list[str]:
     """Write (or merge into) the repo's own MCP config for Claude Code and Codex. Safe to run again.
-    url: a greenlight server; sessions connect to it with $GREENLIGHT_TOKEN instead of starting their own."""
+    url: a greenlight server; sessions connect to it with $GREENLIGHT_TOKEN instead of starting their own.
+    usage_hook: a Stop hook that records each Claude Code session's token counts."""
     done = []
     mcp_json = target / ".mcp.json"
     data = _read_json(mcp_json)
@@ -176,6 +179,18 @@ def project_files(target: Path, dry_run: bool = False, url: str | None = None) -
     enabled = data.get("enabledMcpjsonServers") or []
     allow = (data.get("permissions") or {}).get("allow") or []
     missing = [f"mcp__{SERVER_NAME}__{t}" for t in READ_TOOLS if f"mcp__{SERVER_NAME}__{t}" not in allow]
+    stop = (data.get("hooks") or {}).get("Stop") or []
+    has_hook = any("greenlight usage record" in (h.get("command") or "") for g in stop for h in g.get("hooks") or [])
+    want_hook = usage_hook and not has_hook
+    if want_hook:
+        if dry_run:
+            done.append(".claude/settings.json: would add the hook that records token usage after each turn")
+        else:
+            data.setdefault("hooks", {})["Stop"] = [*stop, {"hooks": [{"type": "command", "command": USAGE_HOOK,
+                                                                         "timeout": 60}]}]
+            _write_json(settings, data)
+            done.append(".claude/settings.json: added the hook that records token usage after each turn (counts "
+                        "only, never prompts or code)")
     if SERVER_NAME in enabled and not missing:
         done.append(".claude/settings.json: greenlight and its read-only tools already approved")
     elif dry_run:
