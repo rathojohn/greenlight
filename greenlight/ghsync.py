@@ -130,7 +130,7 @@ def _job_rows(pipeline_id: str, jobs: list[dict[str, Any]]) -> tuple[list[tuple]
         for s in j.get("steps") or []:
             step_rows.append((jid, s.get("number", 0), s.get("name") or "step",
                               s.get("conclusion") or s.get("status") or "unknown",
-                              _ms(s.get("started_at"), s.get("completed_at"))))
+                              _ms(s.get("started_at"), s.get("completed_at")), norm_time(s.get("started_at"))))
     return job_rows, step_rows
 
 
@@ -164,7 +164,7 @@ def _store_pipeline(conn: sqlite3.Connection, run: dict[str, Any], attempt: int,
     job_rows, step_rows = _job_rows(pid, jobs)
     conn.execute("DELETE FROM jobs WHERE pipeline_id = ?", (pid,))
     conn.executemany("INSERT OR REPLACE INTO jobs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", job_rows)
-    conn.executemany("INSERT OR REPLACE INTO steps VALUES (?, ?, ?, ?, ?)", step_rows)
+    conn.executemany("INSERT OR REPLACE INTO steps VALUES (?, ?, ?, ?, ?, ?)", step_rows)
 
 
 def sync_actions(conn: sqlite3.Connection, gh: GitHub, days: int = 30, junit_glob: str | None = "junit*",

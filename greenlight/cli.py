@@ -8,6 +8,7 @@
   greenlight playtest gate                     sync the playtest ledger, then gate the run just made
   greenlight issues [--apply]                  one GitHub issue per flaky test and perf regression
   greenlight ci record|report|restore          GitHub Actions: data-branch history, gate, PR comment
+  greenlight otel export|receive|import        OpenTelemetry: OTLP traces and metrics out, test and CI/CD spans in
   greenlight flaky                             ranked flaky tests
   greenlight sweep [--apply]                   quarantine candidates / release candidates
   greenlight trends                            Toto duration regressions + rerun forecast
@@ -316,6 +317,48 @@ def cmd_ci_report(a: argparse.Namespace) -> int:
     return 1 if decision == "REAL_FAILURE" else 0
 
 
+def cmd_otel_export(a: argparse.Namespace) -> int:
+    from . import otel
+    cfg = a.cfg
+    only = set(a.only.split(",")) if a.only else None
+    if only and only - {"pipelines", "tests", "deployments", "metrics"}:
+        raise ValueError("--only takes pipelines,tests,deployments,metrics")
+    with closing(connect(a.db)) as conn:
+        run_id = a.run_id
+        if a.this_job:
+            from . import ci
+            run_id = ci.this_job_run(conn, a.name)
+            if run_id is None:
+                raise LookupError("No run recorded by this job yet. Run `greenlight ci record` first.")
+        res = otel.export(conn, cfg.repo, a.endpoint or cfg.get("otel", "endpoint"), cfg.get("otel", "service_name"),
+                          only, a.since_days or int(cfg.get("otel", "since_days")), a.all, run_id, a.dry_run,
+                          int(cfg.get("otel", "window_days")), cfg.get("delivery", "incident_labels"))
+    if a.json:
+        print(json.dumps(res, indent=2))
+    else:
+        verb = "would send" if res.get("dry_run") else "sent"
+        print(f"{verb} {res['spans']} spans in {res['traces']} traces and {res['metrics']} metrics to {res['endpoint']}")
+        if res.get("rejected_spans") or res.get("rejected_points"):
+            print(f"the endpoint rejected {res.get('rejected_spans', 0)} spans and {res.get('rejected_points', 0)} points")
+    return 0
+
+
+def cmd_otel_receive(a: argparse.Namespace) -> int:
+    from . import otel
+    if a.host not in ("127.0.0.1", "localhost", "::1") and not a.token:
+        raise ValueError("Binding off loopback needs --token, sent by the exporter as Authorization: Bearer <token>")
+    otel.serve(a.db, a.host, a.port, a.token)
+    return 0
+
+
+def cmd_otel_import(a: argparse.Namespace) -> int:
+    from . import otel
+    with closing(connect(a.db)) as conn:
+        for f in _expand(a.files):
+            print(f"{f}: {json.dumps(otel.import_file(conn, f))}")
+    return 0
+
+
 def cmd_ui(a: argparse.Namespace) -> int:
     from . import web
     web.set_incident_labels(a.cfg.get("delivery", "incident_labels"))
@@ -342,7 +385,7 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(fn=cmd_auth)
 
     s = sub.add_parser("sync", help="pull git and GitHub data into the DB, per greenlight.toml")
-    s.add_argument("--only", help="comma list: playtest,records,pulls,issues,actions,deployments")
+    s.add_argument("--only", help="comma list: playtest,records,pulls,issues,actions,deployments,otel")
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_sync)
 
@@ -392,6 +435,29 @@ def main(argv: list[str] | None = None) -> int:
                    help="real: exit 1 only on REAL_FAILURE (default); any: gate exit codes; never: always 0")
     t.add_argument("--window-days", type=int, default=analysis.DEFAULT_WINDOW_DAYS)
     t.set_defaults(fn=cmd_ci_report)
+
+    s = sub.add_parser("otel", help="OpenTelemetry: export traces and metrics over OTLP, or receive test and CI/CD spans")
+    osub = s.add_subparsers(dest="otel_cmd", required=True)
+    t = osub.add_parser("export", help="send pipelines, test runs and deployments as traces, plus metrics, over OTLP/HTTP")
+    t.add_argument("--endpoint", help="OTLP/HTTP base URL (default: $OTEL_EXPORTER_OTLP_ENDPOINT, [otel] endpoint, "
+                                      "http://localhost:4318)")
+    t.add_argument("--only", help="comma list: pipelines,tests,deployments,metrics")
+    t.add_argument("--since-days", type=int, help="how far back to look for unsent items (default 90)")
+    t.add_argument("--all", action="store_true", help="resend items already sent")
+    t.add_argument("--run-id", type=int, help="send just this test run")
+    t.add_argument("--this-job", action="store_true", help="in GitHub Actions: send the run this job recorded")
+    t.add_argument("--name", help="with --this-job: the matrix name given to `ci record`")
+    t.add_argument("--dry-run", action="store_true", help="count what would be sent, send nothing")
+    t.add_argument("--json", action="store_true")
+    t.set_defaults(fn=cmd_otel_export)
+    t = osub.add_parser("receive", help="accept OTLP/HTTP JSON test and CI/CD spans into the DB")
+    t.add_argument("--host", default="127.0.0.1")
+    t.add_argument("--port", type=int, default=4319, help="default 4319, beside a Collector on 4318")
+    t.add_argument("--token", help="required when --host isn't loopback")
+    t.set_defaults(fn=cmd_otel_receive)
+    t = osub.add_parser("import", help="load OTLP JSON files (one request, or one per line as the Collector writes)")
+    t.add_argument("files", nargs="+")
+    t.set_defaults(fn=cmd_otel_import)
 
     s = sub.add_parser("ingest", help="record a run from JUnit XML")
     s.add_argument("files", nargs="+", help="JUnit XML files or globs")

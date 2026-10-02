@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 SCHEMA = Path(__file__).with_name("schema.sql").read_text(encoding="utf-8")
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Columns added after their table first shipped: (table, column, declaration). schema.sql has them
 # for new databases; these bring older ones up to date.
@@ -19,6 +19,7 @@ MIGRATIONS = [
     ("runs", "command", "TEXT"),
     ("runs", "url", "TEXT"),
     ("results", "flags", "TEXT"),
+    ("steps", "started_at", "TEXT"),
 ]
 
 _config_db: str | None = None

@@ -14,7 +14,7 @@ import json
 import random
 import tempfile
 from contextlib import closing
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from xml.sax.saxutils import quoteattr
 
@@ -83,8 +83,11 @@ def add_pipeline(conn, rng, run_no, attempt, sha, when, failed_e2e, sha_prefix="
     conn.executemany("INSERT OR REPLACE INTO jobs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
     for job in rows:
         steps = [("Set up job", 2), ("Checkout", 3), ("Install", 25), ("Run tests", max(1, job[6] // 1000 - 32)), ("Upload results", 2)]
-        conn.executemany("INSERT OR REPLACE INTO steps VALUES (?, ?, ?, ?, ?)",
-                         [(job[0], i + 1, n, job[3] if n == "Run tests" else "success", s * 1000) for i, (n, s) in enumerate(steps)])
+        t0 = datetime.fromisoformat(job[4])
+        offsets = [sum(x for _, x in steps[:i]) for i in range(len(steps))]
+        conn.executemany("INSERT OR REPLACE INTO steps VALUES (?, ?, ?, ?, ?, ?)",
+                         [(job[0], i + 1, n, job[3] if n == "Run tests" else "success", s * 1000,
+                           iso(t0 + timedelta(seconds=offsets[i]))) for i, (n, s) in enumerate(steps)])
 
 
 def main() -> None:

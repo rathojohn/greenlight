@@ -5,12 +5,14 @@ from __future__ import annotations
 import sqlite3
 from typing import Any, Callable
 
-from . import ci, ghsync, playtest
+import os
+
+from . import ci, ghsync, otel, playtest
 from .config import Config
 from .github import GitHub, GitHubError, resolve_token
 from .gitrepo import Repo
 
-SOURCES = ("playtest", "records", "pulls", "issues", "actions", "deployments")
+SOURCES = ("playtest", "records", "pulls", "issues", "actions", "deployments", "otel")
 
 
 def plan(cfg: Config, only: set[str] | None = None) -> list[str]:
@@ -28,6 +30,10 @@ def plan(cfg: Config, only: set[str] | None = None) -> list[str]:
     if "deployments" in want and any(d.get(k) for k in ("deploy_branch", "deploy_environment", "deploy_releases",
                                                          "deploy_files")):
         out.append("deployments")
+    # last, so it sends what the sources above just brought in
+    if "otel" in want and (cfg.get("otel", "endpoint") or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+                           or os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")):
+        out.append("otel")
     return out
 
 
@@ -59,12 +65,16 @@ def run(conn: sqlite3.Connection, cfg: Config, only: set[str] | None = None,
                 res = ghsync.sync_issues(conn, gh, cfg.get("issues", "quarantine_label"), days)
             elif source == "actions":
                 res = ghsync.sync_actions(conn, gh, int(cfg.get("actions", "days")), cfg.get("actions", "junit_artifacts"))
+            elif source == "otel":
+                res = otel.export(conn, cfg.repo, cfg.get("otel", "endpoint"), cfg.get("otel", "service_name"),
+                                  since_days=int(cfg.get("otel", "since_days")), window_days=int(cfg.get("otel", "window_days")),
+                                  incident_labels=cfg.get("delivery", "incident_labels"))
             else:
                 delivery = {k: cfg.get("delivery", k) for k in
                             ("deploy_branch", "deploy_environment", "deploy_releases", "deploy_files", "deploy_files_ref")}
                 res = ghsync.sync_deployments(conn, gh, git, delivery)
             report["sources"][source] = res
-        except (GitHubError, ValueError, LookupError, OSError, RuntimeError) as e:
+        except (GitHubError, ValueError, LookupError, OSError, RuntimeError) as e:  # otel.ExportError is a RuntimeError
             report["errors"][source] = str(e)
     if gh:
         report["api_calls"] = gh.calls

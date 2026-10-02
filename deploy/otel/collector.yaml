@@ -1,0 +1,44 @@
+# OpenTelemetry Collector (contrib distribution) for greenlight. See docker-compose.yml.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Push-based GitHub Actions traces, built by the Collector itself from workflow_run and workflow_job
+  # webhooks (alpha). GitHub has to reach this port, so it needs a tunnel or a public host, and a
+  # webhook on the repo (Settings > Webhooks, content type application/json, the same secret).
+  # greenlight's own `sync` pulls the same runs from the API without any of that.
+  # github:
+  #   webhook:
+  #     endpoint: 0.0.0.0:19418
+  #     path: /events
+  #     secret: ${env:GITHUB_WEBHOOK_SECRET}
+
+processors:
+  batch: {}
+
+exporters:
+  otlphttp/lgtm:
+    endpoint: http://lgtm:4318
+
+  # Feed test and CI/CD spans that reach the Collector into greenlight's gate. Start the receiver on
+  # the host first: greenlight otel receive --host 0.0.0.0 --token <token>
+  # otlphttp/greenlight:
+  #   endpoint: http://host.docker.internal:4319
+  #   encoding: json
+  #   headers:
+  #     Authorization: Bearer <token>
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]            # add github here to use the webhook receiver
+      processors: [batch]
+      exporters: [otlphttp/lgtm]   # add otlphttp/greenlight here to feed the gate
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/lgtm]

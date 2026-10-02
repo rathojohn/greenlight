@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS steps (
     name         TEXT NOT NULL,
     status       TEXT NOT NULL,
     duration_ms  INTEGER,
+    started_at   TEXT,
     PRIMARY KEY (job_id, number)
 );
 
@@ -164,4 +165,12 @@ CREATE TABLE IF NOT EXISTS sync_state (
     source     TEXT PRIMARY KEY,
     cursor     TEXT,
     synced_at  TEXT NOT NULL
+);
+
+-- What has been sent to an OpenTelemetry endpoint, so each export only sends what's new.
+CREATE TABLE IF NOT EXISTS otel_exports (
+    kind         TEXT NOT NULL,               -- pipeline, run, deployment
+    key          TEXT NOT NULL,
+    exported_at  TEXT NOT NULL,
+    PRIMARY KEY (kind, key)
 );

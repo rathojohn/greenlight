@@ -11,7 +11,7 @@ dependencies = ["mcp>=1.9", "pydantic>=2"]
 
 [project.optional-dependencies]
 toto = ["toto-models"]  # Toto 2.0, needs Python 3.12+
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "opentelemetry-proto>=1.20"]  # the proto package checks OTLP payloads in tests
 
 [project.scripts]
 greenlight = "greenlight.cli:main"

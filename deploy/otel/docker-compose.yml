@@ -1,0 +1,38 @@
+# A free, local OpenTelemetry backend for greenlight: Grafana with Tempo (traces), Mimir/Prometheus
+# (metrics) and Loki in one container (grafana/otel-lgtm), behind an OpenTelemetry Collector.
+#
+#   docker compose up -d
+#   greenlight otel export            # or set [otel] endpoint and let `greenlight sync` send it
+#   open http://localhost:3000        # Explore > Tempo, e.g. { span.cicd.pipeline.result = "failure" }
+#
+# Everything greenlight sends goes to the Collector on 4317/4318, which forwards it to Grafana.
+# Uncomment the greenlight exporter in collector.yaml to also feed test spans from other sources
+# (OTel-instrumented test runners, the GitHub receiver) into `greenlight otel receive`.
+services:
+  lgtm:
+    image: grafana/otel-lgtm:latest
+    ports:
+      - "3000:3000"            # Grafana
+    volumes:
+      - lgtm-data:/data
+    restart: unless-stopped
+
+  collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otelcol/collector.yaml"]
+    volumes:
+      - ./collector.yaml:/etc/otelcol/collector.yaml:ro
+    ports:
+      - "4317:4317"            # OTLP gRPC
+      - "4318:4318"            # OTLP HTTP (greenlight sends here)
+      # - "19418:19418"        # GitHub webhook, if you enable the github receiver
+    environment:
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # reach `greenlight otel receive` on the host
+    depends_on:
+      - lgtm
+    restart: unless-stopped
+
+volumes:
+  lgtm-data:
