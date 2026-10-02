@@ -187,9 +187,50 @@ CREATE TABLE IF NOT EXISTS agent_usage (
     output_tokens       INTEGER NOT NULL DEFAULT 0,
     cache_read_tokens   INTEGER NOT NULL DEFAULT 0,
     cache_write_tokens  INTEGER NOT NULL DEFAULT 0,
+    cache_write_1h_tokens INTEGER NOT NULL DEFAULT 0,  -- the part written for an hour, which costs more
     PRIMARY KEY (session_id, minute, model, branch)
 );
 CREATE INDEX IF NOT EXISTS idx_agent_usage_minute ON agent_usage(minute);
+
+-- What tool results put into a session's context, and what keeping them there cost (context.py)
+CREATE TABLE IF NOT EXISTS agent_context (
+    session_id      TEXT NOT NULL,
+    minute          TEXT NOT NULL,             -- when the results arrived
+    branch          TEXT NOT NULL DEFAULT '',
+    category        TEXT NOT NULL,             -- test, build, git, read, search, web, shell, image, edit, subagent, skill, mcp:<server>, other
+    calls           INTEGER NOT NULL DEFAULT 0,
+    tokens          INTEGER NOT NULL DEFAULT 0,  -- what the results added to the context
+    carried_tokens  INTEGER NOT NULL DEFAULT 0,  -- cache reads of them by later requests, until a compaction
+    repeat_reads    INTEGER NOT NULL DEFAULT 0,  -- reads of a file already in context and unchanged
+    repeat_tokens   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (session_id, minute, branch, category)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_context_minute ON agent_context(minute);
+
+-- Requests that wrote most of the context to the cache again
+CREATE TABLE IF NOT EXISTS agent_cache_rebuilds (
+    session_id      TEXT NOT NULL,
+    agent           TEXT NOT NULL DEFAULT '',  -- '' for the session, else the subagent's transcript
+    at              TEXT NOT NULL,
+    branch          TEXT NOT NULL DEFAULT '',
+    tokens          INTEGER NOT NULL,          -- cache write tokens
+    ttl             TEXT,                      -- 1h or 5m: how long the cache lasts
+    idle_seconds    INTEGER,                   -- since the request before it
+    cause           TEXT NOT NULL,             -- idle, compaction, model, other
+    PRIMARY KEY (session_id, agent, at)
+);
+
+-- Requests that started work on a new branch while the earlier work was still in context
+CREATE TABLE IF NOT EXISTS agent_task_switches (
+    session_id      TEXT NOT NULL,
+    agent           TEXT NOT NULL DEFAULT '',
+    at              TEXT NOT NULL,
+    from_branch     TEXT NOT NULL DEFAULT '',
+    to_branch       TEXT NOT NULL DEFAULT '',
+    context_tokens  INTEGER NOT NULL,          -- the context the new work started with
+    carried_tokens  INTEGER NOT NULL,          -- cache reads of it by later requests, until a compaction
+    PRIMARY KEY (session_id, agent, at)
+);
 
 CREATE TABLE IF NOT EXISTS agent_sessions (
     session_id      TEXT PRIMARY KEY,

@@ -536,15 +536,34 @@ def cmd_usage(a: argparse.Namespace) -> int:
     print(f"Claude Code, last {a.days} days: {t['sessions']} sessions, {t['requests']} requests, "
           f"{k(t['output_tokens'])} output, {k(t['input_tokens'] + t['cache_write_tokens'])} input, "
           f"{k(t['cache_read_tokens'])} cache reads")
+    cost = t.get("weighted") or 0
+    share = lambda n: f"{n / cost:.0%}" if cost else "0%"  # noqa: E731
+    if cost:
+        print(f"Cost: {k(cost)} in input tokens (cache reads {share(t['cache_read_tokens'] * usage.WEIGHTS['cache_read_tokens'])}"
+              f", output {share(t['output_tokens'] * usage.WEIGHTS['output_tokens'])}"
+              f", cache writes {share(cost - t['input_tokens'] - t['cache_read_tokens'] * usage.WEIGHTS['cache_read_tokens'] - t['output_tokens'] * usage.WEIGHTS['output_tokens'])})")
+    cx = s.get("context") or {}
+    if cx.get("categories"):
+        print("\nWhere context goes (share of cost, tokens re-read):")
+        for c in cx["categories"][:a.limit]:
+            print(f"  {share(c['weighted']):>4}  {k(c['carried_tokens']):>7}  {c['category']}")
+        sw, idle = cx.get("task_switches") or {}, next((r for r in cx["rebuilds"]["by_cause"] if r["cause"] == "idle"), None)
+        if sw.get("count"):
+            print(f"Earlier tasks still in context: {k(sw['carried_tokens'])} re-read ({share(sw['weighted'])} of cost) after "
+                  f"{sw['count']} new branch(es); /compact between tasks drops it")
+        if idle:
+            print(f"Cache rebuilt after idle: {idle['rebuilds']} time(s), {k(idle['tokens'])} tokens ({share(idle['weighted'])})")
+        if cx.get("repeat_reads"):
+            print(f"Files read again while still in context: {cx['repeat_reads']} ({k(cx['repeat_tokens'])} tokens)")
     if s["by_pr"]:
-        print("\nBy pull request (output / input / cache reads):")
+        print("\nBy pull request (cost / output / cache reads):")
         for p in s["by_pr"][:a.limit]:
-            print(f"  #{p['number']:<5} {k(p['output_tokens']):>6} {k(p['input_tokens'] + p['cache_write_tokens']):>6} "
+            print(f"  #{p['number']:<5} {k(p.get('weighted', 0)):>6} {k(p['output_tokens']):>6} "
                   f"{k(p['cache_read_tokens']):>7}  {p['title']}")
     if s["by_test"]:
-        print("\nWhile a test was red (output / input / cache reads, times red):")
+        print("\nWhile a test was red (cost / output / cache reads, times red):")
         for x in s["by_test"][:a.limit]:
-            print(f"  {k(x['output_tokens']):>6} {k(x['input_tokens'] + x['cache_write_tokens']):>6} "
+            print(f"  {k(x.get('weighted', 0)):>6} {k(x['output_tokens']):>6} "
                   f"{k(x['cache_read_tokens']):>7}  {x['times_red']}x  {x['test_id']}")
     if not t["requests"]:
         print("No usage recorded yet. `greenlight setup --project` adds the hook that records it.")

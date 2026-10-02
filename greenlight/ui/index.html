@@ -114,7 +114,12 @@ button { font: inherit; color: inherit; }
 .s3 { grid-column: span 3; } .s4 { grid-column: span 4; } .s5 { grid-column: span 5; } .s6 { grid-column: span 6; }
 .s7 { grid-column: span 7; } .s8 { grid-column: span 8; } .s12 { grid-column: span 12; }
 @media (max-width: 1100px) { .s3 { grid-column: span 6; } .s5, .s7 { grid-column: span 12; } }
-@media (max-width: 900px) { .s4.panel:not(.stat), .s6, .s8 { grid-column: span 12; } }
+@media (max-width: 900px) { .s4.panel:not(.stat), .s4.stack, .s6, .s8 { grid-column: span 12; } }
+.stack { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.stack .stat { flex: 1 0 auto; min-height: 0; }
+.stack .stat .s { white-space: normal; }
+.meter { display: inline-block; width: 64px; height: 6px; margin-right: 6px; vertical-align: middle; border-radius: 3px; background: var(--line-2); overflow: hidden; }
+.meter i { display: block; height: 100%; min-width: 2px; border-radius: 3px; background: var(--series); }
 @media (max-width: 560px) { .s4:not(.stat) { grid-column: span 12; } }
 .start { align-self: start; }
 .panel { position: relative; display: flex; flex-direction: column; min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; }
@@ -191,6 +196,44 @@ table.t { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .t .sub { color: var(--ink-3); font-size: 11.5px; overflow-wrap: anywhere; }
 .more { padding: 8px 12px; border-top: 1px solid var(--line-2); }
 .empty { margin: 0; padding: 14px 12px; color: var(--ink-2); }
+.tb:disabled { opacity: .4; cursor: default; }
+.tb:disabled:hover { color: var(--ink-2); border-color: var(--line); }
+.pager { display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 6px 12px; border-top: 1px solid var(--line-2); color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.pager .tb { height: 26px; }
+.pager .tb.icon { width: 26px; }
+.t tr[data-panel] { cursor: pointer; }
+.t tr[data-panel]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.t tbody tr.sel td { background: var(--wash); }
+.t tbody tr.sel td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+
+/* Tabs inside a page: one screen each, linkable */
+.tabs { display: flex; gap: 2px; margin: 10px 0 8px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.tabs a { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; margin-bottom: -1px; border-bottom: 2px solid transparent; color: var(--ink-2); font-size: 13px; white-space: nowrap; }
+.tabs a:hover { color: var(--ink); }
+.tabs a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 550; }
+.tabs .n { color: var(--ink-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+
+/* Side panel: details beside the list, in the URL (?panel=kind:id), scrolling on its own */
+.drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 60; width: min(560px, 100vw); display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--line); box-shadow: var(--shadow); }
+.drawer[hidden] { display: none; }
+.drawer:focus { outline: none; }
+@media (prefers-reduced-motion: no-preference) { .drawer { animation: slidein .16s ease-out; } }
+@keyframes slidein { from { transform: translateX(24px); opacity: 0; } }
+.dh { display: flex; align-items: flex-start; gap: 8px; padding: calc(9px + env(safe-area-inset-top, 0px)) 10px 9px 16px; border-bottom: 1px solid var(--line); }
+.dh .dt { flex: 1; min-width: 0; padding-top: 4px; }
+.dh h2 { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.dh .ds { margin-top: 2px; color: var(--ink-2); font-size: 12px; overflow-wrap: anywhere; }
+.dh .da, .dh .dn { display: flex; gap: 6px; flex: none; }
+.db { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 16px; padding: 14px 16px calc(24px + env(safe-area-inset-bottom, 0px)); }
+.db section > h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; color: var(--ink-2); font-size: 11.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.db .box { border: 1px solid var(--line-2); border-radius: 4px; overflow: hidden; }
+.facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.facts > div { min-width: 0; padding: 8px 10px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 4px; }
+.facts .k { display: flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 11.5px; }
+.facts .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.advice { margin: 0; padding: 10px 12px; border-left: 2px solid var(--accent); border-radius: 0 4px 4px 0; background: var(--wash); line-height: 1.5; }
+@media (max-width: 560px) { .drawer { border-left: 0; } .dh .da .lbl { display: none; } }
+@media (min-width: 1680px) { body.panel-open .main { margin-right: 560px; } }
 .pb > .empty { padding: 10px 0 4px; }
 @media (max-width: 720px) {
   .t .hide-sm { display: none; }
@@ -335,6 +378,9 @@ details.wj[open] > summary .wn .ic { transform: rotate(90deg); }
   <symbol id="i-down" viewBox="0 0 16 16"><path d="M4.5 6.25 8 9.75l3.5-3.5"/></symbol>
   <symbol id="i-right" viewBox="0 0 16 16"><path d="M6.25 4.5 9.75 8l-3.5 3.5"/></symbol>
   <symbol id="i-check" viewBox="0 0 16 16"><path d="M3.5 8.5 6.5 11.5 12.5 4.5"/></symbol>
+  <symbol id="i-left" viewBox="0 0 16 16"><path d="M9.75 4.5 6.25 8l3.5 3.5"/></symbol>
+  <symbol id="i-up" viewBox="0 0 16 16"><path d="M4.5 9.75 8 6.25l3.5 3.5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></symbol>
   <symbol id="i-ext" viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M13.5 2.5 8 8M11.5 9.5v4h-9v-9h4"/></symbol>
 </svg>
 <div class="app">
@@ -374,6 +420,14 @@ details.wj[open] > summary .wn .ic { transform: rotate(90deg); }
 <div id="bar" hidden></div>
 <div id="tip" hidden></div>
 <div id="toast" role="status" aria-live="polite"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-labelledby="drawer-title" tabindex="-1" hidden>
+  <header class="dh">
+    <div class="dt"><h2 id="drawer-title"></h2><div class="ds" id="drawer-sub"></div></div>
+    <div class="da" id="drawer-actions"></div>
+    <div class="dn"><button class="tb icon" type="button" data-act="step" data-d="-1" aria-label="Previous row" data-tip="Previous (k)"><svg class="ic"><use href="#i-up"/></svg></button><button class="tb icon" type="button" data-act="step" data-d="1" aria-label="Next row" data-tip="Next (j)"><svg class="ic"><use href="#i-down"/></svg></button><button class="tb icon" id="drawer-close" type="button" data-act="close" aria-label="Close panel" data-tip="Close (Esc)"><svg class="ic"><use href="#i-x"/></svg></button></div>
+  </header>
+  <div class="db" id="drawer-body"></div>
+</aside>
 <script id="snapshot" type="application/json">null</script>
 <script>
 "use strict";
@@ -399,14 +453,20 @@ async function api(path, params = {}) {
     if (r.__status) throw new ApiError(r.error, r.__status);
     return r;
   }
-  const qs = new URLSearchParams(p).toString();
-  const res = await fetch(path.slice(1) + (qs ? "?" + qs : ""));
+  const qs = new URLSearchParams(p).toString(), url = path.slice(1) + (qs ? "?" + qs : "");
+  const hit = CACHE.get(url);
+  if (hit && Date.now() - hit.t < 30000) return hit.data;
+  const res = await fetch(url);
   let data = {};
   try { data = await res.json(); } catch { /* non-JSON error */ }
   if (!res.ok) throw new ApiError(data.error || `${res.status} ${res.statusText}`, res.status);
+  CACHE.set(url, { t: Date.now(), data });
   return data;
 }
+/* a tab switch or a side panel reuses what was fetched in the last 30 seconds; refresh and writes clear it */
+const CACHE = new Map();
 async function post(path, body) {
+  CACHE.clear();
   const res = await fetch(path.slice(1), { method: "POST", headers: { "Content-Type": "application/json", "X-Greenlight": "1" }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(data.error || res.statusText, res.status);
@@ -525,31 +585,139 @@ function toast(msg) {
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), 2600);
 }
 
-/* ---------- tables: sortable headers, clickable rows, "show all" ---------- */
+/* ---------- tables: sortable headers, pages, rows that open a page or a side panel ---------- */
 const TABLES = {};
 function table(id, cols, rows, opt = {}) {
-  TABLES[id] = { cols, rows, opt, sort: opt.sort ?? -1, dir: opt.dir ?? -1, limit: opt.limit || 0 };
+  TABLES[id] = { cols, rows, opt, sort: opt.sort ?? -1, dir: opt.dir ?? -1, size: opt.limit || 0, page: 0 };
   return `<div class="tw" id="${id}">${tableInner(id)}</div>`;
+}
+function sortedRows(T) {
+  const rows = T.rows.slice();
+  if (T.sort >= 0) {
+    const f = T.cols[T.sort].sort;
+    rows.sort((a, b) => { const x = f(a), y = f(b); if (x == null || y == null) return (x == null) - (y == null); return (x < y ? -1 : x > y ? 1 : 0) * T.dir; });
+  }
+  return rows;
 }
 function tableInner(id) {
   const T = TABLES[id], { cols, opt } = T;
-  const rows = T.rows.slice();
-  if (T.sort >= 0) {
-    const f = cols[T.sort].sort;
-    rows.sort((a, b) => { const x = f(a), y = f(b); if (x == null || y == null) return (x == null) - (y == null); return (x < y ? -1 : x > y ? 1 : 0) * T.dir; });
-  }
+  const rows = sortedRows(T);
   if (!rows.length) return `<p class="empty">${opt.empty || "Nothing here."}</p>`;
-  const shown = T.limit && rows.length > T.limit ? rows.slice(0, T.limit) : rows;
+  const pages = T.size ? Math.ceil(rows.length / T.size) : 1;
+  T.page = Math.max(0, Math.min(T.page, pages - 1));
+  const shown = T.size ? rows.slice(T.page * T.size, (T.page + 1) * T.size) : rows;
+  const open = hashParts()[1].get("panel");
   const head = cols.map((c, i) => `<th class="${c.cls || ""}"${c.sort ? ` data-col="${i}" tabindex="0" aria-sort="${T.sort === i ? (T.dir > 0 ? "ascending" : "descending") : "none"}"` : ""}${c.tip ? ` data-tip="${esc(c.tip)}"` : ""}>${esc(c.h)}</th>`).join("");
-  const body = shown.map(r => { const href = opt.href && opt.href(r); return `<tr${href ? ` data-href="${esc(href)}"` : ""}>${cols.map(c => `<td class="${c.cls || ""}">${c.cell(r)}</td>`).join("")}</tr>`; }).join("");
-  const more = shown.length < rows.length ? `<div class="more"><button class="btn ghost sm" type="button" data-act="more" data-t="${id}">Show all ${rows.length}</button></div>` : "";
-  return `<table class="t"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>${more}`;
+  const body = shown.map(r => {
+    const panel = opt.panel && opt.panel(r), href = !panel && opt.href && opt.href(r);
+    const attrs = panel ? ` data-panel="${esc(panel)}" tabindex="0"${panel === open ? ` class="sel"` : ""}` : href ? ` data-href="${esc(href)}"` : "";
+    return `<tr${attrs}>${cols.map(c => `<td class="${c.cls || ""}">${c.cell(r)}</td>`).join("")}</tr>`;
+  }).join("");
+  const first = T.page * T.size + 1, last = Math.min(rows.length, (T.page + 1) * T.size);
+  const pager = pages > 1 ? `<div class="pager"><span>${first}-${last} of ${rows.length}</span><button class="tb icon" type="button" data-act="page" data-t="${id}" data-d="-1" aria-label="Previous page"${T.page === 0 ? " disabled" : ""}>${icon("left")}</button><button class="tb icon" type="button" data-act="page" data-t="${id}" data-d="1" aria-label="Next page"${T.page >= pages - 1 ? " disabled" : ""}>${icon("right")}</button></div>` : "";
+  return `<table class="t"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>${pager}`;
 }
 function sortBy(th) {
   const box = th.closest(".tw"), T = TABLES[box.id], i = Number(th.dataset.col);
   if (T.sort === i) T.dir = -T.dir; else { T.sort = i; T.dir = T.cols[i].dir || -1; }
+  T.page = 0;
   box.innerHTML = tableInner(box.id);
 }
+
+/* ---------- side panel ---------- */
+/* The open panel is part of the URL (#/usage/prs?panel=pr:12): Back closes it, a link opens it, and opening one
+   leaves the page under it alone. PANELS[kind](id) returns { title, sub, actions, body, after }. */
+const PANELS = {};
+const drawer = document.getElementById("drawer");
+let drawerKey = null, drawerToken = 0, drawerFrom = null;
+function hashParts() {
+  const h = location.hash || "#/", i = h.indexOf("?");
+  return i < 0 ? [h, new URLSearchParams()] : [h.slice(0, i), new URLSearchParams(h.slice(i + 1))];
+}
+function panelHref(key) { const [path] = hashParts(); return key ? `${path}?panel=${encodeURIComponent(key)}` : path; }
+const panelLink = (key, text, cls = "tl") => `<a class="${cls}" href="${esc(panelHref(key))}">${text}</a>`;
+function markSelected(key) {
+  document.querySelectorAll("tr.sel").forEach(r => r.classList.remove("sel"));
+  if (key) document.querySelectorAll(`tr[data-panel="${CSS.escape(key)}"]`).forEach(r => r.classList.add("sel"));
+}
+async function syncDrawer() {
+  const key = hashParts()[1].get("panel");
+  markSelected(key);
+  if (!key) { closeDrawerUI(); return; }
+  if (key === drawerKey && !drawer.hidden) return;
+  const i = key.indexOf(":"), fn = PANELS[key.slice(0, i)];
+  if (i < 0 || !fn) { closeDrawerUI(); return; }
+  const tok = ++drawerToken, opening = drawer.hidden;
+  if (opening) drawerFrom = document.activeElement;
+  drawerKey = key;
+  drawer.hidden = false;
+  document.body.classList.add("panel-open");
+  document.getElementById("drawer-title").textContent = "Loading";
+  document.getElementById("drawer-sub").textContent = "";
+  document.getElementById("drawer-actions").innerHTML = "";
+  const body = document.getElementById("drawer-body");
+  body.innerHTML = `<div class="panel skel"></div><div class="panel skel tall"></div>`;
+  stepButtons();
+  if (opening) drawer.focus({ preventScroll: true });
+  try {
+    const p = await fn(key.slice(i + 1));
+    if (tok !== drawerToken) return;
+    document.getElementById("drawer-title").innerHTML = p.title;
+    document.getElementById("drawer-sub").innerHTML = p.sub || "";
+    document.getElementById("drawer-actions").innerHTML = p.actions || "";
+    body.innerHTML = p.body;
+    body.scrollTop = 0;
+    if (p.after) p.after();
+  } catch (e) {
+    if (tok !== drawerToken) return;
+    document.getElementById("drawer-title").textContent = "Couldn't open this";
+    body.innerHTML = errorBox(e);
+  }
+}
+function closeDrawerUI() {
+  if (drawer.hidden) return;
+  drawer.hidden = true;
+  drawerKey = null;
+  document.body.classList.remove("panel-open");
+  markSelected(null);
+  if (drawerFrom && document.contains(drawerFrom)) drawerFrom.focus({ preventScroll: true });
+  drawerFrom = null;
+}
+function setPanel(key, replace) {
+  const url = panelHref(key);
+  if (replace) { history.replaceState(null, "", url); syncDrawer(); } else location.hash = url;
+}
+/* the table on the page that lists the open panel's row, for previous and next */
+function panelTable() {
+  for (const [id, T] of Object.entries(TABLES)) {
+    if (!T.opt.panel || !document.getElementById(id) || drawer.contains(document.getElementById(id))) continue;
+    const keys = sortedRows(T).map(T.opt.panel);
+    const at = keys.indexOf(drawerKey);
+    if (at >= 0) return { id, T, keys, at };
+  }
+  return null;
+}
+function stepButtons() {
+  const t = panelTable();
+  drawer.querySelectorAll('[data-act="step"]').forEach(b => {
+    const to = t ? t.at + Number(b.dataset.d) : -1;
+    b.disabled = !t || to < 0 || to >= t.keys.length;
+  });
+}
+function stepPanel(d) {
+  const t = panelTable();
+  if (!t || t.at + d < 0 || t.at + d >= t.keys.length) return;
+  const to = t.at + d;
+  if (t.T.size && Math.floor(to / t.T.size) !== t.T.page) {
+    t.T.page = Math.floor(to / t.T.size);
+    document.getElementById(t.id).innerHTML = tableInner(t.id);
+  }
+  setPanel(t.keys[to], true);
+}
+/* building blocks for panels */
+const facts = items => `<div class="facts">${items.map(([k, v, tipText]) => `<div><div class="k">${esc(k)}${info(tipText)}</div><div class="v">${v}</div></div>`).join("")}</div>`;
+const section = (title, body, tipText) => `<section><h3>${esc(title)}${info(tipText)}</h3>${body}</section>`;
+const boxed = html => `<div class="box">${html}</div>`;
 
 /* ---------- charts (plain SVG, redrawn on resize) ---------- */
 const tip = document.getElementById("tip");
@@ -725,7 +893,7 @@ async function overviewView(tok) {
   setSynced(d.synced);
   const t = d.totals, f = d.field;
   const share = d.days.map((_, i) => { const all = d.runs_first[i] + d.runs_rerun[i]; return all ? d.runs_rerun[i] / all : null; });
-  const field = f.tests.length ? `<div class="hm">${f.tests.map(r => `<a class="hmr" href="${testHref(r.test_id)}"><span class="n" data-tip="${esc(r.test_id)}">${esc(splitId(r.test_id)[1])}${r.quarantined ? ' <span class="q">quarantined</span>' : ""}</span>${cells(r.cells, f.commits)}</a>`).join("")}
+  const field = f.tests.length ? `<div class="hm">${f.tests.map(r => `<a class="hmr" href="${esc(panelHref(`test:${r.test_id}`))}"><span class="n" data-tip="${esc(r.test_id)}">${esc(splitId(r.test_id)[1])}${r.quarantined ? ' <span class="q">quarantined</span>' : ""}</span>${cells(r.cells, f.commits)}</a>`).join("")}
       <div class="hmx"><span></span><span><span>${f.commits.length ? esc(ago(f.commits[0].first_at)) : ""}</span><span>Latest commit</span></span></div></div>`
     : `<p class="empty">No test failed in the last ${DAYS} days.</p>`;
   view.innerHTML = `
@@ -763,7 +931,7 @@ async function flakyView(tok) {
   ];
   view.innerHTML = `<div class="grid">${panel({ title: "Flaky tests", tip: `Tests that passed and failed on the same code in the last ${DAYS} days.`, flush: true,
     actions: `<input type="search" class="inp" id="q" placeholder="Filter tests" aria-label="Filter tests"><label class="chk"><input type="checkbox" id="hideq"> Hide quarantined</label><span class="dim" id="count"></span>`,
-    body: table("t-flaky", cols, d.tests, { sort: 3, href: r => testHref(r.test_id), empty: `No test flipped in the last ${DAYS} days. Flips need a commit tested more than once.` }) })}</div>`;
+    body: table("t-flaky", cols, d.tests, { sort: 3, limit: 20, panel: r => `test:${r.test_id}`, empty: `No test flipped in the last ${DAYS} days. Flips need a commit tested more than once.` }) })}</div>`;
   const q = document.getElementById("q"), hq = document.getElementById("hideq");
   const draw = () => {
     const term = q.value.trim().toLowerCase();
@@ -831,7 +999,7 @@ async function testView(tok, id) {
     </div>
     <div class="grid">
       ${panel({ cls: "s5", title: "Failure messages", flush: true, body: d.signatures.length ? `<div class="sigs">${d.signatures.map(g => `<div class="sig"><div class="kv"><span><b>${plural(g.count, "failure")}</b></span><span>last ${when(g.last_at)}</span></div><div class="msg">${esc(g.sample || "(no message)")}</div></div>`).join("")}</div>` : `<p class="empty">No failures in the last ${DAYS} days.</p>` })}
-      ${panel({ cls: "s7", title: "Executions", flush: true, actions: `<span class="dim">${d.executions.length}</span>`, body: table("t-exec", execCols, d.executions, { limit: 15, href: e => `#/run/${e.run_id}` }) })}
+      ${panel({ cls: "s7", title: "Executions", flush: true, actions: `<span class="dim">${d.executions.length}</span>`, body: table("t-exec", execCols, d.executions, { limit: 15, panel: e => `run:${e.run_id}` }) })}
     </div>`;
   const el = document.getElementById("c-dur");
   chart(el, { days: d.durations.days, label: "Daily median duration", format: "ms", lines: [{ values: d.durations.values, color: "var(--series)", label: "Median", area: true }] });
@@ -877,7 +1045,7 @@ async function runsView(tok) {
       ${stat({ cls: "s4", k: "Real failures", v: by("REAL_FAILURE"), s: "blocked" })}
     </div>
     <div class="grid">${panel({ title: "Runs", tip: "The newest recorded runs and what the gate decided for each.", flush: true, actions: `<span class="dim">${plural(d.runs.length, "run")}</span>`,
-      body: table("t-runs", cols, d.runs, { href: r => `#/run/${r.run_id}`, empty: "No runs yet. Record one with <code>greenlight run -- pytest</code>." }) })}</div>`;
+      body: table("t-runs", cols, d.runs, { limit: 20, panel: r => `run:${r.run_id}`, empty: "No runs yet. Record one with <code>greenlight run -- pytest</code>." }) })}</div>`;
 }
 
 const WHY = {
@@ -912,7 +1080,7 @@ async function runView(tok, id) {
     </div>
     <div class="grid">
       ${panel({ title: t.failures.length ? "Failing tests" : "No failing tests", tip: `${plural(r.tests, "test")} ran. Blocking failures come first.`, flush: true, actions: `<span class="dim">${t.failures.length} of ${r.tests}</span>`,
-        body: t.failures.length ? table("t-fails", cols, fails, { sort: 0, dir: 1 }) : `<p class="empty">Every test passed on the final attempt.</p>`, foot: partial })}
+        body: t.failures.length ? table("t-fails", cols, fails, { sort: 0, dir: 1, limit: 20 }) : `<p class="empty">Every test passed on the final attempt.</p>`, foot: partial })}
     </div>
     ${t.passed_on_retry.length ? `<div class="grid">${panel({ title: "Passed only on retry", tip: "Failed at least once in this run, then passed. Counts toward flake history, doesn't block.", body: `<ul class="ids">${t.passed_on_retry.map(id => `<li><a href="${testHref(id)}">${esc(id)}</a></li>`).join("")}</ul>` })}</div>` : ""}`;
 }
@@ -997,10 +1165,10 @@ async function quarantineView(tok) {
     </div>
     <div class="grid">
       ${panel({ title: "Suggested", tip: `Flipped on 2 or more commits in the last ${DAYS} days and not quarantined yet.`, flush: true, actions: LIVE && d.suggested.length ? `<button class="btn sm" type="button" data-act="qall">Quarantine all ${d.suggested.length}</button>` : "",
-        body: table("t-sug", sugCols, d.suggested, { sort: 1, href: r => testHref(r.test_id), empty: "Nothing to suggest." }) })}
+        body: table("t-sug", sugCols, d.suggested, { sort: 1, limit: 15, panel: r => `test:${r.test_id}`, empty: "Nothing to suggest." }) })}
     </div>
     <div class="grid">
-      ${panel({ cls: "s8", title: "Quarantined", flush: true, body: table("t-quar", qCols, d.quarantined, { sort: 1, href: r => testHref(r.test_id), empty: "No tests are quarantined." }) })}
+      ${panel({ cls: "s8", title: "Quarantined", flush: true, body: table("t-quar", qCols, d.quarantined, { sort: 1, limit: 15, panel: r => `test:${r.test_id}`, empty: "No tests are quarantined." }) })}
       ${panel({ cls: "s4", title: "Ready to release", tip: "Quarantined, 10 or more runs and no failures in the last 14 days. Releasing is your call.", flush: true, body: table("t-rel", relCols, d.release_candidates, { sort: 1, href: r => testHref(r.test_id), empty: "None yet." }) })}
     </div>`;
 }
@@ -1207,7 +1375,172 @@ async function deliveryView(tok) {
 }
 
 /* ---------- token usage (Claude Code) ---------- */
-async function usageView(tok) {
+const COST_TIP = "Tokens priced like input tokens, from Claude's API prices: output 5x, a cache read 0.1x, a cache write 1.25x (2x when it lasts an hour). The same weights for every model, so sessions compare.";
+const CTX_NAMES = { system: "System prompt and tools", conversation: "Conversation", test: "Test runs", build: "Builds", git: "git and gh", read: "File reads", search: "Searches", web: "Web", shell: "Other shell commands", image: "Images", edit: "Edits", subagent: "Subagent reports", skill: "Skills", other: "Other tools" };
+const CTX_HINT = { system: "What every request starts with: instructions, tool definitions, CLAUDE.md", conversation: "Claude's own replies, your messages, reminders", read: "Read, and cat, sed or head in a shell", search: "Grep, Glob, and grep, find or ls in a shell", web: "WebFetch, WebSearch, curl", image: "Screenshots and pictures, priced by size" };
+const CTX_ADVICE = {
+  conversation: "Everything Claude wrote and every message stays in context and is read again by each request. Use /compact between tasks, or start a new session for new work. Asking for edits instead of whole-file rewrites keeps replies short.",
+  system: "Paid on every request. Keep CLAUDE.md and always-on instructions short, and turn off MCP servers a project doesn't use: each one adds its tool definitions.",
+  read: "A file read stays in context until the session compacts. Read with an offset and limit, or Grep for the lines first. Lockfiles, snapshots and logs are rarely worth reading whole.",
+  test: "A test run's output stays in context for the rest of the session. Run only the tests the change needs, with a quiet reporter, and send long logs to a file to read just the failures.",
+  search: "Narrow searches with a path or glob and a result limit.",
+  shell: "Long command output stays in context. Pipe it through tail or grep, or into a file.",
+  image: "An image costs about width x height / 750 tokens and stays in context like text. Look at screenshots in a subagent and keep only its verdict.",
+  web: "Fetched pages stay in context. Ask WebFetch a narrow question so it returns less.",
+  git: "Use --stat, --oneline and -n; a full diff of a big change is long.",
+  edit: "Edits are cheap: only the change goes into context.",
+  subagent: "A subagent's report is all the main session keeps. Ask for short reports.",
+  build: "Build output stays in context. Keep it quiet unless it fails.",
+  skill: "A skill's instructions load once and stay in context.",
+  other: "Results of other tools.",
+};
+const WASTE = {
+  switches: { title: "Earlier tasks still in context", advice: "When a session moves to a new branch, the work before it stays in context and every later request reads it again. /compact with a note of what to keep, or a new session, drops it." },
+  idle: { title: "Cache rebuilt after idle", advice: "The prompt cache lasts an hour in a main session and 5 minutes in a subagent. The first request after a longer break writes the whole context again at the cache write price. Coming back to start new work? Begin a new session instead." },
+  repeats: { title: "Files read again", advice: "Reads of the same file and range while the first read was still in context and nothing had edited it." },
+};
+const ctxName = c => CTX_NAMES[c] || (c.startsWith("mcp:") ? `MCP: ${c.slice(4)}` : c);
+const shareOf = (n, total) => total ? `${Math.round(n / total * 1000) / 10}%` : "0%";
+const meter = (n, total) => `<span class="meter"><i style="width:${total ? Math.min(100, n / total * 100) : 0}%"></i></span> ${shareOf(n, total)}`;
+/* a claude.ai id when there is one; a local session's UUID is recognizable by its first block */
+const sessionName = x => x.remote_session || (/^[0-9a-f]{8}-[0-9a-f-]{27}$/.test(x.session_id || "") ? x.session_id.slice(0, 8) : String(x.session_id || ""));
+const ext = (url, text) => isUrl(url) ? `<a class="tb" href="${esc(url)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(text)}"><span class="lbl">${esc(text)}</span>${icon("ext")}</a>` : "";
+const goto = (href, text) => `<a class="tb" href="${esc(href)}" aria-label="${esc(text)}"><span class="lbl">${esc(text)}</span>${icon("right")}</a>`;
+const prState = st => st === "merged" ? tag("success", "merged") : st === "open" ? tag("open-ok", "open") : tag("closed", st);
+const tokenFacts = r => facts([["Cost", tk(r.weighted), COST_TIP], ["Output", tk(r.output_tokens)], ["Cache reads", tk(r.cache_read_tokens)], ["Requests", tk(r.requests)]]);
+function ctxTable(id, cats, total, limit = 8) {
+  return boxed(table(id, [
+    { h: "What", cell: c => panelLink(`cat:${c.category}`, esc(ctxName(c.category))), sort: c => ctxName(c.category), dir: 1, cls: "wrap" },
+    { h: "Re-read", cell: c => tk(c.carried_tokens), sort: c => c.carried_tokens, cls: "num" },
+    { h: "Share", cell: c => meter(c.weighted, total), sort: c => c.weighted, cls: "num nw" },
+  ], cats, { sort: 2, limit, empty: "No context breakdown recorded." }));
+}
+const sessionCols = [
+  { h: "Session", cell: x => esc(sessionName(x)), sort: x => sessionName(x), dir: 1, cls: "mono" },
+  { h: "Last active", cell: x => when(x.last_at), sort: x => x.last_at, cls: "nw hide-sm" },
+  { h: "Cost", cell: x => tk(x.weighted), sort: x => x.weighted, cls: "num" },
+];
+
+PANELS.test = async id => {
+  const d = await api("/api/test", { days: DAYS, id });
+  const s = d.stats || { flip_shas: 0, eligible_shas: 0, failures: 0, executions: 0, distinct_failure_sigs: 0, classification: "stable", flake_score: 0 };
+  const [cls, name] = splitId(d.test_id), q = d.quarantine;
+  const act = !LIVE ? "" : q ? `<button class="tb" type="button" data-act="u" data-id="${esc(d.test_id)}">Release</button>`
+    : `<button class="tb" type="button" data-act="q" data-id="${esc(d.test_id)}" data-why="quarantined from the dashboard">Quarantine</button>`;
+  return {
+    title: `<span class="mono">${esc(name)}</span>`, sub: `${cls ? `<span class="mono">${esc(cls)}</span> ` : ""}<span class="tags">${tag(s.classification)}${q ? tag("quarantined") : ""}</span>`,
+    actions: act + goto(testHref(d.test_id), "Full history"),
+    body: facts([["Flipped on", `${s.flip_shas} <small class="dim">of ${s.eligible_shas}</small>`, "Commits where it both passed and failed, of those it ran on more than once"],
+                 ["Failures", `${s.failures} <small class="dim">of ${s.executions}</small>`], ["Failure messages", `${s.distinct_failure_sigs}`],
+                 ["Confidence", (s.flake_score || 0).toFixed(2), "How sure greenlight is that it's flaky, from 0 to 1"]])
+      + (q ? `<p class="advice">Quarantined ${esc(ago(q.added_at))}: ${esc(q.reason || "no reason given")}. The gate ignores its failures.</p>` : "")
+      + section("By commit", d.commits.length ? cells(d.commits.map(c => [c.passes, c.fails]), d.commits) + fieldLegend() : `<p class="empty">No executions yet.</p>`, "Each commit it ran on, oldest on the left")
+      + (d.signatures.length ? section("Failure messages", `<div class="sigs box">${d.signatures.slice(0, 3).map(g => `<div class="sig"><div class="kv"><span><b>${plural(g.count, "failure")}</b></span><span>last ${when(g.last_at)}</span></div><div class="msg">${esc(g.sample || "(no message)")}</div></div>`).join("")}</div>`) : "")
+      + section("Executions", boxed(table("d-texec", [
+          { h: "When", cell: e => when(e.started_at), sort: e => e.started_at, cls: "nw" },
+          { h: "Commit", cell: e => sha(e.sha), cls: "nw" },
+          { h: "Result", cell: e => e.outcome === "pass" ? tag("PASS", "passed") : e.outcome === "skip" ? tag("skipped", "skipped") : tag("failing", "failed"), sort: e => e.outcome, dir: 1 },
+          { h: "Duration", cell: e => dur(e.duration_ms), sort: e => e.duration_ms, cls: "num" },
+        ], d.executions, { sort: 0, limit: 8, panel: e => `run:${e.run_id}` }))),
+  };
+};
+PANELS.run = async id => {
+  const t = await api("/api/run", { id }), r = t.run;
+  const order = { real_failure: 0, new_test: 1, known_flaky: 2, suspect_flaky: 3, quarantined: 4 };
+  const fails = [...t.failures].sort((a, b) => order[a.category] - order[b.category]);
+  return {
+    title: `Run ${r.run_id}`, sub: `${sha(r.commit_sha)}${r.branch ? ` on ${esc(r.branch)}` : ""}, ${esc(ago(r.started_at))}`,
+    actions: goto(`#/run/${r.run_id}`, "Full page"),
+    body: gate(t) + (fails.length ? section(`Failing tests (${fails.length} of ${r.tests})`, boxed(table("d-rfails", [
+        { h: "Verdict", cell: f => tag(f.category), sort: f => order[f.category], dir: 1, cls: "fit" },
+        { h: "Test", cell: f => `<span class="mono">${esc(splitId(f.test_id)[1])}</span><div class="why">${esc(WHY[f.category](f))}</div>`, sort: f => f.test_id, dir: 1, cls: "wrap" },
+      ], fails, { sort: 0, dir: 1, limit: 10, panel: f => `test:${f.test_id}` }))) : `<p class="empty">Every test passed on the final attempt.</p>`)
+      + (t.passed_on_retry.length ? section("Passed only on retry", `<ul class="ids">${t.passed_on_retry.map(x => `<li>${panelLink(`test:${x}`, esc(x))}</li>`).join("")}</ul>`) : ""),
+  };
+};
+PANELS.pr = async id => {
+  const d = await api("/api/usage/detail", { days: DAYS, kind: "pr", key: id }), p = d.pr;
+  const ctxTotal = d.context.categories.reduce((a, c) => a + c.weighted, 0);
+  return {
+    title: `#${p.number} ${esc(p.title || "")}`, sub: `${esc(p.head)} ${prState(p.state)}`, actions: ext(p.url, "GitHub"),
+    body: tokenFacts(p) + section("Where its context went", ctxTable("d-prctx", d.context.categories, ctxTotal))
+      + section(`Sessions (${d.sessions.length})`, boxed(table("d-prsess", sessionCols, d.sessions, { sort: 2, limit: 8, panel: x => `session:${x.session_id}` }))),
+  };
+};
+PANELS.session = async id => {
+  const d = await api("/api/usage/detail", { days: DAYS, kind: "session", key: id }), x = d.session, cx = d.context;
+  const total = cx.categories.reduce((a, c) => a + c.weighted, 0);
+  const sw = d.switches, rb = d.rebuilds;
+  return {
+    title: esc(sessionName(x)), sub: `${esc(x.branches.slice(0, 4).join(", "))}${x.branches.length > 4 ? ", ..." : ""}${x.first_at ? `<br>${esc(full(x.first_at))} to ${esc(full(x.last_at))}` : ""}`,
+    actions: ext(x.url, "Open in Claude"),
+    body: tokenFacts(x) + section("Where its context went", ctxTable("d-sctx", cx.categories, total))
+      + (sw.length ? section("Earlier tasks still in context", boxed(table("d-ssw", [
+          { h: "When", cell: r => when(r.at), sort: r => r.at, cls: "nw" },
+          { h: "New branch", cell: r => `${esc(r.to_branch)}<div class="sub">after ${esc(r.from_branch)}</div>`, cls: "wrap" },
+          { h: "Inherited", cell: r => tk(r.context_tokens), sort: r => r.context_tokens, cls: "num" },
+          { h: "Re-read", cell: r => tk(r.carried_tokens), sort: r => r.carried_tokens, cls: "num" },
+        ], sw, { sort: 0, dir: 1, limit: 6 })), WASTE.switches.advice) : "")
+      + (rb.length ? section("Cache rebuilds", boxed(table("d-srb", [
+          { h: "When", cell: r => when(r.at), sort: r => r.at, cls: "nw" },
+          { h: "Why", cell: r => r.cause === "idle" ? `idle ${hrs(r.idle_seconds / 3600)}` : esc(r.cause), sort: r => r.cause, dir: 1 },
+          { h: "Rewritten", cell: r => tk(r.tokens), sort: r => r.tokens, cls: "num" },
+        ], rb, { sort: 0, dir: 1, limit: 6 }))) : "")
+      + (d.prs.length ? section("Pull requests", boxed(table("d-sprs", [
+          { h: "#", cell: p => p.number, sort: p => p.number, cls: "num" },
+          { h: "Pull request", cell: p => esc(p.title || ""), sort: p => p.title, dir: 1, cls: "wrap" },
+          { h: "Cost", cell: p => tk(p.weighted), sort: p => p.weighted, cls: "num" },
+        ], d.prs, { sort: 2, limit: 6, panel: p => `pr:${p.number}` }))) : ""),
+  };
+};
+PANELS.utest = async id => {
+  const d = await api("/api/usage/detail", { days: DAYS, kind: "test", key: id }), t = d.test;
+  const [cls, name] = splitId(id);
+  if (!t) return { title: esc(name), sub: esc(cls), body: `<p class="empty">No session spent tokens while this test was red in the last ${DAYS} days.</p>` };
+  return {
+    title: `<span class="mono">${esc(name)}</span>`, sub: `<span class="mono">${esc(cls)}</span>`,
+    actions: goto(testHref(id), "Test history"),
+    body: facts([["Cost while red", tk(t.weighted), COST_TIP], ["Times red", `${t.times_red}`], ["Still red", `${t.still_red}`, "Failed in a session, with no later run in that session passing it"], ["Sessions", `${t.sessions}`]])
+      + `<p class="advice">Tokens a session spent from a run that failed this test to the next run in that session that passed it. Two tests red at once both count the same tokens.</p>`,
+  };
+};
+PANELS.cat = async id => {
+  const d = await api("/api/usage/detail", { days: DAYS, kind: "category", key: id }), c = d.category;
+  return {
+    title: esc(ctxName(id)), sub: esc(CTX_HINT[id] || ""),
+    body: facts([["Cost", tk(c.weighted || 0), COST_TIP], ["Re-read", tk(c.carried_tokens || 0), "Cache reads of these tokens by later requests"], ["Added", tk(c.tokens || 0)], ["Calls", tk(c.calls || 0)]])
+      + `<p class="advice">${esc(CTX_ADVICE[id] || (id.startsWith("mcp:") ? "Results from this MCP server stay in context. Prefer its narrow tools and small page sizes." : ""))}</p>`
+      + section("Sessions that spent the most on it", boxed(table("d-csess", sessionCols, d.sessions, { sort: 2, limit: 6, panel: x => `session:${x.session_id}` })))
+      + (d.prs.length ? section("Pull requests", boxed(table("d-cprs", [
+          { h: "#", cell: p => p.number, sort: p => p.number, cls: "num" },
+          { h: "Pull request", cell: p => esc(p.title || ""), sort: p => p.title, dir: 1, cls: "wrap" },
+          { h: "Cost", cell: p => tk(p.weighted), sort: p => p.weighted, cls: "num" },
+        ], d.prs, { sort: 2, limit: 6, panel: p => `pr:${p.number}` }))) : ""),
+  };
+};
+PANELS.waste = async id => {
+  const w = WASTE[id];
+  if (!w) throw new ApiError("Nothing like that here.", 404);
+  const d = await api("/api/usage/detail", { days: DAYS, kind: "waste", key: id });
+  const who = { h: "Session", cell: r => esc(sessionName(r)), sort: r => sessionName(r), dir: 1, cls: "mono" };
+  const cols = id === "switches" ? [
+      { h: "When", cell: r => when(r.at), sort: r => r.at, cls: "nw hide-sm" }, who,
+      { h: "New branch", cell: r => `${esc(r.to_branch)}<div class="sub">after ${esc(r.from_branch)}</div>`, cls: "wrap" },
+      { h: "Re-read", cell: r => tk(r.carried_tokens), sort: r => r.carried_tokens, cls: "num" }]
+    : id === "idle" ? [
+      { h: "When", cell: r => when(r.at), sort: r => r.at, cls: "nw hide-sm" }, who,
+      { h: "Idle", cell: r => hrs(r.idle_seconds / 3600), sort: r => r.idle_seconds, cls: "num" },
+      { h: "Rewritten", cell: r => tk(r.tokens), sort: r => r.tokens, cls: "num" }]
+    : [who, { h: "Reads", cell: r => r.repeat_reads, sort: r => r.repeat_reads, cls: "num" },
+      { h: "Tokens", cell: r => tk(r.repeat_tokens), sort: r => r.repeat_tokens, cls: "num" }];
+  return {
+    title: esc(w.title), sub: `The largest in the last ${DAYS} days`,
+    body: `<p class="advice">${esc(w.advice)}</p>` + boxed(table("d-waste", cols, d.rows, { sort: id === "repeats" ? 2 : 3, limit: 10, panel: r => `session:${r.session_id}`, empty: "None in this window." })),
+  };
+};
+
+const USAGE_TABS = [["", "Overview"], ["prs", "Pull requests"], ["tests", "Tests"], ["sessions", "Sessions"]];
+async function usageView(tok, tab = "") {
   const d = await api("/api/usage", { days: DAYS });
   if (tok !== renderToken) return;
   const t = d.totals;
@@ -1215,86 +1548,120 @@ async function usageView(tok) {
     view.innerHTML = `<div class="grid">${noData(`No token usage in the last ${DAYS} days.`, "<code>greenlight setup --project</code> adds a hook that records each Claude Code session's token counts after every turn: counts, branches and times, never prompts or code.")}</div>`;
     return;
   }
-  const fresh = r => r.input_tokens + r.cache_write_tokens;
+  const cx = d.context || { categories: [], rebuilds: { by_cause: [] }, task_switches: {} };
+  const pct = n => shareOf(n, t.weighted);
   const tokCols = [
-    { h: "Output", cell: r => tk(r.output_tokens), sort: r => r.output_tokens, cls: "num" },
-    { h: "Input", cell: r => tk(fresh(r)), sort: r => fresh(r), cls: "num", tip: "Uncached input plus cache writes" },
+    { h: "Cost", cell: r => tk(r.weighted), sort: r => r.weighted, cls: "num", tip: COST_TIP },
+    { h: "Output", cell: r => tk(r.output_tokens), sort: r => r.output_tokens, cls: "num hide-sm" },
     { h: "Cache reads", cell: r => tk(r.cache_read_tokens), sort: r => r.cache_read_tokens, cls: "num hide-sm" },
   ];
-  const prCols = [
-    { h: "#", cell: p => isUrl(p.url) ? `<a class="tl" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${p.number}</a>` : p.number, sort: p => p.number, cls: "num" },
-    { h: "Pull request", cell: p => `${esc(p.title || "")}<div class="sub">${esc(p.head || "")}</div>`, sort: p => p.title, dir: 1, cls: "wrap" },
-    { h: "Sessions", cell: p => p.sessions, sort: p => p.sessions, cls: "num hide-sm" },
-    ...tokCols,
-    { h: "State", cell: p => p.state === "merged" ? tag("success", "merged") : p.state === "open" ? tag("open-ok", "open") : tag("closed", p.state), sort: p => p.state, dir: 1, cls: "hide-sm" },
-  ];
-  const testCols = [
-    { h: "Test", cell: x => testCell(x.test_id), sort: x => x.test_id, dir: 1, cls: "wrap" },
-    { h: "Times red", cell: x => `${x.times_red}${x.still_red ? `<span class="dim">, ${x.still_red} unfixed</span>` : ""}`, sort: x => x.times_red, cls: "num", tip: "Failed in a session; unfixed means no later run in that session passed it" },
-    ...tokCols,
-  ];
-  const sessCols = [
-    { h: "Last active", cell: x => when(x.last_at), sort: x => x.last_at, cls: "nw" },
-    { h: "Session", cell: x => (isUrl(x.url) ? `<a class="tl" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.remote_session)}</a>` : `<span class="mono">${esc(String(x.session_id).slice(0, 8))}</span>`) + `<div class="sub">${esc(x.branches.slice(0, 3).join(", "))}${x.branches.length > 3 ? ", ..." : ""}</div>`, cls: "wrap" },
-    { h: "Requests", cell: x => x.requests, sort: x => x.requests, cls: "num hide-sm" },
-    ...tokCols,
-  ];
-  const un = d.unattributed;
-  view.innerHTML = `
-    <div class="grid">
+  const counts = { prs: d.by_pr.length, tests: d.by_test.length, sessions: d.sessions.length };
+  const tabs = `<nav class="tabs" aria-label="Token usage">${USAGE_TABS.map(([k, label]) => `<a href="#/usage${k ? "/" + k : ""}"${k === tab ? ` aria-current="page"` : ""}>${label}${k ? ` <span class="n">${counts[k]}</span>` : ""}</a>`).join("")}</nav>`;
+  const tiles = `<div class="grid">
+      ${stat({ cls: "s3", k: "Cost", v: tk(t.weighted), s: "in input tokens", spark: d.weighted_per_day, tip: COST_TIP })}
       ${stat({ cls: "s3", k: "Output tokens", v: tk(t.output_tokens), s: `${tk(t.requests)} requests`, spark: d.output_per_day })}
-      ${stat({ cls: "s3", k: "Input tokens", v: tk(fresh(t)), s: "uncached plus cache writes", spark: d.input_per_day, tip: "What the model read that wasn't already in its cache." })}
-      ${stat({ cls: "s3", k: "Cache reads", v: tk(t.cache_read_tokens), s: "context reused from cache", spark: d.cache_read_per_day, tip: "Earlier context read back from the prompt cache. Usually the biggest number and the cheapest per token." })}
+      ${stat({ cls: "s3", k: "Cache reads", v: tk(t.cache_read_tokens), s: `${pct(t.cache_read_tokens * 0.1)} of cost`, spark: d.cache_read_per_day, tip: "Earlier context read back from the prompt cache by every request. Cheap per token, but the biggest number." })}
       ${stat({ cls: "s3", k: "Sessions", v: t.sessions, s: d.models.map(m => m.model).slice(0, 2).join(", ") })}
-    </div>
-    <div class="grid">
+    </div>${tabs}`;
+  let body = "";
+  if (tab === "prs") {
+    const un = d.unattributed;
+    body = `<div class="grid">${panel({ title: "By pull request", tip: "Tokens spent on each PR's branch until it merged or closed. A branch name a later PR reuses counts toward that one.", flush: true,
+      body: table("t-upr", [
+        { h: "#", cell: p => p.number, sort: p => p.number, cls: "num" },
+        { h: "Pull request", cell: p => `${esc(p.title || "")}<div class="sub">${esc(p.head || "")}</div>`, sort: p => p.title, dir: 1, cls: "wrap" },
+        { h: "Sessions", cell: p => p.sessions, sort: p => p.sessions, cls: "num hide-sm" },
+        ...tokCols,
+        { h: "State", cell: p => prState(p.state), sort: p => p.state, dir: 1, cls: "hide-sm" },
+      ], d.by_pr, { sort: 3, limit: 15, panel: p => `pr:${p.number}`, empty: "No usage on a pull request's branch yet." }),
+      foot: un.weighted ? `${tk(un.weighted)} of the cost was on branches without a pull request, like main.` : "" })}</div>`;
+  } else if (tab === "tests") {
+    body = `<div class="grid">${panel({ title: "While a test was red", tip: "Tokens a session spent from a run that failed the test to the next run in that session that passed it. Two tests red at once both count the same tokens.", flush: true,
+      body: table("t-utest", [
+        { h: "Test", cell: x => { const [cls, name] = splitId(x.test_id); return `<span class="mono">${esc(name)}</span>${cls ? `<div class="sub mono">${esc(cls)}</div>` : ""}`; }, sort: x => x.test_id, dir: 1, cls: "wrap" },
+        { h: "Times red", cell: x => `${x.times_red}${x.still_red ? `<span class="dim">, ${x.still_red} unfixed</span>` : ""}`, sort: x => x.times_red, cls: "num", tip: "Failed in a session; unfixed means no later run in that session passed it" },
+        ...tokCols,
+      ], d.by_test, { sort: 2, limit: 15, panel: x => `utest:${x.test_id}`, empty: "No test failed in a session that recorded usage." }) })}</div>`;
+  } else if (tab === "sessions") {
+    body = `<div class="grid">${panel({ title: "Sessions", flush: true,
+      body: table("t-usess", [
+        { h: "Last active", cell: x => when(x.last_at), sort: x => x.last_at, cls: "nw" },
+        { h: "Session", cell: x => `<span class="mono">${esc(sessionName(x))}</span><div class="sub">${esc(x.branches.slice(0, 3).join(", "))}${x.branches.length > 3 ? ", ..." : ""}</div>`, sort: x => sessionName(x), dir: 1, cls: "wrap" },
+        { h: "Requests", cell: x => x.requests, sort: x => x.requests, cls: "num hide-sm" },
+        ...tokCols,
+      ], d.sessions, { sort: 0, limit: 15, panel: x => `session:${x.session_id}` }) })}</div>`;
+  } else {
+    const sw = cx.task_switches || {};
+    const idle = (cx.rebuilds.by_cause || []).find(c => c.cause === "idle") || { rebuilds: 0, tokens: 0, weighted: 0 };
+    const drop = [
+      { k: WASTE.switches.title, v: tk(sw.carried_tokens || 0), href: panelHref("waste:switches"), tip: WASTE.switches.advice,
+        s: sw.count ? `${pct(sw.weighted)} of cost, ${plural(sw.count, "new branch", "new branches")} started with ${tk(Math.round(sw.context_tokens / sw.count))} on average` : "no new branch started in a full context" },
+      { k: WASTE.idle.title, v: tk(idle.tokens), href: panelHref("waste:idle"), tip: WASTE.idle.advice,
+        s: idle.rebuilds ? `${pct(idle.weighted)} of cost, ${plural(idle.rebuilds, "rebuild")}` : "none" },
+      { k: WASTE.repeats.title, v: tk(cx.repeat_tokens || 0), href: panelHref("waste:repeats"), tip: WASTE.repeats.advice,
+        s: cx.repeat_reads ? `${plural(cx.repeat_reads, "read")} of a file already in context, unchanged` : "none" },
+    ];
+    body = `<div class="grid">
+      ${panel({ cls: "s4", title: "Cost per day", tip: COST_TIP, body: `<div class="chart" id="c-cost"></div>` })}
       ${panel({ cls: "s4", title: "Output per day", body: `<div class="chart" id="c-out"></div>` })}
-      ${panel({ cls: "s4", title: "Input per day", tip: "Uncached input plus cache writes.", body: `<div class="chart" id="c-in"></div>` })}
       ${panel({ cls: "s4", title: "Cache reads per day", body: `<div class="chart" id="c-cache"></div>` })}
     </div>
     <div class="grid">
-      ${panel({ title: "By pull request", tip: "Tokens spent on each PR's branch until it merged or closed. A branch name a later PR reuses counts toward that one.", flush: true,
-        actions: `<span class="dim">${d.by_pr.length}</span>`,
-        body: table("t-upr", prCols, d.by_pr, { sort: 3, limit: 15, empty: "No usage on a pull request's branch yet." }),
-        foot: un.output_tokens ? `${tk(un.output_tokens)} output tokens were on branches without a pull request, like main.` : "" })}
-    </div>
-    <div class="grid">
-      ${panel({ title: "While a test was red", tip: "Tokens a session spent from a run that failed the test to the next run in that session that passed it. Two tests red at once both count the same tokens.", flush: true,
-        body: table("t-utest", testCols, d.by_test, { sort: 2, limit: 10, href: x => testHref(x.test_id), empty: "No test failed in a session that recorded usage." }) })}
-    </div>
-    <div class="grid">
-      ${panel({ title: "Sessions", flush: true, actions: `<span class="dim">${d.sessions.length}</span>`,
-        body: table("t-usess", sessCols, d.sessions, { sort: 0, limit: 10 }) })}
+      ${panel({ cls: "s8", title: "Where context goes", flush: true, tip: "Everything a request sends is read again by every request after it, until the session compacts. This splits those reads by what put the tokens there. Open a row for what to do about it.",
+        body: table("t-uctx", [
+          { h: "What", cell: c => `${esc(ctxName(c.category))}<div class="sub">${esc(CTX_HINT[c.category] || "")}</div>`, sort: c => ctxName(c.category), dir: 1, cls: "wrap" },
+          { h: "Calls", cell: c => c.calls ? tk(c.calls) : "", sort: c => c.calls, cls: "num hide-sm", tip: "Tool calls, or requests for the system prompt" },
+          { h: "Added", cell: c => tk(c.tokens), sort: c => c.tokens, cls: "num hide-sm", tip: "Tokens put into the context" },
+          { h: "Re-read", cell: c => tk(c.carried_tokens), sort: c => c.carried_tokens, cls: "num", tip: "Cache reads of them by every later request, until a compaction" },
+          { h: "Share of cost", cell: c => meter(c.weighted, t.weighted), sort: c => c.weighted, cls: "num nw" },
+        ], cx.categories, { sort: 4, limit: 8, panel: c => `cat:${c.category}`, empty: "No context breakdown yet: it comes from the usage hook in this version of greenlight." }) })}
+      <div class="s4 stack">${drop.map(x => stat(x)).join("")}</div>
     </div>`;
-  chart(document.getElementById("c-out"), { days: d.days, label: "Output tokens per day", format: "tok", bars: [{ values: d.output_per_day, color: "var(--series)", label: "Output" }] });
-  chart(document.getElementById("c-in"), { days: d.days, label: "Input tokens per day", format: "tok", bars: [{ values: d.input_per_day, color: "var(--series)", label: "Input" }] });
-  chart(document.getElementById("c-cache"), { days: d.days, label: "Cache reads per day", format: "tok", bars: [{ values: d.cache_read_per_day, color: "var(--neutral)", label: "Cache reads" }] });
+  }
+  view.innerHTML = tiles + body;
+  if (!tab) {
+    chart(document.getElementById("c-cost"), { days: d.days, label: "Cost per day, in input tokens", format: "tok", bars: [{ values: d.weighted_per_day, color: "var(--series)", label: "Cost" }] });
+    chart(document.getElementById("c-out"), { days: d.days, label: "Output tokens per day", format: "tok", bars: [{ values: d.output_per_day, color: "var(--series)", label: "Output" }] });
+    chart(document.getElementById("c-cache"), { days: d.days, label: "Cache reads per day", format: "tok", bars: [{ values: d.cache_read_per_day, color: "var(--neutral)", label: "Cache reads" }] });
+  }
 }
 
-/* ---------- actions (quarantine, show all) ---------- */
+/* ---------- actions (quarantine, pages, side panels) ---------- */
 document.addEventListener("click", async ev => {
   const th = ev.target.closest("th[data-col]");
   if (th) { sortBy(th); return; }
   const b = ev.target.closest("button[data-act]");
   if (b) {
     const a = b.dataset.act;
-    if (a === "more") { TABLES[b.dataset.t].limit = 0; document.getElementById(b.dataset.t).innerHTML = tableInner(b.dataset.t); return; }
+    if (a === "page") { const T = TABLES[b.dataset.t]; T.page += Number(b.dataset.d); document.getElementById(b.dataset.t).innerHTML = tableInner(b.dataset.t); stepButtons(); return; }
+    if (a === "step") { stepPanel(Number(b.dataset.d)); return; }
+    if (a === "close") { setPanel(null, true); return; }
     if (!LIVE) return;
     b.disabled = true;
     try {
       if (a === "qall") { const r = await post("/api/sweep", { apply: true }); toast(`Quarantined ${plural(r.to_quarantine.length, "test")}`); }
       else if (a === "q") { await post("/api/quarantine", { test_id: b.dataset.id, reason: b.dataset.why }); toast(`Quarantined ${splitId(b.dataset.id)[1]}`); }
       else if (a === "u") { await post("/api/unquarantine", { test_id: b.dataset.id }); toast(`Released ${splitId(b.dataset.id)[1]}`); }
+      drawerKey = null;
       render();
     } catch (e) { b.disabled = false; toast(e.message); }
     return;
   }
+  const pr = ev.target.closest("tr[data-panel]");
+  if (pr && !ev.target.closest("a, button, input, select, summary, label")) { setPanel(pr.dataset.panel, !drawer.hidden); return; }
   const tr = ev.target.closest("tr[data-href]");
   if (tr && !ev.target.closest("a, button, input, select, summary, label")) location.hash = tr.dataset.href;
 });
 document.addEventListener("keydown", ev => {
   if (ev.key === "Enter" && ev.target.matches && ev.target.matches("th[data-col]")) sortBy(ev.target);
-  if (ev.key === "Escape") { closeMenu(); document.body.classList.remove("nav-open"); tipOff(); }
+  if (ev.key === "Enter" && ev.target.matches && ev.target.matches("tr[data-panel]")) setPanel(ev.target.dataset.panel, !drawer.hidden);
+  if (ev.key === "Escape") { closeMenu(); document.body.classList.remove("nav-open"); tipOff(); if (!drawer.hidden) setPanel(null, true); }
+  const typing = ev.target.closest && ev.target.closest("input, textarea, select, [contenteditable]");
+  if (!drawer.hidden && !typing && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
+    const inside = drawer.contains(document.activeElement);
+    if (ev.key === "j" || (inside && ev.key === "ArrowDown")) { ev.preventDefault(); stepPanel(1); }
+    if (ev.key === "k" || (inside && ev.key === "ArrowUp")) { ev.preventDefault(); stepPanel(-1); }
+  }
 });
 
 /* ---------- shell: crumbs, sync status, time range, theme, nav drawer ---------- */
@@ -1328,7 +1695,7 @@ rangeMenu.addEventListener("click", ev => {
   const b = ev.target.closest("button[data-days]"); if (!b) return;
   DAYS = Number(b.dataset.days);
   try { localStorage.setItem("greenlight-days", String(DAYS)); } catch { /* storage unavailable */ }
-  closeMenu(); syncRange(); render();
+  closeMenu(); syncRange(); drawerKey = null; render();  /* an open side panel reloads for the new range too */
 });
 document.addEventListener("pointerdown", ev => { if (!ev.target.closest("#picker")) closeMenu(); });
 const themeBtn = document.getElementById("theme");
@@ -1346,7 +1713,7 @@ themeBtn.addEventListener("click", () => {
 });
 document.getElementById("menu-btn").addEventListener("click", () => document.body.classList.toggle("nav-open"));
 document.getElementById("scrim").addEventListener("click", () => document.body.classList.remove("nav-open"));
-document.getElementById("refresh").addEventListener("click", () => render());
+document.getElementById("refresh").addEventListener("click", () => { CACHE.clear(); drawerKey = null; render(); });
 
 /* ---------- router ---------- */
 const ROUTES = [
@@ -1360,13 +1727,13 @@ const ROUTES = [
   [/^#\/pipelines$/, "pipelines", [["Delivery"]], "Pipelines", tok => pipelinesView(tok), true],
   [/^#\/pipeline\/(.+)$/, "pipelines", [["Delivery"], ["Pipelines", "#/pipelines"]], "Pipeline run", (tok, m) => pipelineView(tok, decodeURIComponent(m[1])), false],
   [/^#\/delivery$/, "delivery", [["Delivery"]], "DORA and GitHub", tok => deliveryView(tok), true],
-  [/^#\/usage$/, "usage", [["Agents"]], "Token usage", tok => usageView(tok), true],
+  [/^#\/usage(?:\/(prs|tests|sessions))?$/, "usage", [["Agents"]], "Token usage", (tok, m) => usageView(tok, m[1] || ""), true],
 ];
 let lastHash = null;
 async function render() {
   const tok = ++renderToken;
   tipOff(); closeMenu();
-  const hash = location.hash || "#/";
+  const [hash] = hashParts();
   const hit = ROUTES.map(r => [hash.match(r[0]), ...r.slice(1)]).find(r => r[0]) || [null, ...ROUTES[0].slice(1)];
   const [m, nav, trail, title, fn, isWindowed] = hit;
   windowed = isWindowed;
@@ -1378,7 +1745,7 @@ async function render() {
   const bar = document.getElementById("bar"); bar.hidden = false;
   try { await fn(tok, m); }
   catch (e) { if (tok === renderToken) view.innerHTML = errorBox(e); }
-  finally { if (tok === renderToken) { bar.hidden = true; view.classList.remove("busy"); } }
+  finally { if (tok === renderToken) { bar.hidden = true; view.classList.remove("busy"); syncDrawer(); } }
 }
 
 /* ---------- boot ---------- */
@@ -1392,7 +1759,10 @@ if (SNAP) {
   setSynced(null);
 }
 syncRange(); syncTheme();
-window.addEventListener("hashchange", () => { document.body.classList.remove("nav-open"); render(); view.focus({ preventScroll: true }); window.scrollTo(0, 0); });
+window.addEventListener("hashchange", () => {
+  if (hashParts()[0] === lastHash) { syncDrawer(); return; }  /* only the side panel changed */
+  document.body.classList.remove("nav-open"); closeDrawerUI(); render(); view.focus({ preventScroll: true }); window.scrollTo(0, 0);
+});
 /* a browser signed in with a cookie (the hosted server) gets a way out */
 if (LIVE) api("/api/session").then(s => { if (s.auth === "cookie") document.getElementById("signout").hidden = false; }).catch(() => {});
 render().then(() => {

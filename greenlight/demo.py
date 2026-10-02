@@ -166,18 +166,43 @@ def seed(db: str, days: int = 60, seed_value: int = 7) -> None:
                              "VALUES (?, ?, 'demo', ?, 'main', ?, ?, ?, ?, ?)",
                              (n, f"Change {n}", state, f"work-{n}", s, iso(opened), iso(c) if state == "merged" else None, iso(c)))
             # a Claude Code session per pull request: its branch until it merged, then main while its tests ran
-            usage_rows = []
+            # with where its context went: shares of each minute's cache reads, some rebuilds after idle, and some
+            # sessions that started a pull request with the last one still in context
+            shares = [("conversation", .34), ("system", .2), ("read", .15), ("test", .08), ("search", .05),
+                      ("shell", .04), ("image", .04), ("git", .03), ("web", .02), ("mcp:github", .02), ("edit", .02),
+                      ("subagent", .01)]
+            usage_rows, ctx_rows, rebuilds, switches = [], [], [], []
             for n, (s, c) in enumerate(commits, start=1):
                 sid, t = f"demo-session-{n}", opened_at[n]
                 end = last_run_at.get(n, c) + timedelta(minutes=20)
+                inherited = rng.randint(120_000, 300_000) if n % 3 == 0 else 0
+                minutes = 0
                 while t < end:
-                    usage_rows.append((sid, iso(t.replace(second=0, microsecond=0)), "claude-opus-5-5",
-                                       f"work-{n}" if t <= c else "main", rng.randint(1, 4), rng.randint(5, 60),
-                                       rng.randint(200, 3000), rng.randint(50_000, 400_000), rng.randint(2_000, 20_000)))
+                    minute, branch = iso(t.replace(second=0, microsecond=0)), f"work-{n}" if t <= c else "main"
+                    reads, writes = rng.randint(50_000, 400_000) + inherited, rng.randint(2_000, 20_000)
+                    usage_rows.append((sid, minute, "claude-opus-5-5", branch, rng.randint(1, 4), rng.randint(5, 60),
+                                       rng.randint(200, 3000), reads, writes, writes))
+                    for cat, share in shares:
+                        carried = int(reads * share * rng.uniform(.7, 1.3))
+                        ctx_rows.append((sid, minute, branch, cat, rng.randint(0, 3) if cat != "conversation" else 0,
+                                         carried // rng.randint(20, 80), carried, int(cat == "read" and rng.random() < .1),
+                                         rng.randint(500, 3000) if cat == "read" and rng.random() < .1 else 0))
+                    minutes += 1
                     t += timedelta(minutes=rng.randint(2, 6))
+                if inherited:
+                    switches.append((sid, "", iso(opened_at[n]), f"work-{n - 1}", f"work-{n}", inherited, inherited * minutes))
+                if n % 4 == 1:
+                    at = opened_at[n] + (end - opened_at[n]) / 2
+                    rebuilds.append((sid, "", iso(at), f"work-{n}", rng.randint(80_000, 250_000), "1h",
+                                     rng.randint(3700, 20_000), "idle"))
                 conn.execute("INSERT OR REPLACE INTO agent_sessions (session_id, agent, first_at, last_at, updated_at) "
                              "VALUES (?, 'claude-code', ?, ?, ?)", (sid, iso(opened_at[n]), iso(end), iso(end)))
-            conn.executemany("INSERT OR REPLACE INTO agent_usage VALUES (?,?,?,?,?,?,?,?,?)", usage_rows)
+            conn.executemany("INSERT OR REPLACE INTO agent_usage (session_id, minute, model, branch, requests, input_tokens, "
+                             "output_tokens, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens) "
+                             "VALUES (?,?,?,?,?,?,?,?,?,?)", usage_rows)
+            conn.executemany("INSERT OR REPLACE INTO agent_context VALUES (?,?,?,?,?,?,?,?,?)", ctx_rows)
+            conn.executemany("INSERT OR REPLACE INTO agent_cache_rebuilds VALUES (?,?,?,?,?,?,?,?)", rebuilds)
+            conn.executemany("INSERT OR REPLACE INTO agent_task_switches VALUES (?,?,?,?,?,?,?)", switches)
             # issues: two bugs after releases (incidents), the ones greenlight manages, and some plain ones
             now = utcnow()
             issues = [

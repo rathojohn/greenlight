@@ -31,6 +31,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     "otel": {"endpoint": None, "service_name": None, "window_days": 30, "since_days": 90},
     "sync": {"days": 90},
     "run": {"junit": None},
+    "usage": {"test_commands": None},  # a regex for Bash commands that run tests (default: context.TEST_COMMANDS)
 }
 
 

@@ -446,7 +446,7 @@ Agents follow the same rules: see [What agents should do](#what-agents-should-do
 
 `greenlight ui` serves it on http://127.0.0.1:8765; `greenlight ui --export snapshot.html` writes a read-only, self-contained copy you can share.
 
-It's dark by default with a light theme one click away. The time range (7, 14, 30 or 90 days) applies to every view that has one, tables sort by any column, and the (i) next to a panel title explains what it counts.
+It's dark by default with a light theme one click away. The time range (7, 14, 30 or 90 days) applies to every view that has one, and the (i) next to a panel title explains what it counts. Tables sort by any column and page instead of growing. A row opens a side panel with its details, and the list stays where it was: j and k (or the arrows) step through the rows, Esc closes it, and the panel is part of the URL, so Back closes it and a link opens it. Each panel links to the full page for the deep dive.
 
 - **Overview**: the latest verdict, rerun share, time spent rerunning, and the most unstable tests across recent commits (taller bars failed more often; amber means the same commit passed and failed).
 - **Flaky tests**, **test pages** (results by commit, duration, failure messages, measured numbers against a baseline, linked issues, quarantine controls), **Runs** and **run pages** (why each failure did or didn't block).
@@ -454,7 +454,7 @@ It's dark by default with a light theme one click away. The time range (7, 14, 3
 - **DORA and GitHub**: the four DORA numbers, the deployments behind them, pull request flow and the issue backlog.
 - **Trends**: forecasts from the Toto 2.0 time series model (optional: the server's `:toto` image, or `uv tool install --python 3.12 "greenlight[toto] @ git+https://github.com/rathojohn/greenlight"` on your machine): rerun churn, failure rate and suite duration with a 7-day band, and tests running slower than forecast.
 - **Quarantine**: suggestions, what's quarantined, what's clean enough to release.
-- **Token usage**: Claude Code tokens per day, per pull request, per failing test and per session (see below).
+- **Token usage**: cost per day, where context goes, and what could have been dropped, with tabs for pull requests, tests and sessions (see below).
 
 ## Token usage (Claude Code)
 
@@ -462,6 +462,18 @@ How many tokens went into each pull request, and into each test while it was fai
 
 - **A pull request** gets the tokens spent on its branch until it merged or closed. If a later PR reuses the branch name, what comes after goes to that one.
 - **A test** gets the tokens a session spent while it was red: from a run in that session that failed it to the next run in the same session that passed it (or the session's end, shown as unfixed). Two tests red at once both count the same tokens, so the per-test numbers don't add up to a total. `greenlight run` and survive-project's playtest records note which session ran them, which is what links the two.
+
+### Where the tokens go
+
+Most of what a session costs is context being read again. Every request sends the whole conversation, so anything that lands in context (a test log, a file, a screenshot, Claude's own reply) is paid for again by every later request until the session compacts. The hook also measures that, from the same transcript:
+
+- **Cost** prices every kind of token as input tokens, from Claude's API price ratios: output 5x, a cache read 0.1x, a cache write 1.25x (2x for the hour-long cache a main session uses). It's the same for every model, so sessions compare, and it follows what you pay or what counts against a plan's limits.
+- **Where context goes** splits every cache read by what put the tokens there: the system prompt and tools, the conversation itself, file reads, test runs, searches, shell output, images, web pages, each MCP server, subagent reports. Shell commands count by what they do (`cat` is a read, `grep` a search, `pytest` a test run; `[usage] test_commands` in greenlight.toml changes what counts as a test). A result's tokens are estimated from its size with a chars-per-token ratio each session measures from its own context growth (about 2.4 on recent models), and images at width x height / 750.
+- **Earlier tasks still in context**: when a session moves to a new branch, the work before it stays in context. greenlight records each switch, how much context the new work inherited and what carrying it cost. In long sessions this is often the biggest number; /compact or a new session per task drops it.
+- **Cache rebuilt after idle**: the prompt cache lasts an hour in a main session and 5 minutes in a subagent. The first request after a longer break writes the whole context again.
+- **Files read again**: the same file and range read while the first read was still in context and unedited.
+
+Only counts leave the machine: categories, token numbers, branch names and times.
 
 See it with `greenlight usage`, the Token usage page, or ask an agent (it has `greenlight_token_usage`). `--no-usage-hook` leaves the hook out. To add it by hand, this goes under `hooks` in `.claude/settings.json`:
 
