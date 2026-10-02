@@ -22,8 +22,7 @@ from tests.test_setup import checkout  # noqa: F401 - fixture
 TOKEN = "hosted-t0ken"
 
 
-@pytest.fixture
-def server(tmp_path):
+def start_server(tmp_path, stderr=subprocess.DEVNULL):
     with closing(socket.socket()) as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
@@ -32,7 +31,7 @@ def server(tmp_path):
     home.mkdir()
     proc = subprocess.Popen([sys.executable, "-m", "greenlight", "serve", "--port", str(port)],
                             env=child_env(GREENLIGHT_DB=str(db), GREENLIGHT_TOKEN=TOKEN), cwd=str(home),
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            stdout=subprocess.DEVNULL, stderr=stderr)
     base = f"http://127.0.0.1:{port}"
     for _ in range(100):
         try:
@@ -40,9 +39,22 @@ def server(tmp_path):
                 break
         except OSError:
             time.sleep(0.1)
+    return proc, base, db
+
+
+@pytest.fixture
+def server(tmp_path):
+    proc, base, db = start_server(tmp_path)
     yield base, db
     proc.terminate()
     proc.wait(10)
+
+
+def test_a_token_you_set_stays_out_of_the_log(tmp_path):
+    proc, _, _ = start_server(tmp_path, stderr=subprocess.PIPE)  # hosts keep what a server prints
+    proc.terminate()
+    log = proc.communicate(timeout=10)[1].decode()
+    assert TOKEN not in log and "/$GREENLIGHT_TOKEN/mcp" in log
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
