@@ -240,7 +240,9 @@ def triage_run(
 
     return {
         "run": {"run_id": rid, "commit_sha": sha, "branch": run["branch"], "attempt": run["attempt"],
-                "started_at": run["started_at"], "tests": len(attempts)},
+                "started_at": run["started_at"], "tests": run["total_tests"] or len(attempts),
+                "results_named": len(attempts), "source": run["source"], "git_commit": run["git_commit"],
+                "session": run["session"], "command": run["command"], "url": run["url"]},
         "decision": decision,
         "exit_code": EXIT_CODES[decision],
         "summary": summary,

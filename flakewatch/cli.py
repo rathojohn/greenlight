@@ -318,11 +318,12 @@ def cmd_ci_report(a: argparse.Namespace) -> int:
 
 def cmd_ui(a: argparse.Namespace) -> int:
     from . import web
+    web.set_incident_labels(a.cfg.get("delivery", "incident_labels"))
     if a.export:
         n = web.export_snapshot(a.db, a.export, a.days, with_forecasts=not a.no_forecasts)
         print(f"wrote {a.export}: {n['responses']} views ({n['skipped']} could not be built and show an explanation)")
         return 0
-    web.serve(a.db, a.port, open_browser=not a.no_browser)
+    web.serve(a.db, a.port, open_browser=not a.no_browser, host=a.host, token=a.token)
     return 0
 
 
@@ -427,6 +428,9 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("ui", help="local dashboard on 127.0.0.1, or --export a read-only HTML snapshot")
     s.add_argument("--port", type=int, default=8765)
+    s.add_argument("--host", default="127.0.0.1",
+                   help="bind address. Anything but loopback (e.g. 0.0.0.0 for your phone on the LAN) needs a token")
+    s.add_argument("--token", help="access token when --host isn't loopback (default: a random one, printed)")
     s.add_argument("--no-browser", action="store_true")
     s.add_argument("--export", metavar="FILE", help="write a self-contained snapshot instead of serving")
     s.add_argument("--days", type=int, default=30, help="window for the snapshot")

@@ -47,9 +47,9 @@ def _load_model():
 
 def forecast_batch(series: list[list[float | None]], horizon: int) -> list[dict[str, list[float]]]:
     """Zero-shot quantile forecast for each series. None = missing. Returns p10/p50/p90 per series."""
+    model = _load_model()  # first, so a missing install raises the friendly RuntimeError
     import torch
 
-    model = _load_model()
     patch = getattr(getattr(model, "config", None), "patch_size", 32)
     device = next(model.parameters()).device
     out: list[dict[str, list[float]]] = []

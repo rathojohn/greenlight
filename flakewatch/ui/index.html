@@ -19,16 +19,16 @@
   :root:not([data-theme="light"]) {
     --ground: #151B22; --surface: #1C242E; --ink: #E5EAEF; --ink-2: #98A4B0;
     --rule: #33404D; --rule-2: #26313C;
-    --pass: #4DBA8F; --fail: #EF6B5E; --flip: #EDB23C; --quar: #A3A6E8; --focus: #7AA7FF;
-    --band: rgba(237, 178, 60, .18);
+    --pass: #3FA87F; --fail: #E0507A; --flip: #BC8C14; --quar: #7F84DA; --focus: #7AA7FF;
+    --band: rgba(188, 140, 20, .2);
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --ground: #151B22; --surface: #1C242E; --ink: #E5EAEF; --ink-2: #98A4B0;
   --rule: #33404D; --rule-2: #26313C;
-  --pass: #4DBA8F; --fail: #EF6B5E; --flip: #EDB23C; --quar: #A3A6E8; --focus: #7AA7FF;
-  --band: rgba(237, 178, 60, .18);
+  --pass: #3FA87F; --fail: #E0507A; --flip: #BC8C14; --quar: #7F84DA; --focus: #7AA7FF;
+  --band: rgba(188, 140, 20, .2);
   color-scheme: dark;
 }
 :root { box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
@@ -96,7 +96,9 @@ p { margin: 0 0 10px; }
 .stat { padding: 16px 18px 16px 0; min-width: 0; }
 .stat + .stat { padding-left: 18px; border-left: 1px solid var(--rule); }
 .stat .k { font-weight: 600; }
-.stat .v { font-size: 2rem; font-weight: 720; font-stretch: 115%; line-height: 1.15; }
+.stat .v { font-size: 2rem; font-weight: 720; font-stretch: 115%; line-height: 1.15; font-variant-numeric: proportional-nums; }
+.stat .v small { font-size: .5em; font-weight: 600; color: var(--ink-2); margin-left: 4px; }
+.verdict h1, h1 { font-variant-numeric: proportional-nums; }
 .stat .s { color: var(--ink-2); font-size: .88rem; }
 @media (max-width: 720px) {
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -134,14 +136,17 @@ p { margin: 0 0 10px; }
 .sw.short { height: 4px; vertical-align: 1px; }
 
 /* Tags */
-.tag { display: inline-flex; align-items: center; gap: 6px; font-size: .82rem; font-weight: 620; color: var(--c, var(--ink-2)); white-space: nowrap; }
+.tag { display: inline-flex; align-items: center; gap: 6px; font-size: .82rem; font-weight: 620; color: var(--ink); white-space: nowrap; }
 .tag::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--c, var(--ink-2)); }
 .t-flaky, .t-known_flaky, .t-RERUN_TARGETED { --c: var(--flip); }
 .t-suspect, .t-suspect_flaky { --c: var(--flip); }
 .t-suspect::before, .t-suspect_flaky::before { background: transparent; box-shadow: inset 0 0 0 2px var(--c); }
 .t-failing, .t-real_failure, .t-new_test, .t-REAL_FAILURE { --c: var(--fail); }
-.t-quarantined { --c: var(--quar); }
-.t-PASS, .t-stable { --c: var(--pass); }
+.t-quarantined, .t-perf { --c: var(--quar); }
+.t-PASS, .t-stable, .t-success, .t-open-ok { --c: var(--pass); }
+.t-failure, .t-timed_out, .t-startup_failure { --c: var(--fail); }
+.t-cancelled, .t-skipped, .t-neutral, .t-in_progress, .t-queued, .t-unknown, .t-closed { --c: var(--ink-2); }
+.t-in_progress::before, .t-queued::before { background: transparent; box-shadow: inset 0 0 0 2px var(--c); }
 .tags { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 2px; }
 
 /* Lists */
@@ -151,6 +156,8 @@ a.row:hover { background: linear-gradient(90deg, transparent, var(--rule-2) 8%, 
 .row.head { color: var(--ink-2); font-size: .84rem; padding: 8px 0; }
 .row > * { min-width: 0; }
 .c-test .mono { word-break: break-all; }
+.row code { overflow-wrap: anywhere; }
+.exec-grid .tag, .dep-grid .tag { white-space: normal; }
 .lbl { display: none; color: var(--ink-2); font-size: .8rem; }
 .flaky-grid { grid-template-columns: minmax(0, 2.3fr) 8.5rem 8rem 7rem minmax(8rem, 1fr); }
 .runs-grid { grid-template-columns: 8rem 7.5rem 5rem 6rem 5rem minmax(9rem, 1fr); }
@@ -203,6 +210,36 @@ input[type=text], input[type=search] { font: inherit; padding: 7px 10px; border:
 .fail-item { padding: 14px 0; border-bottom: 1px solid var(--rule-2); }
 .fail-item .why { color: var(--ink-2); margin: 4px 0 0; }
 
+/* Pipelines and delivery */
+.wf-grid { grid-template-columns: minmax(0, 1.6fr) 5rem 7rem 8.5rem 6.5rem 5.5rem 7rem; }
+.pipe-grid { grid-template-columns: 7.5rem minmax(0, 1.6fr) minmax(0, 1fr) 6.5rem 5.5rem 6.5rem; }
+.job-grid { grid-template-columns: minmax(0, 2fr) 9rem 6rem 6rem; }
+.dep-grid { grid-template-columns: 8rem minmax(0, 1.4fr) 6.5rem 5.5rem 7rem minmax(7rem, 1fr); }
+.pr-grid { grid-template-columns: 4rem minmax(0, 2fr) 7rem 6rem; }
+.iss-grid { grid-template-columns: 4rem 6rem minmax(0, 2fr) 6rem; }
+@media (max-width: 860px) {
+  .wf-grid, .pipe-grid, .job-grid, .dep-grid, .pr-grid, .iss-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wf-grid > :first-child, .pipe-grid .c-wide, .job-grid > :first-child, .dep-grid .c-wide, .pr-grid .c-wide, .iss-grid .c-wide { grid-column: 1 / -1; }
+}
+.meta-list { display: flex; flex-wrap: wrap; gap: 4px 22px; color: var(--ink-2); margin: 6px 0 14px; }
+.meta-list b { color: var(--ink); font-weight: 600; }
+.wfall { border-top: 1px solid var(--rule); }
+.wrow { display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr) 5.5rem; gap: 14px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--rule-2); }
+.wrow .track { position: relative; height: 14px; }
+.wrow .seg { position: absolute; top: 0; height: 14px; min-width: 3px; border-radius: 0 4px 4px 0; background: var(--ink-2); }
+.wrow .seg.s-success { background: var(--pass); }
+.wrow .seg.s-failure, .wrow .seg.s-timed_out { background: var(--fail); }
+.wrow .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wrow .dur { text-align: right; color: var(--ink-2); }
+details.steps { grid-column: 1 / -1; margin: 2px 0 0; }
+details.steps summary { cursor: pointer; color: var(--ink-2); font-size: .85rem; }
+details.steps ol { margin: 6px 0 4px; padding-left: 1.4rem; color: var(--ink-2); font-size: .88rem; }
+details.steps li span { color: var(--ink); }
+@media (max-width: 720px) { .wrow { grid-template-columns: 1fr 4.5rem; } .wrow .track { grid-column: 1 / -1; order: 3; } }
+.subnav { display: flex; gap: 12px 18px; flex-wrap: wrap; align-items: center; margin: 4px 0 8px; }
+.issue-links { margin: 0 0 12px; }
+.issue-links a { margin-right: 14px; }
+
 #toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--ground); padding: 9px 16px; border-radius: 6px; font-size: .9rem; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100vw - 32px); }
 #toast.show { opacity: 1; }
 </style>
@@ -215,6 +252,8 @@ input[type=text], input[type=search] { font: inherit; padding: 7px 10px; border:
       <a href="#/" data-nav="overview">Overview</a>
       <a href="#/flaky" data-nav="flaky">Flaky tests</a>
       <a href="#/runs" data-nav="runs">Runs</a>
+      <a href="#/pipelines" data-nav="pipelines">Pipelines</a>
+      <a href="#/delivery" data-nav="delivery">Delivery</a>
       <a href="#/trends" data-nav="trends">Trends</a>
       <a href="#/quarantine" data-nav="quarantine">Quarantine</a>
     </nav>
@@ -267,7 +306,11 @@ async function post(path, body) {
 
 /* ---------- formatting ---------- */
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const sha = s => esc(String(s || "").slice(0, 8));
+/* a code identity is "<sha>", "<sha>@<matrix entry>" or either plus "+<hash>" for uncommitted edits */
+function sha(s) {
+  const raw = String(s || ""), [base, edits] = raw.split("+"), [commit, env] = base.split("@");
+  return esc(commit.slice(0, 8)) + (env ? ` <span class="muted">on ${esc(env)}</span>` : "") + (edits ? ` <span class="muted">+ edits</span>` : "");
+}
 const plural = (n, word, many) => `${n} ${n === 1 ? word : (many || word + "s")}`;
 const pct = x => x == null ? "n/a" : `${Math.round(x * 100)}%`;
 const testHref = id => "#/test/" + encodeURIComponent(id);
@@ -292,8 +335,14 @@ function dur(ms) {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 const fmtDay = d => new Date(d + "T00:00:00Z").toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
-const FMT = { count: v => Math.round(v * 10) / 10 + "", pct: v => `${Math.round(v * 1000) / 10}%`, ms: v => dur(v) };
-const AXIS = { ...FMT, ms: v => v === 0 ? "0" : v < 1000 ? `${Math.round(v)} ms` : `${+(v / 1000).toFixed(1)} s` };
+function hrs(h) {
+  if (h == null) return "n/a";
+  if (h < 1) return `${Math.max(1, Math.round(h * 60))} min`;
+  if (h < 48) return `${+h.toFixed(h < 10 ? 1 : 0)} h`;
+  return `${+(h / 24).toFixed(1)} days`;
+}
+const FMT = { count: v => Math.round(v * 10) / 10 + "", pct: v => `${Math.round(v * 1000) / 10}%`, ms: v => dur(v), h: v => hrs(v), perf: v => `${+v.toFixed(2)} ms` };
+const AXIS = { ...FMT, ms: v => v === 0 ? "0" : v < 1000 ? `${Math.round(v)} ms` : `${+(v / 1000).toFixed(1)} s`, h: v => v === 0 ? "0" : v < 1 ? `${Math.round(v * 60)}m` : v < 48 ? `${+v.toFixed(1)}h` : `${+(v / 24).toFixed(1)}d` };
 
 /* ---------- small renderers ---------- */
 function tag(kind, text) { return `<span class="tag t-${esc(kind)}">${esc(text || kind.replace(/_/g, " "))}</span>`; }
@@ -302,15 +351,17 @@ function strip(outcomes) {
   return `<span class="strip" role="img" aria-label="${fails} of the last ${outcomes.length} runs failed">${outcomes.map(o => `<i class="${o}"></i>`).join("")}</span>`;
 }
 function cellClass(c) { if (!c) return "n"; const [p, f] = c; return f === 0 ? "p" : p === 0 ? "f" : "x"; }
+/* height is the share of runs on that commit that failed: 30% all passed, 100% all failed, in between for a flip */
+function cellHeight(c) { if (!c || !c[1]) return ""; const share = c[1] / (c[0] + c[1]); return `;height:${Math.round(30 + 70 * share)}%`; }
 function cells(list, commits) {
   return `<span class="cells">${list.map((c, j) => {
     const cm = commits[j] || {};
     const t = c ? `${String(cm.sha || "").slice(0, 8)}: ${c[0]} passed, ${c[1]} failed` : `${String(cm.sha || "").slice(0, 8)}: not run`;
-    return `<i class="${cellClass(c)}" style="--c:${j}" title="${esc(t)}"></i>`;
+    return `<i class="${cellClass(c)}" style="--c:${j}${cellHeight(c)}" title="${esc(t)}"></i>`;
   }).join("")}</span>`;
 }
 function fieldLegend() {
-  return `<div class="legend"><span><span class="sw short" style="background:var(--pass)"></span>Passed</span><span><span class="sw" style="background:var(--fail)"></span>Failed</span><span><span class="sw" style="background:var(--flip)"></span>Passed and failed on the same commit</span><span><span class="sw short" style="background:var(--rule);height:2px"></span>Didn't run</span></div>`;
+  return `<div class="legend"><span><span class="sw short" style="background:var(--pass)"></span>Passed</span><span><span class="sw" style="background:var(--fail)"></span>Failed every run</span><span><span class="sw" style="background:var(--flip);height:7px"></span>Passed and failed on the same commit (taller means it failed more)</span><span><span class="sw short" style="background:var(--rule);height:2px"></span>Didn't run</span></div>`;
 }
 function errorBox(e) {
   let hint = "";
@@ -342,7 +393,8 @@ function drawChart(el) {
   el._w = el.clientWidth;
   const fmt = FMT[s.format || "count"];
   const m = { l: s.format === "ms" ? 50 : 40, r: 6, t: 12, b: 24 };
-  const labels = s.days.concat(s.future || []);
+  const labels = (s.labels || s.days).concat(s.future || []);
+  const xlab = s.xfmt || fmtDay;
   const n = labels.length, pw = W - m.l - m.r, ph = H - m.t - m.b, slot = pw / n;
   const x = i => m.l + slot * (i + .5);
   const bars = s.bars || [], lines = s.lines || [];
@@ -367,14 +419,22 @@ function drawChart(el) {
     g += `<polyline class="median" points="${p50.map((v, j) => `${x(from + j)},${y(v)}`).join(" ")}"/>`;
   }
   const bw = Math.max(1.5, Math.min(slot * .7, 16));
+  const GAP = 2; /* surface gap between stacked segments */
   for (let i = 0; i < s.days.length; i++) {
+    const segs = bars.map(b => [b, b.values[i] || 0]).filter(([, v]) => v > 0);
     let acc = 0;
-    for (const b of bars) {
-      const v = b.values[i] || 0; if (!v) continue;
-      const y1 = y(acc + v), y0 = y(acc);
-      g += `<rect x="${x(i) - bw / 2}" y="${y1}" width="${bw}" height="${Math.max(0, y0 - y1)}" rx="1" style="fill:${b.color}"/>`;
+    segs.forEach(([b, v], k) => {
+      const top = k === segs.length - 1;
+      const y0 = y(acc) - (k ? GAP / 2 : 0), y1 = y(acc + v) + (top ? 0 : GAP / 2);
+      const h = Math.max(1, y0 - y1), x0 = x(i) - bw / 2;
+      if (top) { /* 4px rounded data-end, square at the baseline */
+        const r = Math.min(4, bw / 2, h);
+        g += `<path d="M${x0},${y0} V${y1 + r} Q${x0},${y1} ${x0 + r},${y1} H${x0 + bw - r} Q${x0 + bw},${y1} ${x0 + bw},${y1 + r} V${y0} Z" style="fill:${b.color}"/>`;
+      } else {
+        g += `<rect x="${x0}" y="${y1}" width="${bw}" height="${h}" style="fill:${b.color}"/>`;
+      }
       acc += v;
-    }
+    });
   }
   for (const l of lines) {
     let d = "", pen = false;
@@ -382,13 +442,13 @@ function drawChart(el) {
       if (v == null) { pen = false; return; }
       d += `${pen ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)} `; pen = true;
       const lone = (i === 0 || l.values[i - 1] == null) && (i === l.values.length - 1 || l.values[i + 1] == null);
-      if (lone) g += `<circle cx="${x(i)}" cy="${y(v)}" r="2.5" style="fill:${l.color}"/>`;
+      if (lone || l.dots) g += `<circle cx="${x(i)}" cy="${y(v)}" r="4" style="fill:${l.color};stroke:var(--ground);stroke-width:2"/>`;
     });
     g += `<path class="line" d="${d}" style="stroke:${l.color}"/>`;
   }
   g += `<line class="axis" x1="${m.l}" x2="${W - m.r}" y1="${m.t + ph}" y2="${m.t + ph}"/>`;
   const xl = [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i);
-  for (const i of xl) g += `<text x="${x(i)}" y="${H - 6}" text-anchor="${i === 0 ? "start" : i === n - 1 ? "end" : "middle"}">${esc(fmtDay(labels[i]))}</text>`;
+  for (const i of xl) g += `<text x="${x(i)}" y="${H - 6}" text-anchor="${i === 0 ? "start" : i === n - 1 ? "end" : "middle"}">${esc(xlab(labels[i]))}</text>`;
   g += `<line class="cursor" x1="0" x2="0" y1="${m.t}" y2="${m.t + ph}" visibility="hidden"/><rect class="hit" x="${m.l}" y="${m.t}" width="${pw}" height="${ph}" fill="transparent"/>`;
   el.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(s.label || "Chart")}">${g}</svg>`;
 
@@ -397,7 +457,7 @@ function drawChart(el) {
     const r = svg.getBoundingClientRect();
     const i = Math.min(n - 1, Math.max(0, Math.floor((ev.clientX - r.left - m.l) / slot)));
     cursor.setAttribute("x1", x(i)); cursor.setAttribute("x2", x(i)); cursor.setAttribute("visibility", "visible");
-    let html = `<b>${esc(fmtDay(labels[i]))}</b>`;
+    let html = `<b>${esc(s.tipLabel ? s.tipLabel(i) : xlab(labels[i]))}</b>`;
     if (i < s.days.length) {
       for (const b of bars) html += `<br>${esc(b.label)}: ${esc(fmt(b.values[i] || 0))}`;
       for (const l of lines) html += `<br>${esc(l.label)}: ${l.values[i] == null ? "no data" : esc(fmt(l.values[i]))}`;
@@ -460,9 +520,11 @@ async function overviewView(tok) {
     </section>
     <section>
       <h2>Unstable tests by commit</h2>
-      <p class="note">One column per commit, oldest on the left. A tall bar means the test failed there. Amber means the same commit both passed and failed, which is what makes a test flaky.</p>
+      <p class="note">One column per commit, oldest on the left. The taller the bar, the more often the test failed on that commit. Amber means the same commit both passed and failed, which is what makes a test flaky.</p>
       ${field}
     </section>
+    ${Object.keys(d.synced || {}).length ? `<p class="muted" style="margin-top:12px;font-size:.88rem">Synced ${esc(Object.entries(d.synced).map(([k, v]) => `${k} ${rel(v)}`).join(", "))}.</p>` : ""}
+    ${d.has && (d.has.pipelines || d.has.deployments || d.has.pull_requests) ? `<p style="margin-top:6px">${d.has.deployments || d.has.pull_requests ? `<a href="#/delivery">Delivery: deployments, lead time, pull requests and issues</a>` : ""}${d.has.pipelines ? `${d.has.deployments || d.has.pull_requests ? " · " : ""}<a href="#/pipelines">CI pipelines</a>` : ""}</p>` : ""}
     <section class="two">
       <div><h2>Runs per day</h2><p class="note">Reruns are second and later attempts on a commit.</p><div class="chart" id="c-runs"></div>${legend([["var(--ink-2)", "First attempt"], ["var(--flip)", "Rerun"]])}</div>
       <div><h2>Failure rate</h2><p class="note">Share of test executions that failed, per day.</p><div class="chart" id="c-fail"></div></div>
@@ -505,6 +567,23 @@ async function flakyView(tok) {
   draw();
 }
 
+/* A test that measures something (a perf check's median against its base build) gets its numbers charted per run */
+function perfSection(m) {
+  if (!m || !m.points || !m.points.length || !m.names.includes("value_ms")) return "";
+  const hasBase = m.names.includes("base_ms"), budget = m.points.map(p => p.budget_ms).find(v => v != null);
+  return `<section><h2>Measured</h2><p class="note">This check's number on each run${hasBase ? ", beside the base build it was measured against" : ""}${budget != null ? `. Its budget is ${budget} ms` : ""}.</p>
+    <div class="chart" id="c-perf"></div>${hasBase ? legend([["var(--ink)", "This build"], ["var(--quar)", "Base build"]]) : ""}</section>`;
+}
+function drawPerf(m) {
+  const el = document.getElementById("c-perf");
+  if (!el) return;
+  const pts = m.points;
+  chart(el, { days: pts.map(p => p.started_at), label: "Measured value per run", format: "perf",
+    xfmt: v => fmtDay(String(v).slice(0, 10)), tipLabel: i => `${new Date(pts[i].started_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}, ${String(pts[i].sha || "").slice(0, 8)}`,
+    lines: [{ values: pts.map(p => p.value_ms ?? null), color: "var(--ink)", label: "This build", dots: true },
+            ...(m.names.includes("base_ms") ? [{ values: pts.map(p => p.base_ms ?? null), color: "var(--quar)", label: "Base build", dots: true }] : [])] });
+}
+
 async function testView(tok, id) {
   view.innerHTML = loading();
   const d = await api("/api/test", { days: DAYS, id });
@@ -521,6 +600,7 @@ async function testView(tok, id) {
     <div class="tid-class">${esc(cls)}</div>
     <div class="tid-name">${esc(name)}</div>
     <div class="tags" style="margin-bottom:12px">${tag(s.classification)}</div>
+    ${(d.issues || []).length ? `<p class="issue-links">${d.issues.map(i => `${i.url && /^https:\/\//.test(i.url) ? `<a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">#${i.number}</a>` : `#${i.number}`} <span class="muted">${esc(i.fw_key.split(":")[0] === "perf" ? "perf regression" : "flaky test")} issue, ${esc(i.state)}</span>`).join(" ")}</p>` : ""}
     <p style="max-width:70ch">In the last ${DAYS} days it flipped on ${s.flip_shas} of the ${plural(s.eligible_shas, "commit")} it ran on more than once, and failed ${plural(s.failures, "time")} in ${plural(s.executions, "execution")} with ${plural(s.distinct_failure_sigs, "distinct failure message")}.</p>
     ${qblock}
     <section>
@@ -529,6 +609,7 @@ async function testView(tok, id) {
       <div class="field">${d.commits.length ? `<div class="frow" style="grid-template-columns:1fr">${cells(commitsAsCells, d.commits)}</div>` : '<p class="empty">No executions yet.</p>'}</div>
       ${fieldLegend()}
     </section>
+    ${perfSection(d.metrics)}
     <section>
       <h2>Duration</h2>
       <p class="note" id="dur-note">Daily median of passing runs.</p>
@@ -547,7 +628,7 @@ async function testView(tok, id) {
           <span>${esc(rel(e.started_at))}</span>
           <span><a href="#/run/${e.run_id}"><code>${sha(e.sha)}</code></a></span>
           <span><span class="lbl">Attempt</span>${e.attempt}${e.retry ? `, retry ${e.retry}` : ""}</span>
-          <span>${e.outcome === "pass" ? tag("PASS", "passed") : e.outcome === "skip" ? tag("stable", "skipped") : tag("failing", "failed")}</span>
+          <span>${e.outcome === "pass" ? tag("PASS", (e.flags || "").includes("slower") ? "passed, slower than base" : (e.flags || "").includes("inferred") ? "passed (suite passed)" : "passed") : e.outcome === "skip" ? tag("stable", "skipped") : tag("failing", (e.flags || "").includes("known") ? "failed, known" : "failed")}</span>
           <span><span class="lbl">Duration</span>${dur(e.duration_ms)}</span></div>`).join("")}
       </div>
       ${d.executions.length > 20 ? `<p style="margin-top:14px"><button class="btn ghost" id="more">Show ${d.executions.length - 20} more</button></p>` : ""}
@@ -556,6 +637,7 @@ async function testView(tok, id) {
   if (more) more.addEventListener("click", () => { view.querySelectorAll("[data-more]").forEach(r => r.hidden = false); more.remove(); });
   const el = document.getElementById("c-dur");
   chart(el, { days: d.durations.days, label: "Daily median duration", format: "ms", lines: [{ values: d.durations.values, color: "var(--ink)", label: "Median" }] });
+  drawPerf(d.metrics);
 
   if (LIVE) {
     const qf = document.getElementById("qf");
@@ -619,12 +701,21 @@ async function runView(tok, id) {
   if (tok !== renderToken) return;
   const order = { real_failure: 0, new_test: 1, known_flaky: 2, suspect_flaky: 3, quarantined: 4 };
   const fails = [...t.failures].sort((a, b) => order[a.category] - order[b.category]);
+  const r = t.run, link = u => u && /^https:\/\//.test(u);
+  const runMeta = `<div class="meta-list">
+      ${r.source ? `<span>From <b>${esc(r.source)}</b></span>` : ""}
+      ${r.git_commit && r.git_commit !== r.commit_sha ? `<span>Commit <code>${esc(r.git_commit.slice(0, 8))}</code></span>` : ""}
+      ${r.command ? `<span><code>${esc(r.command)}</code></span>` : ""}
+      ${r.session ? (link(r.url) ? `<a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.session)}</a>` : `<span>${esc(r.session)}</span>`) : link(r.url) ? `<a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">Open the run</a>` : ""}
+    </div>`;
+  const partial = r.results_named < r.tests ? ` The record names only the checks that failed or ran slower, so ${plural(r.tests - r.results_named, "other check")} aren't listed.` : "";
   view.innerHTML = `
     <a class="crumb" href="#/runs">All runs</a>
     ${verdictBlock(t)}
+    ${runMeta}
     <section>
       <h2>${t.failures.length ? plural(t.failures.length, "failing test") : "No failing tests"}</h2>
-      <p class="note">${plural(t.run.tests, "test")} ran${t.failures.length ? `, ${t.failures.length} failed on the final attempt` : ""}. Blocking failures are listed first.</p>
+      <p class="note">${plural(t.run.tests, "test")} ran${t.failures.length ? `, ${t.failures.length} failed on the final attempt` : ""}. Blocking failures are listed first.${partial}</p>
       ${fails.map(f => `<div class="fail-item">
         ${tag(f.category)}${f.new_signature ? ` <span class="tag t-failing">new failure message</span>` : ""}
         <div style="margin-top:4px"><a href="${testHref(f.test_id)}"><code>${esc(f.test_id)}</code></a></div>
@@ -732,6 +823,200 @@ async function quarantineClicks(ev) {
   } catch (e) { b.disabled = false; toast(e.message); }
 }
 
+/* ---------- pipelines (GitHub Actions) ---------- */
+const STATUS_LABEL = { success: "passed", failure: "failed", timed_out: "timed out", cancelled: "cancelled", skipped: "skipped", in_progress: "running", queued: "queued", startup_failure: "failed to start", neutral: "neutral", action_required: "needs approval" };
+const statusTag = st => tag(st || "unknown", STATUS_LABEL[st] || st || "unknown");
+const pipeHref = id => "#/pipeline/" + encodeURIComponent(id);
+function noData(what, how) { return `<p class="empty">${what}</p>${how ? `<p class="note">${how}</p>` : ""}`; }
+
+async function pipelinesView(tok) {
+  view.innerHTML = loading();
+  const d = await api("/api/pipelines", { days: DAYS });
+  if (tok !== renderToken) return;
+  if (!d.recent.length) {
+    view.innerHTML = `<h1>Pipelines</h1>${noData(`No GitHub Actions runs in the last ${DAYS} days.`,
+      "Set <code>[github] repo</code> in <code>flakewatch.toml</code> and run <code>flakewatch sync</code>. Every workflow run, attempt, job and step lands here, with flaky jobs called out the same way flaky tests are.")}`;
+    return;
+  }
+  const t = d.totals;
+  view.innerHTML = `
+    <h1>Pipelines</h1>
+    <p class="note">GitHub Actions runs from the last ${DAYS} days. A rerun is a second or later attempt of the same run.</p>
+    <section class="stats" style="margin-top:20px" aria-label="Pipeline summary">
+      <div class="stat"><div class="k">Runs</div><div class="v">${t.runs}</div><div class="s">${(t.runs / DAYS).toFixed(1)} a day</div></div>
+      <div class="stat"><div class="k">Failed</div><div class="v">${t.runs ? pct(t.failed / t.runs) : "0%"}</div><div class="s">${plural(t.failed, "run")} on its latest attempt</div></div>
+      <div class="stat"><div class="k">Rerun</div><div class="v">${t.rerun}</div><div class="s">${plural(t.rerun, "run")} needed another attempt</div></div>
+      <div class="stat"><div class="k">CI time</div><div class="v">${dur(t.minutes * 60000)}</div><div class="s">Wall time across every attempt</div></div>
+    </section>
+    <section>
+      <h2>Runs per day</h2><p class="note">By the latest attempt's result.</p>
+      <div class="chart" id="c-pipes"></div>${legend([["var(--pass)", "Passed"], ["var(--fail)", "Failed"]])}
+    </section>
+    <section>
+      <h2>Workflows</h2>
+      <div class="list"><div class="row head wf-grid"><span>Workflow</span><span>Runs</span><span>Passed</span><span>Duration p50 / p95</span><span>Queue p50</span><span>Reran</span><span>Last</span></div>
+      ${d.workflows.map(w => `<div class="row wf-grid"><span><b>${esc(w.workflow)}</b></span>
+        <span><span class="lbl">Runs</span>${w.runs}</span>
+        <span><span class="lbl">Passed</span>${pct(w.success_rate)}</span>
+        <span><span class="lbl">Duration p50 / p95</span>${dur(w.p50_duration_ms)} / ${dur(w.p95_duration_ms)}</span>
+        <span><span class="lbl">Queue p50</span>${dur(w.p50_queue_ms)}</span>
+        <span><span class="lbl">Reran</span>${w.rerun_runs}</span>
+        <span>${statusTag(w.last_status)}</span></div>`).join("")}</div>
+    </section>
+    <section class="two">
+      <div><h2>Flaky jobs</h2><p class="note">Jobs that both failed and passed on the same commit, usually a failed attempt that passed on rerun.</p>
+        ${d.flaky_jobs.length ? `<div class="list">${d.flaky_jobs.map(j => `<div class="row" style="grid-template-columns:minmax(0,1fr) auto">
+          <span><b>${esc(j.name)}</b><br><span class="muted">${esc(j.workflow)}</span></span>
+          <span>Flipped on ${j.flips} of ${plural(j.eligible, "commit")}<br><span class="muted">last ${esc(rel(j.last_flip_at))}</span></span></div>`).join("")}</div>`
+          : `<p class="empty">No job both failed and passed on the same commit.</p>`}</div>
+      <div><h2>Slowest jobs</h2><p class="note">Passing runs only.</p>
+        ${d.slow_jobs.length ? `<div class="list">${d.slow_jobs.map(j => `<div class="row" style="grid-template-columns:minmax(0,1fr) auto">
+          <span><b>${esc(j.job)}</b><br><span class="muted">${esc(j.workflow)}, ${plural(j.runs, "run")}</span></span>
+          <span>${dur(j.p50_ms)} <span class="muted">p50</span><br>${dur(j.p95_ms)} <span class="muted">p95</span></span></div>`).join("")}</div>`
+          : `<p class="empty">No passing jobs yet.</p>`}</div>
+    </section>
+    <section>
+      <h2>Recent runs</h2>
+      <div class="list"><div class="row head pipe-grid"><span>When</span><span>Workflow</span><span>Branch</span><span>Commit</span><span>Duration</span><span>Result</span></div>
+      ${d.recent.map(r => `<a class="row pipe-grid" href="${pipeHref(r.pipeline_id)}">
+        <span>${esc(rel(r.created_at))}</span>
+        <span class="c-wide">${esc(r.workflow)} #${esc(r.run_number)}${r.attempt > 1 ? ` <span class="muted">attempt ${r.attempt}</span>` : ""}</span>
+        <span><span class="lbl">Branch</span>${esc(r.branch || "n/a")}</span>
+        <span><span class="lbl">Commit</span><code>${sha(r.commit_sha)}</code></span>
+        <span><span class="lbl">Duration</span>${dur(r.duration_ms)}</span>
+        <span>${statusTag(r.status)}</span></a>`).join("")}</div>
+    </section>`;
+  chart(document.getElementById("c-pipes"), { days: d.days, label: "Runs per day",
+    bars: [{ values: d.success_per_day, color: "var(--pass)", label: "Passed" }, { values: d.failed_per_day, color: "var(--fail)", label: "Failed" }] });
+}
+
+async function pipelineView(tok, id) {
+  view.innerHTML = loading();
+  const d = await api("/api/pipeline", { id });
+  if (tok !== renderToken) return;
+  const p = d.pipeline;
+  const span = Math.max(1, ...d.jobs.map(j => (j.offset_ms || 0) + (j.duration_ms || 0)));
+  view.innerHTML = `
+    <a class="crumb" href="#/pipelines">All pipelines</a>
+    <h1>${esc(p.workflow)} #${esc(p.run_number)}</h1>
+    <div class="tags" style="margin-bottom:8px">${statusTag(p.status)}</div>
+    <div class="meta-list">
+      <span>Attempt <b>${p.attempt}</b> of ${d.attempts.length}${d.attempts.length > 1 ? `: ${d.attempts.map(a => a.pipeline_id === p.pipeline_id ? `<b>${a.attempt}</b>` : `<a href="${pipeHref(a.pipeline_id)}">${a.attempt}</a>`).join(", ")}` : ""}</span>
+      <span>Branch <b>${esc(p.branch || "n/a")}</b></span>
+      <span>Commit <code>${sha(p.commit_sha)}</code></span>
+      <span>Event <b>${esc(p.event || "n/a")}</b></span>
+      <span>Took <b>${dur(p.duration_ms)}</b></span>
+      <span>Queued <b>${dur(p.queue_ms)}</b></span>
+      ${p.actor ? `<span>By <b>${esc(p.actor)}</b></span>` : ""}
+      ${p.url && /^https:\/\//.test(p.url) ? `<a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">Open on GitHub</a>` : ""}
+    </div>
+    <section style="margin-top:24px">
+      <h2>Jobs</h2><p class="note">Each bar starts when its job started and runs for as long as it took, on the same scale.</p>
+      ${d.jobs.length ? `<div class="wfall">${d.jobs.map(j => `<div class="wrow">
+        <span class="name" title="${esc(j.name)}">${esc(j.name)}</span>
+        <span class="track"><span class="seg s-${esc(j.status)}" style="left:${(100 * (j.offset_ms || 0) / span).toFixed(2)}%;width:${(100 * (j.duration_ms || 0) / span).toFixed(2)}%" title="${esc(STATUS_LABEL[j.status] || j.status)}"></span></span>
+        <span class="dur">${dur(j.duration_ms)}</span>
+        ${j.steps.length ? `<details class="steps"><summary>${plural(j.steps.length, "step")}${j.queue_ms != null ? `, waited ${dur(j.queue_ms)} for a runner` : ""}</summary><ol>${j.steps.map(st => `<li><span>${esc(st.name)}</span> ${dur(st.duration_ms)}${st.status !== "success" ? `, ${esc(STATUS_LABEL[st.status] || st.status)}` : ""}</li>`).join("")}</ol></details>` : ""}
+      </div>`).join("")}</div>${legend([["var(--pass)", "Passed"], ["var(--fail)", "Failed"], ["var(--ink-2)", "Other"]])}`
+        : `<p class="empty">No jobs recorded for this attempt.</p>`}
+    </section>
+    ${d.test_runs.length ? `<section><h2>Test results from this commit</h2><ul class="idlist">${d.test_runs.map(r => `<li><a href="#/run/${r.run_id}">Run ${r.run_id}</a> <span class="muted">attempt ${r.attempt}</span></li>`).join("")}</ul></section>` : ""}`;
+}
+
+/* ---------- delivery: DORA, pull requests, issues ---------- */
+let deliveryEnv = null;
+async function deliveryView(tok) {
+  view.innerHTML = loading();
+  const params = { days: DAYS };
+  if (deliveryEnv) params.env = deliveryEnv;
+  const d = await api("/api/delivery", params);
+  if (tok !== renderToken) return;
+  const o = d.dora, m = o.metrics, pr = d.prs, is = d.issues;
+  const envs = o.environments || [];
+  const envSwitch = envs.length > 1 ? `<div class="seg" id="envs" role="group" aria-label="Environment">${envs.map(e => `<button type="button" data-env="${esc(e.environment)}" aria-pressed="${e.environment === o.environment}">${esc(e.environment)}</button>`).join("")}</div>` : "";
+  const synced = Object.entries(d.synced || {}).map(([k, v]) => `${k} ${rel(v)}`).join(", ");
+  const doraBlock = !envs.length ? noData("No deployments recorded yet.",
+      "Tell flakewatch what a release is in <code>flakewatch.toml</code> under <code>[delivery]</code>: pushes to a branch (<code>deploy_branch = \"release\"</code>), files added in git such as patch notes (<code>deploy_files</code>), GitHub Deployments (<code>deploy_environment</code>) or GitHub Releases (<code>deploy_releases = true</code>). Then run <code>flakewatch sync</code>.")
+    : `
+    <section class="stats" style="margin-top:20px" aria-label="DORA metrics for ${esc(o.environment)}">
+      <div class="stat"><div class="k">Deployment frequency</div><div class="v">${m.deploys_per_day}<small>a day</small></div><div class="s">${plural(m.deployments, "deployment")} on ${plural(m.deploy_days, "day")}</div></div>
+      <div class="stat"><div class="k">Lead time for changes</div><div class="v">${hrs(m.lead_time_p50_h)}</div><div class="s">Median from commit to deploy; p90 ${hrs(m.lead_time_p90_h)}</div></div>
+      <div class="stat"><div class="k">Change failure rate</div><div class="v">${m.change_failure_rate == null ? "n/a" : pct(m.change_failure_rate)}</div><div class="s">${m.failed_deployments} failed or led to an incident</div></div>
+      <div class="stat"><div class="k">Time to restore</div><div class="v">${hrs(m.time_to_restore_p50_h)}</div><div class="s">${plural(m.incidents, "incident")}, ${m.open_incidents} still open</div></div>
+    </section>
+    <section class="two">
+      <div><h2>Deployments per day</h2><div class="chart" id="c-dep"></div></div>
+      <div><h2>Lead time</h2><p class="note">Median per day, from each shipped commit to its deployment.</p><div class="chart" id="c-lead"></div></div>
+    </section>
+    <section>
+      <h2>Deployments</h2>
+      <p class="note">An incident is an issue labeled ${(o.incident_labels || []).map(l => `<code>${esc(l)}</code>`).join(", ")}, tied to the last deployment before it opened.</p>
+      ${o.deployments.length ? `<div class="list"><div class="row head dep-grid"><span>When</span><span>Version</span><span>Commit</span><span>Commits</span><span>Lead time</span><span>Result</span></div>
+      ${o.deployments.map(r => `<div class="row dep-grid">
+        <span>${esc(rel(r.deployed_at))}</span>
+        <span class="c-wide">${esc(r.version || r.source)}</span>
+        <span><span class="lbl">Commit</span><code>${sha(r.commit_sha)}</code></span>
+        <span><span class="lbl">Commits</span>${r.commits}</span>
+        <span><span class="lbl">Lead time</span>${hrs(r.lead_time_p50_h)}</span>
+        <span>${r.failed ? tag("failure", r.incidents.length ? `incident ${r.incidents.map(n => "#" + n).join(", ")}` : "failed") : tag("success", "shipped")}</span></div>`).join("")}</div>`
+        : `<p class="empty">No deployments to ${esc(o.environment)} in the last ${DAYS} days.</p>`}
+    </section>`;
+  view.innerHTML = `
+    <h1>Delivery</h1>
+    <p class="note">How often you ship and how long changes take to get there, from synced git and GitHub data.${synced ? ` Last synced: ${esc(synced)}.` : ""}</p>
+    ${envSwitch ? `<div class="subnav"><span class="muted">Environment</span>${envSwitch}</div>` : ""}
+    ${doraBlock}
+    <section>
+      <h2>Pull requests</h2>
+      ${pr.metrics.merged + pr.metrics.open + pr.metrics.opened ? `
+      <section class="stats" style="margin-top:12px" aria-label="Pull requests">
+        <div class="stat"><div class="k">Merged</div><div class="v">${pr.metrics.merged}</div><div class="s">${pr.metrics.opened} opened in ${DAYS} days</div></div>
+        <div class="stat"><div class="k">Time to merge</div><div class="v">${hrs(pr.metrics.time_to_merge_p50_h)}</div><div class="s">Median; p90 ${hrs(pr.metrics.time_to_merge_p90_h)}</div></div>
+        <div class="stat"><div class="k">Open</div><div class="v">${pr.metrics.open}</div><div class="s">${pr.open.length ? `Oldest ${hrs(pr.open[0].age_h)}` : "None waiting"}</div></div>
+        <div class="stat"><div class="k">Closed unmerged</div><div class="v">${pr.metrics.closed_unmerged}</div><div class="s">Abandoned or replaced</div></div>
+      </section>
+      <div class="two" style="margin-top:28px">
+        <div><h2>Merged per day</h2><div class="chart" id="c-prs"></div></div>
+        <div><h2>Open pull requests</h2>${pr.open.length ? `<div class="list">${pr.open.slice(0, 8).map(x => `<div class="row pr-grid">
+          <span>#${x.number}</span><span class="c-wide">${x.url && /^https:\/\//.test(x.url) ? `<a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title)}</a>` : esc(x.title)}</span>
+          <span class="muted">${esc(x.head || "")}</span><span>${hrs(x.age_h)}</span></div>`).join("")}</div>` : `<p class="empty">Nothing open.</p>`}</div>
+      </div>` : noData("No pull requests synced.", "Run <code>flakewatch sync</code> with a <code>[github] repo</code> set.")}
+    </section>
+    <section>
+      <h2>Issues</h2>
+      ${is.metrics.open + is.metrics.opened + is.managed.length ? `
+      <section class="stats" style="margin-top:12px" aria-label="Issues">
+        <div class="stat"><div class="k">Open</div><div class="v">${is.metrics.open}</div><div class="s">Median age ${hrs(is.metrics.open_age_p50_h)}</div></div>
+        <div class="stat"><div class="k">Opened</div><div class="v">${is.metrics.opened}</div><div class="s">In ${DAYS} days</div></div>
+        <div class="stat"><div class="k">Closed</div><div class="v">${is.metrics.closed}</div><div class="s">Median ${hrs(is.metrics.time_to_close_p50_h)} to close</div></div>
+        <div class="stat"><div class="k">Tracked by flakewatch</div><div class="v">${is.managed.filter(i => i.state === "open").length}</div><div class="s">Flaky tests and perf regressions</div></div>
+      </section>
+      <div class="two" style="margin-top:28px">
+        <div><h2>Open issues</h2><p class="note">How many were open at the end of each day.</p><div class="chart" id="c-iss"></div></div>
+        <div><h2>Flaky tests and perf regressions</h2>${is.managed.length ? `<div class="list">${is.managed.slice(0, 12).map(i => `<div class="row iss-grid">
+          <span>${i.url && /^https:\/\//.test(i.url) ? `<a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">#${i.number}</a>` : `#${i.number}`}</span>
+          <span>${i.kind === "flaky" ? tag("flaky", "flaky") : tag("perf", "perf")}</span>
+          <span class="c-wide"><a href="${testHref(i.test_id)}"><code>${esc(i.test_id)}</code></a></span>
+          <span>${i.state === "open" ? tag("open-ok", "open") : tag("closed", "closed")}</span></div>`).join("")}</div>`
+          : `<p class="empty">None yet. <code>flakewatch issues</code> shows what it would open.</p>`}</div>
+      </div>
+      ${is.oldest_open.length ? `<h2 style="margin-top:32px">Oldest open issues</h2><div class="list">${is.oldest_open.slice(0, 8).map(i => `<div class="row pr-grid">
+        <span>#${i.number}</span><span class="c-wide">${i.url && /^https:\/\//.test(i.url) ? `<a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">${esc(i.title)}</a>` : esc(i.title)}</span>
+        <span class="muted">${esc((i.labels || []).slice(0, 2).join(", "))}</span><span>${hrs(i.age_h)}</span></div>`).join("")}</div>` : ""}`
+      : noData("No issues synced.", "Run <code>flakewatch sync</code> with a <code>[github] repo</code> set.")}
+    </section>`;
+  if (envs.length) {
+    chart(document.getElementById("c-dep"), { days: o.days, label: "Deployments per day", bars: [{ values: o.deploys_per_day, color: "var(--quar)", label: "Deployments" }] });
+    chart(document.getElementById("c-lead"), { days: o.days, label: "Median lead time per day", format: "h", lines: [{ values: o.lead_time_per_day, color: "var(--ink)", label: "Lead time", dots: true }] });
+  }
+  const prEl = document.getElementById("c-prs");
+  if (prEl) chart(prEl, { days: pr.days, label: "Pull requests merged per day", bars: [{ values: pr.merged_per_day, color: "var(--quar)", label: "Merged" }] });
+  const isEl = document.getElementById("c-iss");
+  if (isEl) chart(isEl, { days: is.days, label: "Open issues at the end of each day", lines: [{ values: is.open_per_day, color: "var(--quar)", label: "Open" }] });
+  const sw = document.getElementById("envs");
+  if (sw) sw.addEventListener("click", ev => { const b = ev.target.closest("button"); if (b) { deliveryEnv = b.dataset.env; render(); } });
+}
+
 /* ---------- router ---------- */
 const ROUTES = [
   [/^#?\/?$/, "overview", tok => overviewView(tok), true],
@@ -739,6 +1024,9 @@ const ROUTES = [
   [/^#\/test\/(.+)$/, "flaky", (tok, m) => testView(tok, decodeURIComponent(m[1])), true],
   [/^#\/runs$/, "runs", tok => runsView(tok), false],
   [/^#\/run\/(\d+)$/, "runs", (tok, m) => runView(tok, Number(m[1])), false],
+  [/^#\/pipelines$/, "pipelines", tok => pipelinesView(tok), true],
+  [/^#\/pipeline\/(.+)$/, "pipelines", (tok, m) => pipelineView(tok, decodeURIComponent(m[1])), false],
+  [/^#\/delivery$/, "delivery", tok => deliveryView(tok), true],
   [/^#\/trends$/, "trends", tok => trendsView(tok), false],
   [/^#\/quarantine$/, "quarantine", tok => quarantineView(tok), true],
 ];

@@ -285,6 +285,9 @@ def issues_summary(conn: sqlite3.Connection, days: int = 30, incident_labels: li
         i["labels"] = json.loads(i["labels"] or "[]")
     day_list = day_range(days)
     opened = Counter(_day(i["created_at"]) for i in issues if i["created_at"] >= start)
+    # the backlog at the end of each day: opened by then and not yet closed
+    open_per_day = [sum(1 for i in issues if _day(i["created_at"]) <= day and (not i["closed_at"] or _day(i["closed_at"]) > day))
+                    for day in day_list]
     closed = Counter(_day(i["closed_at"]) for i in issues if i["closed_at"] and i["closed_at"] >= start)
     open_issues = [i for i in issues if i["state"] == "open"]
     now = utcnow().isoformat()
@@ -296,6 +299,7 @@ def issues_summary(conn: sqlite3.Connection, days: int = 30, incident_labels: li
         "days": day_list,
         "opened_per_day": [opened.get(d, 0) for d in day_list],
         "closed_per_day": [closed.get(d, 0) for d in day_list],
+        "open_per_day": open_per_day,
         "metrics": {
             "open": len(open_issues),
             "opened": sum(opened.values()),

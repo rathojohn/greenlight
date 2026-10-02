@@ -66,6 +66,13 @@ def overview(conn: sqlite3.Connection, days: int = 30) -> dict[str, Any]:
         },
         "latest": latest_verdict(conn, days),
         "field": flake_field(conn, days, stats),
+        "synced": {r["source"]: r["synced_at"] for r in conn.execute("SELECT source, synced_at FROM sync_state")},
+        "has": {
+            "pipelines": bool(conn.execute("SELECT 1 FROM pipelines LIMIT 1").fetchone()),
+            "deployments": bool(conn.execute("SELECT 1 FROM deployments LIMIT 1").fetchone()),
+            "pull_requests": bool(conn.execute("SELECT 1 FROM pull_requests LIMIT 1").fetchone()),
+            "issues": bool(conn.execute("SELECT 1 FROM issues LIMIT 1").fetchone()),
+        },
     }
 
 
@@ -151,7 +158,7 @@ def test_detail(conn: sqlite3.Connection, test_id: str, days: int = 30) -> dict[
 
     executions = [dict(r) for r in conn.execute(
         """SELECT ru.run_id, ru.started_at, ru.commit_sha AS sha, ru.attempt, r.retry, r.outcome,
-                  r.duration_ms, r.failure_sig
+                  r.duration_ms, r.failure_sig, r.flags
            FROM results r JOIN runs ru ON ru.run_id = r.run_id
            WHERE r.test_id = ? ORDER BY ru.started_at DESC, ru.run_id DESC, r.retry DESC LIMIT 60""", (tid,))]
 
@@ -163,11 +170,17 @@ def test_detail(conn: sqlite3.Connection, test_id: str, days: int = 30) -> dict[
         (tid, since(days))):
         per_day[day].append(ms)
 
+    issues = [dict(r) for r in conn.execute(
+        "SELECT number, title, state, url, fw_key FROM issues WHERE fw_key IN (?, ?) ORDER BY state = 'open' DESC, number DESC",
+        (f"flaky:{tid}", f"perf:{tid}"))]
+    from .delivery import test_metrics
     return {
         "test_id": tid,
         "window_days": days,
         "stats": stats,
         "quarantine": dict(q) if q else None,
+        "issues": issues,
+        "metrics": test_metrics(conn, tid),
         "commits": commits,
         "signatures": signatures,
         "executions": executions,
