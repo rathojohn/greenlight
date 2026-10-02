@@ -4,266 +4,368 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>greenlight</title>
+<script>try { if (localStorage.getItem("greenlight-theme") === "light") document.documentElement.dataset.theme = "light"; } catch { /* storage unavailable */ }</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
+/* Dark is the default; the toggle stores "light". Status colors are validated for color vision deficiency on each
+   theme's panel surface: pass, flip, fail and quarantined, all pairs. */
 :root {
-  --ground: #F1F3F5; --surface: #FFFFFF; --ink: #16202A; --ink-2: #55606C;
-  --rule: #D3D9DF; --rule-2: #E3E7EB;
-  --pass: #2E8A67; --fail: #C4372D; --flip: #B07A00; --quar: #6366A8; --focus: #2563EB;
-  --band: rgba(176, 122, 0, .17);
-  color-scheme: light;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --ground: #151B22; --surface: #1C242E; --ink: #E5EAEF; --ink-2: #98A4B0;
-    --rule: #33404D; --rule-2: #26313C;
-    --pass: #3FA87F; --fail: #E0507A; --flip: #BC8C14; --quar: #7F84DA; --focus: #7AA7FF;
-    --band: rgba(188, 140, 20, .2);
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --ground: #151B22; --surface: #1C242E; --ink: #E5EAEF; --ink-2: #98A4B0;
-  --rule: #33404D; --rule-2: #26313C;
-  --pass: #3FA87F; --fail: #E0507A; --flip: #BC8C14; --quar: #7F84DA; --focus: #7AA7FF;
-  --band: rgba(188, 140, 20, .2);
   color-scheme: dark;
+  --bg: #0b0d12; --panel: #12151c; --panel-2: #181c25; --sunk: #0e1117;
+  --line: #262b36; --line-2: #1c2029;
+  --ink: #e3e6ed; --ink-2: #a0a7b4; --ink-3: #737a89;
+  --accent: #9d87ff; --accent-ink: #0b0d12; --wash: rgba(157, 135, 255, .14);
+  --pass: #00aa82; --flip: #c08000; --fail: #c2272d; --quar: #6d78d8;
+  --series: #9d87ff; --neutral: #4b5366;
+  --band: rgba(160, 167, 180, .17);
+  --tip-bg: #1e232d; --shadow: 0 10px 28px rgba(0, 0, 0, .5);
 }
-:root { box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
-html { scroll-padding-top: env(safe-area-inset-top, 0px); }
-*, *::before, *::after { box-sizing: inherit; }
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f2f3f6; --panel: #ffffff; --panel-2: #f6f7f9; --sunk: #f2f3f6;
+  --line: #dde0e6; --line-2: #eceef2;
+  --ink: #161a22; --ink-2: #545c6a; --ink-3: #7c8391;
+  --accent: #6b4fdb; --accent-ink: #ffffff; --wash: rgba(107, 79, 219, .10);
+  --pass: #10916d; --flip: #b06a00; --fail: #b8173f; --quar: #5a63c8;
+  --series: #6b4fdb; --neutral: #b3b9c5;
+  --band: rgba(84, 92, 106, .13);
+  --tip-bg: #ffffff; --shadow: 0 10px 28px rgba(22, 26, 34, .14);
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
 body {
-  margin: 0; background: var(--ground); color: var(--ink);
-  font-family: "Archivo", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  font-size: 15px; line-height: 1.5; font-variant-numeric: tabular-nums;
-  -webkit-text-size-adjust: 100%;
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 13px/1.45 "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-feature-settings: "cv11", "ss01";
 }
-code, .mono { font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace; font-size: .86em; }
-a { color: inherit; text-decoration-color: var(--rule); text-underline-offset: 3px; }
-a:hover { text-decoration-color: currentColor; }
-:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
+code, .mono { font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace; font-size: .92em; }
+a { color: inherit; text-decoration: none; }
+a:hover { color: var(--ink); }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
 [hidden] { display: none !important; }
-
-/* Header */
-.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--ground); border-bottom: 1px solid var(--rule); }
-.top-inner { max-width: 1180px; margin: 0 auto; padding: 10px 20px; display: flex; align-items: center; gap: 28px; flex-wrap: wrap; }
-.mark { font-weight: 760; font-stretch: 125%; font-size: 1.15rem; letter-spacing: -.01em; text-decoration: none; }
-nav { display: flex; gap: 20px; overflow-x: auto; flex: 1; scrollbar-width: none; }
-nav::-webkit-scrollbar { display: none; }
-nav a { text-decoration: none; color: var(--ink-2); padding: 8px 0 6px; border-bottom: 2px solid transparent; white-space: nowrap; }
-nav a:hover { color: var(--ink); }
-nav a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--ink); }
-.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; flex: none; }
-.seg button { font: inherit; font-size: .85rem; padding: 5px 11px; border: 0; background: transparent; color: var(--ink-2); cursor: pointer; }
-.seg button + button { border-left: 1px solid var(--rule); }
-.seg button[aria-pressed="true"] { background: var(--ink); color: var(--ground); }
-@media (max-width: 720px) {
-  .top-inner { gap: 4px 16px; padding-bottom: 0; }
-  nav { order: 3; flex-basis: 100%; gap: 16px; }
-  nav a { font-size: .94rem; }
-  .top .seg { margin-left: auto; }
-}
-#banner { max-width: 1180px; margin: 14px auto 0; padding: 0 20px; color: var(--ink-2); font-size: .9rem; }
-
-/* Page */
-main { max-width: 1180px; margin: 0 auto; padding: 28px 20px 72px; }
-main#view:focus, main#view:focus-visible { outline: none; }
-section { margin-top: 44px; }
-h1 { font-size: clamp(1.7rem, 4vw, 2.3rem); font-stretch: 112%; font-weight: 760; line-height: 1.08; letter-spacing: -.01em; margin: 0 0 8px; }
-h2 { font-size: 1.05rem; font-weight: 660; margin: 0 0 4px; }
-p { margin: 0 0 10px; }
-.note { color: var(--ink-2); max-width: 70ch; margin-bottom: 16px; }
 .muted { color: var(--ink-2); }
-.loading { color: var(--ink-2); padding: 24px 0; }
-.err { border-left: 3px solid var(--fail); padding: 10px 14px; background: var(--surface); max-width: 72ch; }
-.err code { word-break: break-all; }
-.empty { padding: 20px 0; color: var(--ink-2); max-width: 70ch; }
+.dim { color: var(--ink-3); }
+.ic { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 
-/* Verdict: the one loud thing on the overview */
-.verdict h1 { font-size: clamp(2.5rem, 8.5vw, 4.8rem); font-stretch: 125%; font-weight: 820; line-height: .95; letter-spacing: -.025em; margin: 0 0 16px; }
-.v-REAL_FAILURE h1 { color: var(--fail); }
-.v-RERUN_TARGETED h1 { color: var(--flip); }
-.v-PASS h1 { color: var(--pass); }
-.verdict .detail { font-size: 1.06rem; max-width: 68ch; }
-.verdict .meta { color: var(--ink-2); }
-.idlist { list-style: none; padding: 0; margin: 6px 0 12px; }
-.idlist li { padding: 2px 0; word-break: break-all; }
+/* Shell: sidebar, top bar, content */
+.app { display: grid; grid-template-columns: 212px minmax(0, 1fr); min-height: 100vh; }
+.side { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; z-index: 40; }
+.brand { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 16px; border-bottom: 1px solid var(--line); font-weight: 650; font-size: 14px; letter-spacing: -.01em; flex: none; }
+.brand svg { width: 20px; height: 20px; }
+.nav { display: flex; flex-direction: column; gap: 1px; padding: 6px 8px 12px; }
+.nav .grp { font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); padding: 12px 8px 4px; }
+.nav a { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 4px; color: var(--ink-2); }
+.nav a:hover { background: var(--panel-2); color: var(--ink); }
+.nav a[aria-current] { background: var(--wash); color: var(--ink); box-shadow: inset 2px 0 0 var(--accent); }
+.side-foot { margin-top: auto; padding: 10px 16px 14px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-2); display: flex; align-items: center; gap: 8px; min-height: 42px; }
+.pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--pass); flex: none; }
+.pulse.off { background: var(--ink-3); }
+.main { min-width: 0; display: flex; flex-direction: column; }
+.top { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 16px; background: var(--bg); border-bottom: 1px solid var(--line); }
+.crumbs { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; color: var(--ink-3); }
+.crumbs a:hover { color: var(--ink); }
+.crumbs .ic { width: 12px; height: 12px; }
+.crumbs h1 { margin: 0; font-size: 14px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.crumbs > span { white-space: nowrap; }
+.tb { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--ink-2); cursor: pointer; white-space: nowrap; font-size: 12.5px; }
+.tb:hover { color: var(--ink); border-color: var(--ink-3); }
+.tb.icon { width: 30px; padding: 0; justify-content: center; }
+.tb[aria-disabled="true"] { opacity: .5; cursor: default; }
+.tb[aria-disabled="true"]:hover { color: var(--ink-2); border-color: var(--line); }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 13px; background: var(--wash); color: var(--ink); font-size: 12px; white-space: nowrap; }
+.picker { position: relative; }
+.menu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 180px; padding: 4px; background: var(--tip-bg); border: 1px solid var(--line); border-radius: 6px; box-shadow: var(--shadow); z-index: 50; }
+.menu button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; border: 0; border-radius: 4px; background: none; text-align: left; cursor: pointer; color: var(--ink); }
+.menu button:hover { background: var(--panel-2); }
+.menu button .ic { visibility: hidden; color: var(--accent); stroke-width: 2.2; }
+.menu button[aria-checked="true"] { font-weight: 600; }
+.menu button[aria-checked="true"] .ic { visibility: visible; }
+#menu-btn { display: none; }
+.scrim { display: none; }
+#view { padding: 12px 16px 48px; min-width: 0; }
+#view:focus { outline: none; }
+#view.busy { opacity: .6; transition: opacity .15s .15s; }
+#bar { position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 60; overflow: hidden; pointer-events: none; }
+#bar::after { content: ""; position: absolute; top: 0; bottom: 0; width: 30%; background: var(--accent); animation: slide 1.1s ease-in-out infinite; }
+@keyframes slide { from { left: -30%; } to { left: 100%; } }
+@media (max-width: 900px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .side { position: fixed; top: 0; bottom: 0; left: 0; width: 240px; height: auto; transform: translateX(-100%); transition: transform .18s ease; padding-top: env(safe-area-inset-top, 0px); }
+  body.nav-open .side { transform: none; box-shadow: var(--shadow); }
+  body.nav-open .scrim { display: block; position: fixed; inset: 0; z-index: 35; background: rgba(0, 0, 0, .45); }
+  #menu-btn { display: inline-flex; }
+  .top { top: env(safe-area-inset-top, 0px); padding: 0 12px; }
+  #view { padding: 10px 12px 40px; }
+}
+@media (max-width: 560px) {
+  .crumbs > span, .crumbs > a, .crumbs > .ic { display: none; }
+  #range-label { display: none; }
+}
 
-/* Stat row */
-.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
-.stat { padding: 16px 18px 16px 0; min-width: 0; }
-.stat + .stat { padding-left: 18px; border-left: 1px solid var(--rule); }
-.stat .k { font-weight: 600; }
-.stat .v { font-size: 2rem; font-weight: 720; font-stretch: 115%; line-height: 1.15; font-variant-numeric: proportional-nums; }
-.stat .v small { font-size: .5em; font-weight: 600; color: var(--ink-2); margin-left: 4px; }
-.verdict h1, h1 { font-variant-numeric: proportional-nums; }
-.stat .s { color: var(--ink-2); font-size: .88rem; }
+/* Panels: a 12 column grid, 8px gutters */
+.grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 8px; }
+.grid + .grid, .grid + .row-title, .row-title + .grid, .vars + .grid { margin-top: 8px; }
+.s3 { grid-column: span 3; } .s4 { grid-column: span 4; } .s5 { grid-column: span 5; } .s6 { grid-column: span 6; }
+.s7 { grid-column: span 7; } .s8 { grid-column: span 8; } .s12 { grid-column: span 12; }
+@media (max-width: 1100px) { .s3 { grid-column: span 6; } .s5, .s7 { grid-column: span 12; } }
+@media (max-width: 900px) { .s4.panel:not(.stat), .s6, .s8 { grid-column: span 12; } }
+@media (max-width: 560px) { .s4:not(.stat) { grid-column: span 12; } }
+.start { align-self: start; }
+.panel { position: relative; display: flex; flex-direction: column; min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; }
+a.panel:hover { border-color: var(--ink-3); }
+.ph { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-height: 36px; padding: 6px 10px 4px 12px; }
+.ph h2 { margin: 0; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pa { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.pb { flex: 1; min-width: 0; padding: 4px 12px 12px; }
+.pb.flush { padding: 0; border-top: 1px solid var(--line-2); }
+.pf { padding: 8px 12px; border-top: 1px solid var(--line-2); color: var(--ink-2); font-size: 12px; }
+.info { display: inline-flex; padding: 0; border: 0; background: none; color: var(--ink-3); cursor: help; }
+.info:hover, .info:focus-visible { color: var(--ink); }
+.info .ic { width: 14px; height: 14px; }
+.row-title { display: flex; align-items: center; gap: 8px; padding: 10px 2px 2px; font-size: 13px; font-weight: 600; }
+.row-title .ic { color: var(--ink-3); }
+.lnk { color: var(--accent); font-weight: 500; white-space: nowrap; }
+.lnk:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.vars { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.var { display: inline-flex; align-items: stretch; height: 30px; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: var(--panel); }
+.var span { display: flex; align-items: center; padding: 0 10px; background: var(--panel-2); color: var(--ink-2); border-right: 1px solid var(--line); font-size: 12px; }
+.var select { border: 0; background: var(--panel); color: var(--ink); font: inherit; padding: 0 8px; min-width: 0; }
+
+/* Stat tiles */
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.stat { padding: 10px 12px 12px; min-height: 96px; justify-content: space-between; gap: 6px; }
+.stat .k { display: flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 12px; font-weight: 500; }
+.stat .vr { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; }
+.stat .v { font-size: 26px; font-weight: 600; letter-spacing: -.02em; line-height: 1.1; white-space: nowrap; }
+.stat .v small { font-size: 13px; font-weight: 500; color: var(--ink-2); margin-left: 3px; letter-spacing: 0; }
+.stat .s { color: var(--ink-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.spark { flex: 0 1 48%; height: 30px; min-width: 0; display: block; overflow: visible; }
+@media (max-width: 560px) {
+  .stat { min-height: 84px; padding: 8px 10px 10px; }
+  .stat .v { font-size: 21px; }
+  .s4.stat .spark, .s4.stat .s { display: none; }
+}
+
+/* Status tags: shape and label carry the state, color backs them up */
+.tag { display: inline-flex; align-items: center; gap: 6px; padding: 0 7px 0 6px; border-radius: 3px; line-height: 20px; font-size: 12px; font-weight: 500; white-space: nowrap; color: var(--ink); background: color-mix(in srgb, var(--c) 16%, transparent); }
+.tag i { width: 8px; height: 8px; flex: none; background: var(--c); }
+.tag.lg { font-size: 13px; line-height: 24px; padding: 0 10px 0 8px; gap: 8px; }
+.tag.lg i { width: 10px; height: 10px; }
+.st-pass { --c: var(--pass); } .st-pass i { border-radius: 50%; }
+.st-fail { --c: var(--fail); } .st-fail i { border-radius: 1px; }
+.st-flip, .st-flip-o { --c: var(--flip); } .st-flip i, .st-flip-o i { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.st-flip-o i { opacity: .55; }
+.st-quar { --c: var(--quar); } .st-quar i { transform: rotate(45deg) scale(.8); border-radius: 1px; }
+.st-neutral { --c: var(--ink-3); } .st-neutral i { border-radius: 50%; background: transparent; box-shadow: inset 0 0 0 1.5px var(--c); }
+.st-run { --c: var(--accent); } .st-run i { border-radius: 50%; background: transparent; box-shadow: inset 0 0 0 2px var(--c); }
+.tags { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+
+/* Tables */
+.tw { overflow-x: auto; }
+table.t { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.t th { text-align: left; font-weight: 500; font-size: 11.5px; color: var(--ink-2); padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; background: var(--panel-2); }
+.t th[data-col] { cursor: pointer; user-select: none; }
+.t th[data-col]:hover { color: var(--ink); }
+.t th[aria-sort="ascending"]::after { content: " \2191"; color: var(--accent); }
+.t th[aria-sort="descending"]::after { content: " \2193"; color: var(--accent); }
+.t td { padding: 6px 10px; border-bottom: 1px solid var(--line-2); vertical-align: top; line-height: 20px; }
+.t td .sub, .t td .why { line-height: 1.45; }
+.t tr:last-child td { border-bottom: 0; }
+.t th:first-child, .t td:first-child { padding-left: 12px; }
+.t th:last-child, .t td:last-child { padding-right: 12px; }
+.t tbody tr:hover td { background: var(--panel-2); }
+.t tr[data-href] { cursor: pointer; }
+.t .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.t .nw { white-space: nowrap; }
+.t .wrap { min-width: 13rem; overflow-wrap: anywhere; }
+.t .act { text-align: right; white-space: nowrap; }
+.t .fit { width: 1%; white-space: nowrap; }
+.show-sm { display: none !important; }
+.t a.tl:hover { color: var(--accent); }
+.t .sub { color: var(--ink-3); font-size: 11.5px; overflow-wrap: anywhere; }
+.more { padding: 8px 12px; border-top: 1px solid var(--line-2); }
+.empty { margin: 0; padding: 14px 12px; color: var(--ink-2); }
+.pb > .empty { padding: 10px 0 4px; }
 @media (max-width: 720px) {
-  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .stat:nth-child(3) { border-left: 0; padding-left: 0; }
-  .stat:nth-child(n+3) { border-top: 1px solid var(--rule); }
+  .t .hide-sm { display: none; }
+  .t .show-sm { display: flex !important; }
+  .t th, .t td { padding-left: 8px; padding-right: 8px; }
+  .t .wrap { min-width: 9rem; }
 }
-
-/* Flake field and strips: height means failure, amber means one commit both passed and failed */
-.field { display: grid; gap: 4px; }
-.frow, .faxis { display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr); gap: 16px; align-items: end; }
-.frow { text-decoration: none; padding: 3px 0; }
-.frow:hover .fname { text-decoration: underline; }
-.fname { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fname .q { color: var(--quar); }
-.cells { display: flex; align-items: flex-end; gap: 2px; height: 28px; }
-.cells i { flex: 1 1 0; min-width: 2px; height: 30%; background: var(--pass); border-radius: 1px; }
-.cells i.f { height: 100%; background: var(--fail); }
-.cells i.x { height: 100%; background: var(--flip); }
-.cells i.n { height: 2px; background: var(--rule); }
-.faxis { color: var(--ink-2); font-size: .8rem; margin-top: 2px; }
-.faxis > span:last-child { display: flex; justify-content: space-between; }
-.field.animate .cells i { animation: rise .55s cubic-bezier(.2, .7, .2, 1) both; animation-delay: calc(var(--c) * 14ms); transform-origin: bottom; }
-@keyframes rise { from { transform: scaleY(0); } }
-@media (prefers-reduced-motion: reduce) { .field.animate .cells i { animation: none; } }
-@media (max-width: 720px) {
-  .frow, .faxis { grid-template-columns: 1fr; gap: 3px; }
-  .faxis > span:first-child { display: none; }
-  .frow { padding: 6px 0; }
-}
-.strip { display: inline-flex; align-items: flex-end; gap: 2px; height: 18px; vertical-align: middle; width: 178px; max-width: 100%; }
-.strip i { flex: 1 1 0; min-width: 1px; max-width: 4px; height: 32%; background: var(--pass); border-radius: 1px; }
-.strip i.f { height: 100%; background: var(--fail); }
-.legend { display: flex; gap: 6px 18px; flex-wrap: wrap; color: var(--ink-2); font-size: .85rem; margin-top: 10px; }
-.sw { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 2px; vertical-align: -1px; }
-.sw.short { height: 4px; vertical-align: 1px; }
-
-/* Tags */
-.tag { display: inline-flex; align-items: center; gap: 6px; font-size: .82rem; font-weight: 620; color: var(--ink); white-space: nowrap; }
-.tag::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--c, var(--ink-2)); }
-.t-flaky, .t-known_flaky, .t-RERUN_TARGETED { --c: var(--flip); }
-.t-suspect, .t-suspect_flaky { --c: var(--flip); }
-.t-suspect::before, .t-suspect_flaky::before { background: transparent; box-shadow: inset 0 0 0 2px var(--c); }
-.t-failing, .t-real_failure, .t-new_test, .t-REAL_FAILURE { --c: var(--fail); }
-.t-quarantined, .t-perf { --c: var(--quar); }
-.t-PASS, .t-stable, .t-success, .t-open-ok { --c: var(--pass); }
-.t-failure, .t-timed_out, .t-startup_failure { --c: var(--fail); }
-.t-cancelled, .t-skipped, .t-neutral, .t-in_progress, .t-queued, .t-unknown, .t-closed { --c: var(--ink-2); }
-.t-in_progress::before, .t-queued::before { background: transparent; box-shadow: inset 0 0 0 2px var(--c); }
-.tags { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 2px; }
-
-/* Lists */
-.list { border-top: 1px solid var(--rule); }
-.row { display: grid; gap: 6px 20px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--rule-2); text-decoration: none; min-width: 0; }
-a.row:hover { background: linear-gradient(90deg, transparent, var(--rule-2) 8%, var(--rule-2) 92%, transparent); }
-.row.head { color: var(--ink-2); font-size: .84rem; padding: 8px 0; }
-.row > * { min-width: 0; }
-.c-test .mono { word-break: break-all; }
-.row code { overflow-wrap: anywhere; }
-.exec-grid .tag, .dep-grid .tag { white-space: normal; }
-.lbl { display: none; color: var(--ink-2); font-size: .8rem; }
-.flaky-grid { grid-template-columns: minmax(0, 2.3fr) 8.5rem 8rem 7rem minmax(8rem, 1fr); }
-.runs-grid { grid-template-columns: 8rem 7.5rem 5rem 6rem 5rem minmax(9rem, 1fr); }
-.q-grid { grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) 12rem 7.5rem; }
-.q-grid > :last-child { text-align: right; }
-.score { display: flex; align-items: center; gap: 8px; }
-.score b { display: block; height: 6px; background: var(--flip); border-radius: 3px; }
-.score .track { flex: 1; max-width: 70px; background: var(--rule-2); border-radius: 3px; }
-@media (max-width: 860px) {
-  .row.head { display: none; }
-  .flaky-grid, .runs-grid, .q-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .flaky-grid .c-test, .q-grid .c-test, .runs-grid .c-wide { grid-column: 1 / -1; }
-  .lbl { display: block; }
-}
-.toolbar { display: flex; gap: 12px 18px; align-items: center; flex-wrap: wrap; margin: 4px 0 16px; }
-.toolbar label { display: inline-flex; gap: 8px; align-items: center; color: var(--ink-2); }
 
 /* Controls */
-.btn { font: inherit; font-weight: 620; font-size: .9rem; padding: 7px 14px; border-radius: 6px; border: 1px solid var(--ink); background: var(--ink); color: var(--ground); cursor: pointer; white-space: nowrap; }
-.btn.ghost { background: transparent; color: var(--ink); border-color: var(--rule); }
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 4px; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 500; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+.btn.ghost { background: transparent; color: var(--ink); border-color: var(--line); }
+.btn.ghost:hover { border-color: var(--ink-3); }
+.btn.sm { height: 24px; padding: 0 9px; font-size: 12px; }
 .btn:disabled { opacity: .5; cursor: default; }
-input[type=text], input[type=search] { font: inherit; padding: 7px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); color: var(--ink); min-width: 0; }
-.qform { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; max-width: 640px; }
-.qform input { flex: 1 1 220px; }
+.inp { height: 28px; padding: 0 9px; border: 1px solid var(--line); border-radius: 4px; background: var(--sunk); color: var(--ink); font: inherit; min-width: 0; width: 200px; }
+.inp:focus { outline: none; border-color: var(--accent); }
+.chk { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); white-space: nowrap; cursor: pointer; }
+.chk input { accent-color: var(--accent); margin: 0; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.seg button { padding: 0 10px; height: 26px; border: 0; background: transparent; color: var(--ink-2); cursor: pointer; font-size: 12px; white-space: nowrap; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--wash); color: var(--ink); font-weight: 500; }
+.qform { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.qform .inp { width: 260px; }
+@media (max-width: 720px) { .inp, .qform .inp { width: 100%; font-size: 16px; } .pa:has(input) { width: 100%; justify-content: flex-start; } .bar2 > .qform { width: 100%; } }
+
+/* Gate */
+.gate { display: flex; flex-direction: column; gap: 8px; }
+.gate .head { font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+.ids { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.ids a { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
+.ids a:hover { color: var(--accent); }
+.kv { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--ink-2); font-size: 12px; }
+.kv b { color: var(--ink); font-weight: 500; }
+.kv a { color: var(--accent); }
+
+/* Entity header on detail pages */
+.ent { padding: 12px; gap: 8px; }
+.ent .cls { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; color: var(--ink-3); font-size: 12px; overflow-wrap: anywhere; }
+.ent .name { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: 17px; font-weight: 500; overflow-wrap: anywhere; line-height: 1.3; }
+.ent .title { font-size: 17px; font-weight: 600; }
+.ent .bar2 { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+
+/* Flake field and strips: bar height is the share of runs that failed; amber means pass and fail on one commit */
+.hm { display: flex; flex-direction: column; gap: 1px; }
+.hmr { display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr); gap: 12px; align-items: end; padding: 3px 0; }
+a.hmr:hover .n { color: var(--accent); }
+.hmr .n { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: 12px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hmr .n .q { color: var(--quar); }
+.cells { display: flex; align-items: flex-end; gap: 2px; height: 22px; }
+.cells i { flex: 1 1 0; min-width: 2px; height: 30%; background: var(--pass); border-radius: 2px 2px 0 0; }
+.cells i.f { height: 100%; background: var(--fail); }
+.cells i.x { height: 100%; background: var(--flip); }
+.cells i.n { height: 2px; background: var(--line); border-radius: 0; }
+.hmx { display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr); gap: 12px; color: var(--ink-3); font-size: 11px; padding-top: 4px; }
+.hmx > span:last-child { display: flex; justify-content: space-between; }
+@media (max-width: 720px) { .hmr, .hmx { grid-template-columns: minmax(0, 1fr); gap: 3px; } .hmx > span:first-child { display: none; } }
+.strip { display: inline-flex; align-items: flex-end; gap: 2px; height: 16px; vertical-align: middle; width: 150px; }
+.strip i { flex: 1 1 0; min-width: 1px; max-width: 4px; height: 35%; background: var(--pass); border-radius: 1px 1px 0 0; }
+.strip i.f { height: 100%; background: var(--fail); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--ink-2); font-size: 12px; }
+.legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.sw.ln { height: 2px; width: 14px; border-radius: 1px; }
+.score { display: inline-flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.score .track { width: 52px; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.score b { display: block; height: 100%; background: var(--flip); border-radius: 2px; }
 
 /* Charts */
-.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 44px; }
-@media (max-width: 860px) { .two { grid-template-columns: minmax(0, 1fr); } }
 .chart { width: 100%; min-height: 60px; }
 .chart svg { display: block; overflow: visible; touch-action: pan-y; }
-.chart .grid { stroke: var(--rule-2); stroke-width: 1; }
-.chart .axis { stroke: var(--rule); stroke-width: 1; }
-.chart text { fill: var(--ink-2); font-size: 11px; font-family: inherit; }
+.chart .grid { stroke: var(--line-2); stroke-width: 1; }
+.chart .axis { stroke: var(--line); stroke-width: 1; }
+.chart text { fill: var(--ink-3); font-size: 11px; font-family: inherit; font-variant-numeric: tabular-nums; }
 .chart .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .chart .band { fill: var(--band); }
-.chart .median { fill: none; stroke: var(--flip); stroke-width: 1.5; stroke-dasharray: 4 3; }
-.chart .future { fill: var(--rule-2); opacity: .55; }
-.chart .cursor { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 2 3; }
-#tip { position: fixed; z-index: 20; pointer-events: none; background: var(--ink); color: var(--ground); padding: 8px 10px; border-radius: 6px; font-size: .8rem; line-height: 1.45; max-width: 260px; }
-#tip b { font-weight: 650; }
+.chart .median { fill: none; stroke: var(--ink-2); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.chart .future { fill: var(--panel-2); }
+.chart .cursor { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 3 3; }
+.chart .colband { fill: var(--ink); opacity: .06; }
+#tip { position: fixed; z-index: 70; pointer-events: none; max-width: 300px; padding: 7px 10px; border-radius: 4px; border: 1px solid var(--line); background: var(--tip-bg); color: var(--ink); box-shadow: var(--shadow); font-size: 12px; line-height: 1.5; }
+#tip .th { font-weight: 600; margin-bottom: 2px; }
+#tip .tr { display: flex; align-items: center; gap: 8px; }
+#tip .tr span { color: var(--ink-2); flex: 1; }
+#tip .tr b { font-weight: 600; font-variant-numeric: tabular-nums; }
+#tip .sw { width: 8px; height: 8px; }
 
-/* Test page */
-.tid-class { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; color: var(--ink-2); font-size: .88rem; word-break: break-all; }
-.tid-name { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: clamp(1.25rem, 3.4vw, 1.9rem); font-weight: 600; line-height: 1.2; word-break: break-all; margin: 4px 0 12px; }
-.crumb { color: var(--ink-2); font-size: .9rem; margin-bottom: 18px; display: inline-block; }
-.msg { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: .8rem; white-space: pre-wrap; word-break: break-word; background: var(--surface); border: 1px solid var(--rule-2); border-radius: 4px; padding: 8px 10px; margin: 6px 0 0; }
-.sig { padding: 12px 0; border-bottom: 1px solid var(--rule-2); }
-.exec-grid { grid-template-columns: 8rem 7.5rem 6rem 5rem minmax(0, 1fr); }
-@media (max-width: 860px) { .exec-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.fail-item { padding: 14px 0; border-bottom: 1px solid var(--rule-2); }
-.fail-item .why { color: var(--ink-2); margin: 4px 0 0; }
+/* Messages, run failures, pipeline waterfall */
+.msg { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--sunk); border: 1px solid var(--line-2); border-radius: 3px; padding: 6px 8px; margin: 6px 0 0; max-height: 9.5em; overflow: auto; color: var(--ink-2); }
+.sigs { display: flex; flex-direction: column; }
+.sig { padding: 10px 12px; border-bottom: 1px solid var(--line-2); }
+.sig:last-child { border-bottom: 0; }
+.why { color: var(--ink-2); font-size: 12px; margin-top: 2px; }
+.wf { font-size: 12.5px; }
+.wr { display: grid; grid-template-columns: minmax(0, 14rem) minmax(0, 1fr) 4.5rem; gap: 12px; align-items: center; padding: 5px 12px; border-bottom: 1px solid var(--line-2); }
+.wr.wax { color: var(--ink-3); font-size: 11px; border-bottom: 1px solid var(--line); padding-top: 7px; padding-bottom: 7px; background: var(--panel-2); }
+.wr .wn { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wr .wn .ic { width: 12px; height: 12px; color: var(--ink-3); transition: transform .12s; }
+.wr .num { text-align: right; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.track { position: relative; height: 16px; background-image: linear-gradient(to right, var(--line-2) 1px, transparent 1px); }
+.wax .track { background: none; height: 14px; }
+.wax .track b { position: absolute; top: 0; font-weight: 400; transform: translateX(-50%); white-space: nowrap; }
+.wax .track b:first-child { transform: none; }
+.wax .track b:last-child { transform: translateX(-100%); }
+.bar { position: absolute; top: 2px; height: 12px; min-width: 3px; border-radius: 0 3px 3px 0; background: var(--c); }
+.bar.thin { top: 5px; height: 6px; opacity: .85; }
+details.wj > summary { list-style: none; cursor: pointer; }
+details.wj > summary::-webkit-details-marker { display: none; }
+details.wj > summary:hover { background: var(--panel-2); }
+details.wj[open] > summary .wn .ic { transform: rotate(90deg); }
+.wr.sub { padding-top: 3px; padding-bottom: 3px; color: var(--ink-2); font-size: 12px; }
+.wr.sub .wn { padding-left: 18px; }
+@media (max-width: 720px) { .wr { grid-template-columns: minmax(0, 1fr) 4rem; } .wr .track { grid-column: 1 / -1; order: 3; } .wr.wax span:first-child, .wr.wax span:last-child { display: none; } .wr.wax { grid-template-columns: minmax(0, 1fr); } }
 
-/* Pipelines and delivery */
-.wf-grid { grid-template-columns: minmax(0, 1.6fr) 5rem 7rem 8.5rem 6.5rem 5.5rem 7rem; }
-.pipe-grid { grid-template-columns: 7.5rem minmax(0, 1.6fr) minmax(0, 1fr) 6.5rem 5.5rem 6.5rem; }
-.job-grid { grid-template-columns: minmax(0, 2fr) 9rem 6rem 6rem; }
-.dep-grid { grid-template-columns: 8rem minmax(0, 1.4fr) 6.5rem 5.5rem 7rem minmax(7rem, 1fr); }
-.pr-grid { grid-template-columns: 4rem minmax(0, 2fr) 7rem 6rem; }
-.iss-grid { grid-template-columns: 4rem 6rem minmax(0, 2fr) 6rem; }
-@media (max-width: 860px) {
-  .wf-grid, .pipe-grid, .job-grid, .dep-grid, .pr-grid, .iss-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .wf-grid > :first-child, .pipe-grid .c-wide, .job-grid > :first-child, .dep-grid .c-wide, .pr-grid .c-wide, .iss-grid .c-wide { grid-column: 1 / -1; }
-}
-.meta-list { display: flex; flex-wrap: wrap; gap: 4px 22px; color: var(--ink-2); margin: 6px 0 14px; }
-.meta-list b { color: var(--ink); font-weight: 600; }
-.wfall { border-top: 1px solid var(--rule); }
-.wrow { display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr) 5.5rem; gap: 14px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--rule-2); }
-.wrow .track { position: relative; height: 14px; }
-.wrow .seg { position: absolute; top: 0; height: 14px; min-width: 3px; border-radius: 0 4px 4px 0; background: var(--ink-2); }
-.wrow .seg.s-success { background: var(--pass); }
-.wrow .seg.s-failure, .wrow .seg.s-timed_out { background: var(--fail); }
-.wrow .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wrow .dur { text-align: right; color: var(--ink-2); }
-details.steps { grid-column: 1 / -1; margin: 2px 0 0; }
-details.steps summary { cursor: pointer; color: var(--ink-2); font-size: .85rem; }
-details.steps ol { margin: 6px 0 4px; padding-left: 1.4rem; color: var(--ink-2); font-size: .88rem; }
-details.steps li span { color: var(--ink); }
-@media (max-width: 720px) { .wrow { grid-template-columns: 1fr 4.5rem; } .wrow .track { grid-column: 1 / -1; order: 3; } }
-.subnav { display: flex; gap: 12px 18px; flex-wrap: wrap; align-items: center; margin: 4px 0 8px; }
-.issue-links { margin: 0 0 12px; }
-.issue-links a { margin-right: 14px; }
-
-#toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--ground); padding: 9px 16px; border-radius: 6px; font-size: .9rem; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100vw - 32px); }
+.err { margin: 0; padding: 12px; border-left: 3px solid var(--fail); background: var(--panel); border-radius: 4px; }
+.err p { margin: 0 0 6px; }
+.err p:last-child { margin: 0; }
+.skel { min-height: 96px; background: linear-gradient(90deg, var(--panel) 30%, var(--panel-2) 50%, var(--panel) 70%) 0 0 / 300% 100%; animation: shimmer 1.4s linear infinite; }
+.skel.tall { min-height: 240px; }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .skel, #bar::after { animation: none; } }
+#toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 80; padding: 8px 14px; border-radius: 4px; border: 1px solid var(--line); background: var(--tip-bg); color: var(--ink); box-shadow: var(--shadow); opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100vw - 32px); }
 #toast.show { opacity: 1; }
 </style>
 </head>
 <body>
-<header class="top">
-  <div class="top-inner">
-    <a class="mark" href="#/">greenlight</a>
-    <nav id="nav" aria-label="Views">
-      <a href="#/" data-nav="overview">Overview</a>
-      <a href="#/flaky" data-nav="flaky">Flaky tests</a>
-      <a href="#/runs" data-nav="runs">Runs</a>
-      <a href="#/pipelines" data-nav="pipelines">Pipelines</a>
-      <a href="#/delivery" data-nav="delivery">Delivery</a>
-      <a href="#/trends" data-nav="trends">Trends</a>
-      <a href="#/quarantine" data-nav="quarantine">Quarantine</a>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-overview" viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></symbol>
+  <symbol id="i-flaky" viewBox="0 0 16 16"><path d="M1.5 8h2.5l1.5-4.5 3 9 1.5-4.5h4.5"/></symbol>
+  <symbol id="i-runs" viewBox="0 0 16 16"><path d="M6 4h8M6 8h8M6 12h8M2.5 4h.5M2.5 8h.5M2.5 12h.5"/></symbol>
+  <symbol id="i-quarantine" viewBox="0 0 16 16"><path d="M8 1.75 13.25 3.5v4c0 3.2-2.2 5.5-5.25 6.75C4.95 13 2.75 10.7 2.75 7.5v-4z"/><path d="M5.75 8h4.5"/></symbol>
+  <symbol id="i-trends" viewBox="0 0 16 16"><path d="M1.75 12.25 6 8l2.75 2.75 5.5-6"/><path d="M10.5 4.75h3.75V8.5"/></symbol>
+  <symbol id="i-pipelines" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r="1.75"/><circle cx="12.5" cy="3.5" r="1.75"/><circle cx="12.5" cy="12.5" r="1.75"/><path d="M5.25 8h1.5c1.5 0 2-1 2.5-2.25S10 3.5 10.75 3.5M6.75 8c1.5 0 2 1 2.5 2.25s.75 2.25 1.5 2.25"/></symbol>
+  <symbol id="i-delivery" viewBox="0 0 16 16"><path d="M8 10.25V2M4.75 5.25 8 2l3.25 3.25"/><path d="M2.5 9.5v4h11v-4"/></symbol>
+  <symbol id="i-info" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.25"/><path d="M8 7.25v3.75M8 5h.01"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13.25 8A5.25 5.25 0 1 1 11.7 4.3"/><path d="M13.25 2.25v3.5h-3.5"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.75"/><path d="M8 1.5V3M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.05 1.05M11.55 11.55l1.05 1.05M3.4 12.6l1.05-1.05M11.55 4.45l1.05-1.05"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 16 16"><path d="M13.25 9.75A5.5 5.5 0 0 1 6.25 2.75a5.5 5.5 0 1 0 7 7z"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2.25 1.5"/></symbol>
+  <symbol id="i-down" viewBox="0 0 16 16"><path d="M4.5 6.25 8 9.75l3.5-3.5"/></symbol>
+  <symbol id="i-right" viewBox="0 0 16 16"><path d="M6.25 4.5 9.75 8l-3.5 3.5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="M3.5 8.5 6.5 11.5 12.5 4.5"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M13.5 2.5 8 8M11.5 9.5v4h-9v-9h4"/></symbol>
+</svg>
+<div class="app">
+  <aside class="side" id="side" aria-label="Navigation">
+    <a class="brand" href="#/"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="1" y="1" width="18" height="18" rx="5" fill="var(--panel-2)" stroke="var(--line)"/><circle cx="10" cy="10" r="4.25" fill="var(--pass)"/></svg>greenlight</a>
+    <nav class="nav" id="nav">
+      <div class="grp">Tests</div>
+      <a href="#/" data-nav="overview"><svg class="ic"><use href="#i-overview"/></svg>Overview</a>
+      <a href="#/flaky" data-nav="flaky"><svg class="ic"><use href="#i-flaky"/></svg>Flaky tests</a>
+      <a href="#/runs" data-nav="runs"><svg class="ic"><use href="#i-runs"/></svg>Runs</a>
+      <a href="#/quarantine" data-nav="quarantine"><svg class="ic"><use href="#i-quarantine"/></svg>Quarantine</a>
+      <a href="#/trends" data-nav="trends"><svg class="ic"><use href="#i-trends"/></svg>Trends</a>
+      <div class="grp">Delivery</div>
+      <a href="#/pipelines" data-nav="pipelines"><svg class="ic"><use href="#i-pipelines"/></svg>Pipelines</a>
+      <a href="#/delivery" data-nav="delivery"><svg class="ic"><use href="#i-delivery"/></svg>DORA and GitHub</a>
     </nav>
-    <div class="seg" id="window" role="group" aria-label="Time window">
-      <button type="button" data-days="7">7d</button><button type="button" data-days="30">30d</button><button type="button" data-days="90">90d</button>
-    </div>
+    <div class="side-foot" id="sync"><span class="pulse off"></span><span>Not synced yet</span></div>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+  <div class="main">
+    <header class="top">
+      <button class="tb icon" id="menu-btn" type="button" aria-label="Open navigation"><svg class="ic"><use href="#i-menu"/></svg></button>
+      <div class="crumbs" id="crumbs"><h1>Overview</h1></div>
+      <span class="chip" id="snapchip" hidden></span>
+      <div class="picker" id="picker">
+        <button class="tb" id="range" type="button" aria-haspopup="true" aria-expanded="false"><svg class="ic"><use href="#i-clock"/></svg><span id="range-label">Last 30 days</span><svg class="ic"><use href="#i-down"/></svg></button>
+        <div class="menu" id="range-menu" role="menu" hidden></div>
+      </div>
+      <button class="tb icon" id="refresh" type="button" aria-label="Refresh" data-tip="Refresh"><svg class="ic"><use href="#i-refresh"/></svg></button>
+      <button class="tb icon" id="theme" type="button" aria-label="Switch theme"><svg class="ic"><use href="#i-sun"/></svg></button>
+    </header>
+    <main id="view" tabindex="-1"></main>
   </div>
-</header>
-<p id="banner" hidden></p>
-<main id="view" tabindex="-1"></main>
+</div>
+<div id="bar" hidden></div>
 <div id="tip" hidden></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script id="snapshot" type="application/json">null</script>
@@ -273,32 +375,33 @@ const SNAP = JSON.parse(document.getElementById("snapshot").textContent || "null
 const LIVE = !SNAP;
 const NOW = SNAP ? new Date(SNAP.generated_at) : new Date();
 const view = document.getElementById("view");
+const RANGES = [7, 14, 30, 90];
 let DAYS = SNAP ? SNAP.days : (() => { try { return Number(localStorage.getItem("greenlight-days")) || 30; } catch { return 30; } })();
 let renderToken = 0;
-let animatedField = false;
 
 /* ---------- data ---------- */
 class ApiError extends Error { constructor(msg, status) { super(msg); this.status = status; } }
 function snapKey(path, params) {
   return path + "?" + Object.keys(params).sort().map(k => `${k}=${params[k]}`).join("&");
 }
+/* relative URLs, so a page served under /<token>/ keeps the token on every call */
 async function api(path, params = {}) {
   const p = Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)]));
   if (SNAP) {
     const r = SNAP.responses[snapKey(path, p)];
-    if (!r) throw new ApiError("This view isn't in the snapshot. Run greenlight ui locally to see it.", 404);
+    if (!r) throw new ApiError("This view isn't in the snapshot. Open the live dashboard to see it.", 404);
     if (r.__status) throw new ApiError(r.error, r.__status);
     return r;
   }
   const qs = new URLSearchParams(p).toString();
-  const res = await fetch(path + (qs ? "?" + qs : ""));
+  const res = await fetch(path.slice(1) + (qs ? "?" + qs : ""));
   let data = {};
   try { data = await res.json(); } catch { /* non-JSON error */ }
   if (!res.ok) throw new ApiError(data.error || `${res.status} ${res.statusText}`, res.status);
   return data;
 }
 async function post(path, body) {
-  const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Greenlight": "1" }, body: JSON.stringify(body) });
+  const res = await fetch(path.slice(1), { method: "POST", headers: { "Content-Type": "application/json", "X-Greenlight": "1" }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(data.error || res.statusText, res.status);
   return data;
@@ -309,22 +412,25 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 /* a code identity is "<sha>", "<sha>@<matrix entry>" or either plus "+<hash>" for uncommitted edits */
 function sha(s) {
   const raw = String(s || ""), [base, edits] = raw.split("+"), [commit, env] = base.split("@");
-  return esc(commit.slice(0, 8)) + (env ? ` <span class="muted">on ${esc(env)}</span>` : "") + (edits ? ` <span class="muted">+ edits</span>` : "");
+  return `<code>${esc(commit.slice(0, 8))}</code>` + (env ? ` <span class="muted">on ${esc(env)}</span>` : "") + (edits ? ` <span class="muted">+ edits</span>` : "");
 }
 const plural = (n, word, many) => `${n} ${n === 1 ? word : (many || word + "s")}`;
-const pct = x => x == null ? "n/a" : `${Math.round(x * 100)}%`;
+const pct = x => x == null || isNaN(x) ? "n/a" : `${Math.round(x * 100)}%`;
 const testHref = id => "#/test/" + encodeURIComponent(id);
+const pipeHref = id => "#/pipeline/" + encodeURIComponent(id);
 const splitId = id => { const i = id.lastIndexOf("::"); return i < 0 ? ["", id] : [id.slice(0, i), id.slice(i + 2)]; };
-function rel(iso) {
+const isUrl = u => u && /^https:\/\//.test(u);
+const full = iso => iso ? new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "";
+function ago(iso) {
   if (!iso) return "never";
   const s = (NOW - new Date(iso)) / 1000;
-  if (s < 0) return "just now";
   if (s < 90) return "just now";
-  if (s < 3600) return `${Math.round(s / 60)} min ago`;
-  if (s < 86400) return plural(Math.round(s / 3600), "hour") + " ago";
-  if (s < 86400 * 45) return plural(Math.round(s / 86400), "day") + " ago";
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  if (s < 86400 * 45) return `${Math.round(s / 86400)}d ago`;
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
+const when = iso => `<span data-tip="${esc(full(iso))}">${esc(ago(iso))}</span>`;
 function dur(ms) {
   if (ms == null) return "n/a";
   if (ms < 1000) return `${Math.round(ms)} ms`;
@@ -334,7 +440,7 @@ function dur(ms) {
   if (m < 60) return `${m}m ${Math.round(s % 60)}s`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
-const fmtDay = d => new Date(d + "T00:00:00Z").toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+const fmtDay = d => new Date(String(d).slice(0, 10) + "T00:00:00Z").toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
 function hrs(h) {
   if (h == null) return "n/a";
   if (h < 1) return `${Math.max(1, Math.round(h * 60))} min`;
@@ -342,38 +448,96 @@ function hrs(h) {
   return `${+(h / 24).toFixed(1)} days`;
 }
 const FMT = { count: v => Math.round(v * 10) / 10 + "", pct: v => `${Math.round(v * 1000) / 10}%`, ms: v => dur(v), h: v => hrs(v), perf: v => `${+v.toFixed(2)} ms` };
-const AXIS = { ...FMT, ms: v => v === 0 ? "0" : v < 1000 ? `${Math.round(v)} ms` : `${+(v / 1000).toFixed(1)} s`, h: v => v === 0 ? "0" : v < 1 ? `${Math.round(v * 60)}m` : v < 48 ? `${+v.toFixed(1)}h` : `${+(v / 24).toFixed(1)}d` };
+const AXIS = { ...FMT, pct: v => `${Math.round(v * 100)}%`, ms: v => v === 0 ? "0" : v < 1000 ? `${Math.round(v)}ms` : v < 60000 ? `${+(v / 1000).toFixed(1)}s` : v < 3600000 ? `${+(v / 60000).toFixed(1)}m` : `${+(v / 3600000).toFixed(1)}h`, h: v => v === 0 ? "0" : v < 1 ? `${Math.round(v * 60)}m` : v < 48 ? `${+v.toFixed(1)}h` : `${+(v / 24).toFixed(1)}d` };
 
-/* ---------- small renderers ---------- */
-function tag(kind, text) { return `<span class="tag t-${esc(kind)}">${esc(text || kind.replace(/_/g, " "))}</span>`; }
+/* ---------- building blocks ---------- */
+const icon = (name, cls = "") => `<svg class="ic ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+const info = text => text ? `<button class="info" type="button" aria-label="${esc(text)}" data-tip="${esc(text)}">${icon("info")}</button>` : "";
+function panel({ cls = "s12", title = "", tip = "", actions = "", body = "", foot = "", flush = false, id = "" }) {
+  return `<section class="panel ${cls}"${id ? ` id="${id}"` : ""}>${title || actions ? `<header class="ph">${title ? `<h2>${esc(title)}</h2>` : ""}${info(tip)}${actions ? `<div class="pa">${actions}</div>` : ""}</header>` : ""}<div class="pb${flush ? " flush" : ""}">${body}</div>${foot ? `<div class="pf">${foot}</div>` : ""}</section>`;
+}
+function stat({ k, v, unit = "", s = "", tip = "", spark: values, color = "var(--series)", href, cls = "" }) {
+  const inner = `<div class="k">${esc(k)}${info(tip)}</div><div class="vr"><div class="v">${v}${unit ? `<small>${esc(unit)}</small>` : ""}</div>${values ? spark(values, color) : ""}</div><div class="s">${s}</div>`;
+  return href ? `<a class="panel stat ${cls}" href="${href}">${inner}</a>` : `<div class="panel stat ${cls}">${inner}</div>`;
+}
+/* a sparkline has no axes, so it only says "shape"; the tile's number is the value */
+function spark(values, color) {
+  const pts = values.map((v, i) => [i, v]).filter(([, v]) => v != null);
+  if (pts.length < 2) return "";
+  const max = Math.max(...pts.map(p => p[1])) || 1, n = values.length - 1 || 1;
+  const xy = ([i, v]) => `${(i / n * 100).toFixed(2)},${(29 - v / max * 24).toFixed(2)}`;
+  const line = pts.map(xy).join(" ");
+  return `<svg class="spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"><polygon points="${pts[0][0] / n * 100},30 ${line} ${pts[pts.length - 1][0] / n * 100},30" style="fill:${color};opacity:.14"/><polyline points="${line}" style="fill:none;stroke:${color};stroke-width:1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`;
+}
+const ST = {
+  PASS: "pass", stable: "pass", success: "pass", "open-ok": "pass", shipped: "pass",
+  RERUN_TARGETED: "flip", flaky: "flip", known_flaky: "flip", suspect: "flip-o", suspect_flaky: "flip-o", action_required: "flip-o",
+  REAL_FAILURE: "fail", failing: "fail", real_failure: "fail", new_test: "fail", failure: "fail", timed_out: "fail", startup_failure: "fail",
+  quarantined: "quar", perf: "quar",
+  in_progress: "run", queued: "run",
+};
+function tag(kind, text, lg) { return `<span class="tag st-${ST[kind] || "neutral"}${lg ? " lg" : ""}"><i></i>${esc(text || String(kind).replace(/_/g, " "))}</span>`; }
+const STATUS_LABEL = { success: "passed", failure: "failed", timed_out: "timed out", cancelled: "cancelled", skipped: "skipped", in_progress: "running", queued: "queued", startup_failure: "failed to start", neutral: "neutral", action_required: "needs approval" };
+const statusTag = st => tag(st || "unknown", STATUS_LABEL[st] || st || "unknown");
+const DECISION = { PASS: "Pass", RERUN_TARGETED: "Rerun flaky", REAL_FAILURE: "Real failure" };
 function strip(outcomes) {
   const fails = outcomes.filter(o => o === "f").length;
-  return `<span class="strip" role="img" aria-label="${fails} of the last ${outcomes.length} runs failed">${outcomes.map(o => `<i class="${o}"></i>`).join("")}</span>`;
+  return `<span class="strip" role="img" aria-label="${fails} of the last ${outcomes.length} runs failed" data-tip="${fails} of the last ${outcomes.length} runs failed">${outcomes.map(o => `<i class="${esc(o)}"></i>`).join("")}</span>`;
+}
+function score(x) { return `<span class="score"><span class="track"><b style="width:${Math.round(x * 100)}%"></b></span>${x.toFixed(2)}</span>`; }
+const addedBy = a => a === "auto" ? "by sweep" : a === "manual" ? "by hand" : /^github#\d+$/.test(a) ? `from issue #${a.slice(7)}` : `from ${a}`;
+function testCell(id, extra = "") {
+  const [cls, name] = splitId(id);
+  return `<a class="tl mono" href="${testHref(id)}">${esc(name)}</a>${cls ? `<div class="sub mono">${esc(cls)}</div>` : ""}${extra}`;
 }
 function cellClass(c) { if (!c) return "n"; const [p, f] = c; return f === 0 ? "p" : p === 0 ? "f" : "x"; }
 /* height is the share of runs on that commit that failed: 30% all passed, 100% all failed, in between for a flip */
-function cellHeight(c) { if (!c || !c[1]) return ""; const share = c[1] / (c[0] + c[1]); return `;height:${Math.round(30 + 70 * share)}%`; }
+function cellHeight(c) { if (!c || !c[1]) return ""; return ` style="height:${Math.round(30 + 70 * c[1] / (c[0] + c[1]))}%"`; }
 function cells(list, commits) {
   return `<span class="cells">${list.map((c, j) => {
-    const cm = commits[j] || {};
-    const t = c ? `${String(cm.sha || "").slice(0, 8)}: ${c[0]} passed, ${c[1]} failed` : `${String(cm.sha || "").slice(0, 8)}: not run`;
-    return `<i class="${cellClass(c)}" style="--c:${j}${cellHeight(c)}" title="${esc(t)}"></i>`;
+    const cm = commits[j] || {}, id = String(cm.sha || "").slice(0, 8);
+    const t = c ? `${id}: ${c[0]} passed, ${c[1]} failed` : `${id}: not run`;
+    return `<i class="${cellClass(c)}"${cellHeight(c)} data-tip="${esc(t)}"></i>`;
   }).join("")}</span>`;
 }
-function fieldLegend() {
-  return `<div class="legend"><span><span class="sw short" style="background:var(--pass)"></span>Passed</span><span><span class="sw" style="background:var(--fail)"></span>Failed every run</span><span><span class="sw" style="background:var(--flip);height:7px"></span>Passed and failed on the same commit (taller means it failed more)</span><span><span class="sw short" style="background:var(--rule);height:2px"></span>Didn't run</span></div>`;
-}
+const fieldLegend = () => `<div class="legend"><span><span class="sw" style="background:var(--pass);height:4px"></span>Passed</span><span><span class="sw" style="background:var(--fail)"></span>Failed every run</span><span><span class="sw" style="background:var(--flip)"></span>Passed and failed on one commit, taller failed more</span><span><span class="sw" style="background:var(--line);height:2px"></span>Not run</span></div>`;
+function legend(items) { return `<div class="legend">${items.map(([c, t, ln]) => `<span><span class="sw${ln ? " ln" : ""}" style="background:${c}"></span>${esc(t)}</span>`).join("")}</div>`; }
 function errorBox(e) {
   let hint = "";
-  if (e.status === 503) hint = `<p>Record a run first: <code>greenlight ingest reports/*.xml --sha &lt;commit&gt;</code></p>`;
-  if (e.status === 501) hint = `<p>Install Toto with <code>pip install toto-models</code> (Python 3.12+), then restart <code>greenlight ui</code>.</p>`;
+  if (e.status === 503) hint = `<p class="muted">Record a run first, for example <code>greenlight run -- pytest</code>.</p>`;
   return `<div class="err"><p>${esc(e.message)}</p>${hint}</div>`;
 }
-const loading = text => `<p class="loading">${esc(text || "Loading")}</p>`;
+const skeleton = () => `<div class="grid"><div class="panel s3 skel"></div><div class="panel s3 skel"></div><div class="panel s3 skel"></div><div class="panel s3 skel"></div></div><div class="grid"><div class="panel s12 skel tall"></div></div>`;
 function toast(msg) {
   const t = document.getElementById("toast");
   t.textContent = msg; t.classList.add("show");
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), 2600);
+}
+
+/* ---------- tables: sortable headers, clickable rows, "show all" ---------- */
+const TABLES = {};
+function table(id, cols, rows, opt = {}) {
+  TABLES[id] = { cols, rows, opt, sort: opt.sort ?? -1, dir: opt.dir ?? -1, limit: opt.limit || 0 };
+  return `<div class="tw" id="${id}">${tableInner(id)}</div>`;
+}
+function tableInner(id) {
+  const T = TABLES[id], { cols, opt } = T;
+  const rows = T.rows.slice();
+  if (T.sort >= 0) {
+    const f = cols[T.sort].sort;
+    rows.sort((a, b) => { const x = f(a), y = f(b); if (x == null || y == null) return (x == null) - (y == null); return (x < y ? -1 : x > y ? 1 : 0) * T.dir; });
+  }
+  if (!rows.length) return `<p class="empty">${opt.empty || "Nothing here."}</p>`;
+  const shown = T.limit && rows.length > T.limit ? rows.slice(0, T.limit) : rows;
+  const head = cols.map((c, i) => `<th class="${c.cls || ""}"${c.sort ? ` data-col="${i}" tabindex="0" aria-sort="${T.sort === i ? (T.dir > 0 ? "ascending" : "descending") : "none"}"` : ""}${c.tip ? ` data-tip="${esc(c.tip)}"` : ""}>${esc(c.h)}</th>`).join("");
+  const body = shown.map(r => { const href = opt.href && opt.href(r); return `<tr${href ? ` data-href="${esc(href)}"` : ""}>${cols.map(c => `<td class="${c.cls || ""}">${c.cell(r)}</td>`).join("")}</tr>`; }).join("");
+  const more = shown.length < rows.length ? `<div class="more"><button class="btn ghost sm" type="button" data-act="more" data-t="${id}">Show all ${rows.length}</button></div>` : "";
+  return `<table class="t"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>${more}`;
+}
+function sortBy(th) {
+  const box = th.closest(".tw"), T = TABLES[box.id], i = Number(th.dataset.col);
+  if (T.sort === i) T.dir = -T.dir; else { T.sort = i; T.dir = T.cols[i].dir || -1; }
+  box.innerHTML = tableInner(box.id);
 }
 
 /* ---------- charts (plain SVG, redrawn on resize) ---------- */
@@ -388,27 +552,37 @@ function niceTicks(max, integer) {
   const ticks = []; for (let v = 0; v <= max + step * 0.999; v += step) ticks.push(Number(v.toPrecision(10)));
   return ticks;
 }
+/* durations tick on clock steps: 30s, 1m, 5m, not 3.3m */
+const TSTEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400].map(s => s * 1000);
+function timeTicks(max) {
+  if (!(max > 3000)) return niceTicks(max, false);
+  const step = TSTEPS.find(t => max / t <= 4) || 86400000 * Math.ceil(max / 4 / 86400000);
+  const ticks = [];
+  for (let v = 0; ; v += step) { ticks.push(v); if (v >= max) break; }
+  return ticks;
+}
+let GID = 0;
 function drawChart(el) {
-  const s = el._spec, W = Math.max(240, el.clientWidth || 600), H = s.height || 190;
+  const s = el._spec, W = Math.max(200, el.clientWidth || 600), H = s.height || 180;
   el._w = el.clientWidth;
-  const fmt = FMT[s.format || "count"];
-  const m = { l: s.format === "ms" ? 50 : 40, r: 6, t: 12, b: 24 };
+  const key = s.format || "count", fmt = FMT[key];
   const labels = (s.labels || s.days).concat(s.future || []);
   const xlab = s.xfmt || fmtDay;
-  const n = labels.length, pw = W - m.l - m.r, ph = H - m.t - m.b, slot = pw / n;
-  const x = i => m.l + slot * (i + .5);
   const bars = s.bars || [], lines = s.lines || [];
   let max = 0;
   for (let i = 0; i < s.days.length; i++) { let sum = 0; for (const b of bars) sum += b.values[i] || 0; max = Math.max(max, sum); }
   for (const l of lines) for (const v of l.values) if (v != null) max = Math.max(max, v);
   if (s.band) for (const v of s.band.p90) max = Math.max(max, v);
-  const ticks = niceTicks(max, (s.format || "count") === "count"), top = ticks[ticks.length - 1] || 1;
+  const ticks = key === "ms" ? timeTicks(max) : niceTicks(max, key === "count"), top = ticks[ticks.length - 1] || 1;
+  const m = { l: Math.max(26, Math.max(...ticks.map(t => AXIS[key](t).length)) * 6.3 + 10), r: 4, t: 8, b: 20 };
+  const n = labels.length, pw = W - m.l - m.r, ph = H - m.t - m.b, slot = pw / n;
+  const x = i => m.l + slot * (i + .5);
   const y = v => m.t + ph - (Math.max(0, v) / top) * ph;
   let g = "";
-  for (const t of ticks) g += `<line class="grid" x1="${m.l}" x2="${W - m.r}" y1="${y(t)}" y2="${y(t)}"/><text x="${m.l - 6}" y="${y(t) + 4}" text-anchor="end">${esc(AXIS[s.format || "count"](t))}</text>`;
+  for (const t of ticks) g += `<line class="grid" x1="${m.l}" x2="${W - m.r}" y1="${y(t)}" y2="${y(t)}"/><text x="${m.l - 8}" y="${y(t) + 3.5}" text-anchor="end">${esc(AXIS[key](t))}</text>`;
   if (s.future && s.future.length) {
     const x0 = m.l + slot * s.days.length;
-    g += `<rect class="future" x="${x0}" y="${m.t}" width="${W - m.r - x0}" height="${ph}"/><text x="${x0 + 5}" y="${m.t + ph - 6}">Forecast</text>`;
+    g += `<rect class="future" x="${x0}" y="${m.t}" width="${W - m.r - x0}" height="${ph}"/><text x="${x0 + 5}" y="${m.t + 11}">Forecast</text>`;
   }
   if (s.band) {
     const { from, p10, p50, p90 } = s.band;
@@ -418,17 +592,17 @@ function drawChart(el) {
     g += `<polygon class="band" points="${up.concat(lo.reverse()).map(p => p.join(",")).join(" ")}"/>`;
     g += `<polyline class="median" points="${p50.map((v, j) => `${x(from + j)},${y(v)}`).join(" ")}"/>`;
   }
-  const bw = Math.max(1.5, Math.min(slot * .7, 16));
+  const bw = Math.max(1.5, Math.min(slot * .7, 18));
   const GAP = 2; /* surface gap between stacked segments */
   for (let i = 0; i < s.days.length; i++) {
     const segs = bars.map(b => [b, b.values[i] || 0]).filter(([, v]) => v > 0);
     let acc = 0;
     segs.forEach(([b, v], k) => {
-      const top = k === segs.length - 1;
-      const y0 = y(acc) - (k ? GAP / 2 : 0), y1 = y(acc + v) + (top ? 0 : GAP / 2);
+      const last = k === segs.length - 1;
+      const y0 = y(acc) - (k ? GAP / 2 : 0), y1 = y(acc + v) + (last ? 0 : GAP / 2);
       const h = Math.max(1, y0 - y1), x0 = x(i) - bw / 2;
-      if (top) { /* 4px rounded data-end, square at the baseline */
-        const r = Math.min(4, bw / 2, h);
+      if (last) { /* rounded data end, square at the baseline */
+        const r = Math.min(3, bw / 2, h);
         g += `<path d="M${x0},${y0} V${y1 + r} Q${x0},${y1} ${x0 + r},${y1} H${x0 + bw - r} Q${x0 + bw},${y1} ${x0 + bw},${y1 + r} V${y0} Z" style="fill:${b.color}"/>`;
       } else {
         g += `<rect x="${x0}" y="${y1}" width="${bw}" height="${h}" style="fill:${b.color}"/>`;
@@ -437,342 +611,340 @@ function drawChart(el) {
     });
   }
   for (const l of lines) {
-    let d = "", pen = false;
+    let d = "", pen = false, start = null, last = null;
+    const runs = [];
     l.values.forEach((v, i) => {
-      if (v == null) { pen = false; return; }
-      d += `${pen ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)} `; pen = true;
+      if (v == null) { if (pen) runs.push([start, last]); pen = false; return; }
+      d += `${pen ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)} `;
+      if (!pen) start = i; last = i; pen = true;
       const lone = (i === 0 || l.values[i - 1] == null) && (i === l.values.length - 1 || l.values[i + 1] == null);
-      if (lone || l.dots) g += `<circle cx="${x(i)}" cy="${y(v)}" r="4" style="fill:${l.color};stroke:var(--ground);stroke-width:2"/>`;
+      if (lone || l.dots) g += `<circle cx="${x(i)}" cy="${y(v)}" r="3.5" style="fill:${l.color};stroke:var(--panel);stroke-width:2"/>`;
     });
+    if (pen) runs.push([start, last]);
+    if (l.area) {
+      const id = `ga${++GID}`;
+      g += `<defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:${l.color};stop-opacity:.28"/><stop offset="1" style="stop-color:${l.color};stop-opacity:0"/></linearGradient></defs>`;
+      for (const [a, b] of runs) {
+        if (a === b) continue;
+        let p = `M${x(a).toFixed(1)},${y(0)} `;
+        for (let i = a; i <= b; i++) p += `L${x(i).toFixed(1)},${y(l.values[i]).toFixed(1)} `;
+        g += `<path d="${p}L${x(b).toFixed(1)},${y(0)} Z" fill="url(#${id})"/>`;
+      }
+    }
     g += `<path class="line" d="${d}" style="stroke:${l.color}"/>`;
   }
   g += `<line class="axis" x1="${m.l}" x2="${W - m.r}" y1="${m.t + ph}" y2="${m.t + ph}"/>`;
-  const xl = [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i);
-  for (const i of xl) g += `<text x="${x(i)}" y="${H - 6}" text-anchor="${i === 0 ? "start" : i === n - 1 ? "end" : "middle"}">${esc(xlab(labels[i]))}</text>`;
-  g += `<line class="cursor" x1="0" x2="0" y1="${m.t}" y2="${m.t + ph}" visibility="hidden"/><rect class="hit" x="${m.l}" y="${m.t}" width="${pw}" height="${ph}" fill="transparent"/>`;
+  const count = Math.max(2, Math.min(n, Math.floor(pw / 86)));
+  const xl = [...new Set(Array.from({ length: count }, (_, k) => Math.round(k * (n - 1) / (count - 1))))];
+  for (const i of xl) g += `<text x="${x(i)}" y="${H - 5}" text-anchor="${i === 0 ? "start" : i === n - 1 ? "end" : "middle"}">${esc(xlab(labels[i]))}</text>`;
+  g += bars.length ? `<rect class="colband cursor-el" x="0" y="${m.t}" width="${slot}" height="${ph}" visibility="hidden"/>` : `<line class="cursor cursor-el" x1="0" x2="0" y1="${m.t}" y2="${m.t + ph}" visibility="hidden"/>`;
+  g += `<rect class="hit" x="${m.l}" y="${m.t}" width="${pw}" height="${ph}" fill="transparent"/>`;
   el.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(s.label || "Chart")}">${g}</svg>`;
 
-  const svg = el.firstChild, cursor = svg.querySelector(".cursor"), hit = svg.querySelector(".hit");
+  const svg = el.firstChild, cursor = svg.querySelector(".cursor-el"), hit = svg.querySelector(".hit");
+  const row = (color, label, value, ln) => `<div class="tr"><i class="sw${ln ? " ln" : ""}" style="background:${color}"></i><span>${esc(label)}</span><b>${esc(value)}</b></div>`;
   const show = ev => {
     const r = svg.getBoundingClientRect();
     const i = Math.min(n - 1, Math.max(0, Math.floor((ev.clientX - r.left - m.l) / slot)));
-    cursor.setAttribute("x1", x(i)); cursor.setAttribute("x2", x(i)); cursor.setAttribute("visibility", "visible");
-    let html = `<b>${esc(s.tipLabel ? s.tipLabel(i) : xlab(labels[i]))}</b>`;
+    if (bars.length) cursor.setAttribute("x", x(i) - slot / 2);
+    else { cursor.setAttribute("x1", x(i)); cursor.setAttribute("x2", x(i)); }
+    cursor.setAttribute("visibility", "visible");
+    let html = `<div class="th">${esc(s.tipLabel ? s.tipLabel(i) : xlab(labels[i]))}</div>`;
     if (i < s.days.length) {
-      for (const b of bars) html += `<br>${esc(b.label)}: ${esc(fmt(b.values[i] || 0))}`;
-      for (const l of lines) html += `<br>${esc(l.label)}: ${l.values[i] == null ? "no data" : esc(fmt(l.values[i]))}`;
+      for (const b of [...bars].reverse()) html += row(b.color, b.label, fmt(b.values[i] || 0));
+      for (const l of lines) html += row(l.color, l.label, l.values[i] == null ? "no data" : fmt(l.values[i]), true);
     }
     if (s.band && i >= s.band.from && i < s.band.from + s.band.p50.length) {
       const j = i - s.band.from;
-      html += `<br>Forecast: ${esc(fmt(s.band.p50[j]))}<br><span style="opacity:.75">likely ${esc(fmt(s.band.p10[j]))} to ${esc(fmt(s.band.p90[j]))}</span>`;
+      html += row("var(--ink-2)", "Forecast", fmt(s.band.p50[j]), true) + row("var(--band)", "Likely range", `${fmt(s.band.p10[j])} to ${fmt(s.band.p90[j])}`);
     }
-    tip.innerHTML = html; tip.hidden = false;
-    const tx = Math.min(window.innerWidth - tip.offsetWidth - 8, ev.clientX + 14);
-    tip.style.left = Math.max(8, tx) + "px"; tip.style.top = Math.max(8, ev.clientY - tip.offsetHeight - 12) + "px";
+    placeTip(html, ev.clientX, ev.clientY);
   };
   const hide = () => { cursor.setAttribute("visibility", "hidden"); tip.hidden = true; };
   hit.addEventListener("pointermove", show); hit.addEventListener("pointerdown", show); hit.addEventListener("pointerleave", hide);
 }
-function legend(items) { return `<div class="legend">${items.map(([c, t]) => `<span><span class="sw" style="background:${c}"></span>${esc(t)}</span>`).join("")}</div>`; }
+function placeTip(html, cx, cy) {
+  tip.innerHTML = html; tip.hidden = false;
+  const tx = Math.min(window.innerWidth - tip.offsetWidth - 8, cx + 14);
+  tip.style.left = Math.max(8, tx) + "px";
+  tip.style.top = (cy - tip.offsetHeight - 12 < 8 ? cy + 18 : cy - tip.offsetHeight - 12) + "px";
+}
+/* every [data-tip] gets the same tooltip, on hover, focus or tap */
+let tipFor = null;
+function tipOn(el) {
+  if (!el || el.closest(".chart")) return;
+  tipFor = el;
+  const r = el.getBoundingClientRect();
+  tip.innerHTML = esc(el.dataset.tip); tip.hidden = false;
+  const left = Math.min(window.innerWidth - tip.offsetWidth - 8, Math.max(8, r.left + r.width / 2 - tip.offsetWidth / 2));
+  const above = r.top - tip.offsetHeight - 6;
+  tip.style.left = left + "px"; tip.style.top = (above < 8 ? r.bottom + 6 : above) + "px";
+}
+function tipOff() { tipFor = null; tip.hidden = true; }
+document.addEventListener("pointerover", ev => { const el = ev.target.closest("[data-tip]"); if (el && el !== tipFor) tipOn(el); else if (!el && tipFor) tipOff(); });
+document.addEventListener("focusin", ev => { const el = ev.target.closest("[data-tip]"); if (el) tipOn(el); });
+document.addEventListener("focusout", () => { if (tipFor) tipOff(); });
+window.addEventListener("scroll", () => { if (tipFor) tipOff(); }, { passive: true });
 
-/* ---------- verdict (overview + run page) ---------- */
-function verdictBlock(t, { withLink } = {}) {
-  if (!t) return `<section class="verdict" style="margin-top:0"><h1>No runs yet</h1><p class="detail">Record a test run and refresh: <code>greenlight ingest reports/*.xml --sha &lt;commit&gt;</code></p></section>`;
-  const ids = list => `<ul class="idlist">${list.slice(0, 5).map(id => `<li><a href="${testHref(id)}"><code>${esc(id)}</code></a></li>`).join("")}${list.length > 5 ? `<li class="muted">and ${list.length - 5} more</li>` : ""}</ul>`;
-  let head, detail;
+/* ---------- gate decision (overview + run page) ---------- */
+function gate(t) {
+  if (!t) return `<div class="gate"><span>${tag("unknown", "No runs yet", true)}</span><div class="muted">Record one with <code>greenlight run -- pytest</code>.</div></div>`;
+  const ids = list => `<ul class="ids">${list.slice(0, 5).map(id => `<li><a href="${testHref(id)}">${esc(id)}</a></li>`).join("")}${list.length > 5 ? `<li class="muted">and ${list.length - 5} more</li>` : ""}</ul>`;
+  let head, body = "";
   if (t.decision === "REAL_FAILURE") {
-    head = plural(t.blocking.length, "real failure");
-    const one = t.blocking.length === 1;
-    detail = `<p class="detail">${one ? "This test has" : "These tests have"} no flake history, so this is the case that justifies a full regression once ${one ? "it's" : "they're"} fixed.</p>${ids(t.blocking)}`;
+    head = `${plural(t.blocking.length, "test")} ${t.blocking.length === 1 ? "blocks" : "block"} this commit`;
+    body = ids(t.blocking);
   } else if (t.decision === "RERUN_TARGETED") {
-    head = `Rerun ${plural(t.rerun_tests.length, "flaky test")}`;
-    detail = `<p class="detail">Only known flaky tests failed. Rerun just these, not the suite.</p>${ids(t.rerun_tests)}`;
+    head = `Rerun ${plural(t.rerun_tests.length, "flaky test")}, not the suite`;
+    body = ids(t.rerun_tests);
   } else {
-    head = "Nothing to rerun";
     const q = t.failures.length;
-    detail = `<p class="detail">${q ? `${plural(q, "quarantined test")} failed and ${q === 1 ? "was" : "were"} ignored.` : "Every test passed."}${t.passed_on_retry.length ? ` ${plural(t.passed_on_retry.length, "test")} passed only on retry.` : ""}</p>`;
+    head = q ? `${plural(q, "quarantined failure")} ignored` : "Every test passed";
+    if (t.passed_on_retry.length) body = `<div class="muted">${plural(t.passed_on_retry.length, "test")} passed only on retry.</div>`;
   }
   const r = t.run;
-  const meta = `Commit <code>${sha(r.commit_sha)}</code>, attempt ${r.attempt} on this commit, ${esc(rel(r.started_at))}.${withLink ? ` <a href="#/run/${r.run_id}">Open this run</a>` : ""}`;
-  return `<section class="verdict v-${esc(t.decision)}" style="margin-top:0"><h1>${esc(head)}</h1>${detail}<p class="meta">${meta}</p></section>`;
+  return `<div class="gate"><span>${tag(t.decision, DECISION[t.decision], true)}</span><div class="head">${esc(head)}</div>${body}
+    <div class="kv"><span>Commit ${sha(r.commit_sha)}</span><span>Attempt <b>${r.attempt}</b></span>${r.branch ? `<span>Branch <b>${esc(r.branch)}</b></span>` : ""}<span>${when(r.started_at)}</span></div></div>`;
 }
 
 /* ---------- views ---------- */
 async function overviewView(tok) {
-  view.innerHTML = loading();
   const d = await api("/api/overview", { days: DAYS });
   if (tok !== renderToken) return;
+  setSynced(d.synced);
   const t = d.totals, f = d.field;
-  const field = f.tests.length ? `
-    <div class="field ${animatedField ? "" : "animate"}">
-      ${f.tests.map(r => { const [cls, name] = splitId(r.test_id); return `<a class="frow" href="${testHref(r.test_id)}" title="${esc(r.test_id)}"><span class="fname">${esc(name)}${r.quarantined ? ' <span class="q">quarantined</span>' : ""}</span>${cells(r.cells, f.commits)}</a>`; }).join("")}
-      <div class="faxis"><span></span><span><span>${f.commits.length ? esc(rel(f.commits[0].first_at)) : ""}</span><span>Latest commit</span></span></div>
-    </div>${fieldLegend()}`
-    : `<p class="empty">No test has failed in the last ${DAYS} days.</p>`;
-  animatedField = true;
+  const share = d.days.map((_, i) => { const all = d.runs_first[i] + d.runs_rerun[i]; return all ? d.runs_rerun[i] / all : null; });
+  const field = f.tests.length ? `<div class="hm">${f.tests.map(r => `<a class="hmr" href="${testHref(r.test_id)}"><span class="n" data-tip="${esc(r.test_id)}">${esc(splitId(r.test_id)[1])}${r.quarantined ? ' <span class="q">quarantined</span>' : ""}</span>${cells(r.cells, f.commits)}</a>`).join("")}
+      <div class="hmx"><span></span><span><span>${f.commits.length ? esc(ago(f.commits[0].first_at)) : ""}</span><span>Latest commit</span></span></div></div>`
+    : `<p class="empty">No test failed in the last ${DAYS} days.</p>`;
   view.innerHTML = `
-    ${verdictBlock(d.latest, { withLink: true })}
-    <section class="stats" aria-label="Summary for the last ${DAYS} days">
-      <div class="stat"><div class="k">Runs that were reruns</div><div class="v">${t.runs ? pct(t.reruns / t.runs) : "0%"}</div><div class="s">${t.reruns} of ${plural(t.runs, "run")} in ${DAYS} days</div></div>
-      <div class="stat"><div class="k">Time spent rerunning</div><div class="v">${dur(t.rerun_ms)}</div><div class="s">Test time on second and later attempts</div></div>
-      <div class="stat"><div class="k">Flaky tests</div><div class="v">${t.flaky}</div><div class="s">${t.suspect} suspect, ${t.failing} failing without flips</div></div>
-      <div class="stat"><div class="k">Quarantined</div><div class="v">${t.quarantined}</div><div class="s"><a href="#/quarantine">Manage quarantine</a></div></div>
-    </section>
-    <section>
-      <h2>Unstable tests by commit</h2>
-      <p class="note">One column per commit, oldest on the left. The taller the bar, the more often the test failed on that commit. Amber means the same commit both passed and failed, which is what makes a test flaky.</p>
-      ${field}
-    </section>
-    ${Object.keys(d.synced || {}).length ? `<p class="muted" style="margin-top:12px;font-size:.88rem">Synced ${esc(Object.entries(d.synced).map(([k, v]) => `${k} ${rel(v)}`).join(", "))}.</p>` : ""}
-    ${d.has && (d.has.pipelines || d.has.deployments || d.has.pull_requests) ? `<p style="margin-top:6px">${d.has.deployments || d.has.pull_requests ? `<a href="#/delivery">Delivery: deployments, lead time, pull requests and issues</a>` : ""}${d.has.pipelines ? `${d.has.deployments || d.has.pull_requests ? " · " : ""}<a href="#/pipelines">CI pipelines</a>` : ""}</p>` : ""}
-    <section class="two">
-      <div><h2>Runs per day</h2><p class="note">Reruns are second and later attempts on a commit.</p><div class="chart" id="c-runs"></div>${legend([["var(--ink-2)", "First attempt"], ["var(--flip)", "Rerun"]])}</div>
-      <div><h2>Failure rate</h2><p class="note">Share of test executions that failed, per day.</p><div class="chart" id="c-fail"></div></div>
-    </section>`;
-  chart(document.getElementById("c-runs"), { days: d.days, label: "Runs per day", bars: [{ values: d.runs_first, color: "var(--ink-2)", label: "First attempt" }, { values: d.runs_rerun, color: "var(--flip)", label: "Rerun" }] });
-  chart(document.getElementById("c-fail"), { days: d.days, label: "Failure rate", format: "pct", lines: [{ values: d.failure_rate, color: "var(--fail)", label: "Failure rate" }] });
+    <div class="grid">
+      ${panel({ cls: "s6", title: "Latest gate decision", tip: "What the gate decided for the newest run: block on a real failure, rerun only known flaky tests, or pass.", actions: d.latest ? `<a class="lnk" href="#/run/${d.latest.run.run_id}">Open run</a>` : "", body: gate(d.latest) })}
+      <div class="s6 tiles">
+        ${stat({ k: "Rerun share", v: t.runs ? pct(t.reruns / t.runs) : "0%", s: `${t.reruns} of ${plural(t.runs, "run")}`, tip: "Runs that were a second or later attempt on the same code.", spark: share, color: "var(--flip)" })}
+        ${stat({ k: "Time rerunning", v: dur(t.rerun_ms), s: "test time on reruns", tip: "Test time spent on second and later attempts." })}
+        ${stat({ k: "Flaky tests", v: t.flaky, s: `${t.suspect} suspect, ${t.failing} failing`, href: "#/flaky" })}
+        ${stat({ k: "Quarantined", v: t.quarantined, s: "ignored by the gate", href: "#/quarantine" })}
+      </div>
+    </div>
+    <div class="grid">
+      ${panel({ cls: "s6", title: "Runs per day", tip: "Reruns are second and later attempts on the same code.", body: `<div class="chart" id="c-runs"></div>`, foot: legend([["var(--neutral)", "First attempt"], ["var(--flip)", "Rerun"]]) })}
+      ${panel({ cls: "s6", title: "Failure rate", tip: "Share of test executions that failed, per day.", body: `<div class="chart" id="c-fail"></div>` })}
+    </div>
+    <div class="grid">
+      ${panel({ title: "Unstable tests by commit", tip: "One column per commit, oldest on the left. A test is flaky when one commit both passed and failed it.", actions: `<span class="dim">${plural(f.commits.length, "commit")}</span>`, body: field, foot: f.tests.length ? fieldLegend() : "" })}
+    </div>`;
+  chart(document.getElementById("c-runs"), { days: d.days, label: "Runs per day", bars: [{ values: d.runs_first, color: "var(--neutral)", label: "First attempt" }, { values: d.runs_rerun, color: "var(--flip)", label: "Rerun" }] });
+  chart(document.getElementById("c-fail"), { days: d.days, label: "Failure rate", format: "pct", lines: [{ values: d.failure_rate, color: "var(--fail)", label: "Failure rate", area: true }] });
 }
 
 async function flakyView(tok) {
-  view.innerHTML = loading();
   const d = await api("/api/flaky", { days: DAYS });
   if (tok !== renderToken) return;
-  view.innerHTML = `
-    <h1>Flaky tests</h1>
-    <p class="note">Tests that both passed and failed on the same commit in the last ${DAYS} days. Ranked by confidence, so a test that flipped on 5 of 10 commits ranks above one that flipped on 1 of 1.</p>
-    <div class="toolbar">
-      <input type="search" id="q" placeholder="Filter by test name" aria-label="Filter by test name">
-      <label><input type="checkbox" id="hideq"> Hide quarantined</label>
-      <span class="muted" id="count"></span>
-    </div>
-    <div class="list" id="rows"></div>`;
-  const rowsEl = document.getElementById("rows"), q = document.getElementById("q"), hq = document.getElementById("hideq");
+  const cols = [
+    { h: "Test", cell: r => testCell(r.test_id, `<div class="tags show-sm" style="margin-top:4px">${tag(r.classification)}${r.quarantined ? tag("quarantined") : ""}</div>`), sort: r => r.test_id, dir: 1, cls: "wrap" },
+    { h: "Status", cell: r => `<span class="tags">${tag(r.classification)}${r.quarantined ? tag("quarantined") : ""}</span>`, sort: r => r.classification, dir: 1, cls: "hide-sm" },
+    { h: "Flipped", cell: r => `${r.flip_shas}<span class="dim"> / ${r.eligible_shas}</span>`, sort: r => r.flip_shas, cls: "num", tip: "Commits it both passed and failed on, out of the commits it ran on more than once" },
+    { h: "Confidence", cell: r => score(r.flake_score), sort: r => r.flake_score, cls: "num", tip: "Flipping on 5 of 10 commits ranks above 1 of 1" },
+    { h: "Fail rate", cell: r => pct(r.executions ? r.failures / r.executions : null), sort: r => r.executions ? r.failures / r.executions : null, cls: "num hide-sm" },
+    { h: "Last flip", cell: r => when(r.last_flip_at), sort: r => r.last_flip_at, cls: "num hide-sm" },
+    { h: "Last 30 runs", cell: r => strip(r.recent), cls: "hide-sm" },
+  ];
+  view.innerHTML = `<div class="grid">${panel({ title: "Flaky tests", tip: `Tests that passed and failed on the same code in the last ${DAYS} days.`, flush: true,
+    actions: `<input type="search" class="inp" id="q" placeholder="Filter tests" aria-label="Filter tests"><label class="chk"><input type="checkbox" id="hideq"> Hide quarantined</label><span class="dim" id="count"></span>`,
+    body: table("t-flaky", cols, d.tests, { sort: 3, href: r => testHref(r.test_id), empty: `No test flipped in the last ${DAYS} days. Flips need a commit tested more than once.` }) })}</div>`;
+  const q = document.getElementById("q"), hq = document.getElementById("hideq");
   const draw = () => {
     const term = q.value.trim().toLowerCase();
-    const rows = d.tests.filter(r => (!term || r.test_id.toLowerCase().includes(term)) && !(hq.checked && r.quarantined));
-    document.getElementById("count").textContent = plural(rows.length, "test");
-    if (!d.tests.length) { rowsEl.innerHTML = `<p class="empty">No flips in the last ${DAYS} days. A test can only flip on a commit that was tested more than once, so this fills in as reruns get recorded.</p>`; return; }
-    rowsEl.innerHTML = `<div class="row head flaky-grid"><span>Test</span><span>Flipped on</span><span>Confidence</span><span>Last flip</span><span>Last 30 runs</span></div>` +
-      rows.map(r => { const [cls, name] = splitId(r.test_id); return `
-      <a class="row flaky-grid" href="${testHref(r.test_id)}">
-        <span class="c-test"><span class="mono">${esc(name)}</span><br><span class="muted mono" style="font-size:.75rem">${esc(cls)}</span>
-          <span class="tags">${tag(r.classification)}${r.quarantined ? tag("quarantined") : ""}</span></span>
-        <span><span class="lbl">Flipped on</span>${r.flip_shas} of ${plural(r.eligible_shas, "commit")}</span>
-        <span><span class="lbl">Confidence</span><span class="score"><span class="track"><b style="width:${Math.round(r.flake_score * 100)}%"></b></span>${r.flake_score.toFixed(2)}</span></span>
-        <span><span class="lbl">Last flip</span>${esc(rel(r.last_flip_at))}</span>
-        <span><span class="lbl">Last runs</span>${strip(r.recent)}</span>
-      </a>`; }).join("");
+    TABLES["t-flaky"].rows = d.tests.filter(r => (!term || r.test_id.toLowerCase().includes(term)) && !(hq.checked && r.quarantined));
+    document.getElementById("t-flaky").innerHTML = tableInner("t-flaky");
+    document.getElementById("count").textContent = plural(TABLES["t-flaky"].rows.length, "test");
   };
   q.addEventListener("input", draw); hq.addEventListener("change", draw);
-  draw();
+  document.getElementById("count").textContent = plural(d.tests.length, "test");
 }
 
 /* A test that measures something (a perf check's median against its base build) gets its numbers charted per run */
-function perfSection(m) {
-  if (!m || !m.points || !m.points.length || !m.names.includes("value_ms")) return "";
-  const hasBase = m.names.includes("base_ms"), budget = m.points.map(p => p.budget_ms).find(v => v != null);
-  return `<section><h2>Measured</h2><p class="note">This check's number on each run${hasBase ? ", beside the base build it was measured against" : ""}${budget != null ? `. Its budget is ${budget} ms` : ""}.</p>
-    <div class="chart" id="c-perf"></div>${hasBase ? legend([["var(--ink)", "This build"], ["var(--quar)", "Base build"]]) : ""}</section>`;
-}
 function drawPerf(m) {
   const el = document.getElementById("c-perf");
   if (!el) return;
   const pts = m.points;
   chart(el, { days: pts.map(p => p.started_at), label: "Measured value per run", format: "perf",
     xfmt: v => fmtDay(String(v).slice(0, 10)), tipLabel: i => `${new Date(pts[i].started_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}, ${String(pts[i].sha || "").slice(0, 8)}`,
-    lines: [{ values: pts.map(p => p.value_ms ?? null), color: "var(--ink)", label: "This build", dots: true },
-            ...(m.names.includes("base_ms") ? [{ values: pts.map(p => p.base_ms ?? null), color: "var(--quar)", label: "Base build", dots: true }] : [])] });
+    lines: [{ values: pts.map(p => p.value_ms ?? null), color: "var(--series)", label: "This build", dots: true },
+            ...(m.names.includes("base_ms") ? [{ values: pts.map(p => p.base_ms ?? null), color: "var(--ink-3)", label: "Base build", dots: true }] : [])] });
 }
 
 async function testView(tok, id) {
-  view.innerHTML = loading();
   const d = await api("/api/test", { days: DAYS, id });
   if (tok !== renderToken) return;
-  const s = d.stats || { flip_shas: 0, eligible_shas: 0, failures: 0, executions: 0, distinct_failure_sigs: 0, classification: "stable" };
+  const s = d.stats || { flip_shas: 0, eligible_shas: 0, failures: 0, executions: 0, distinct_failure_sigs: 0, classification: "stable", flake_score: 0 };
   const [cls, name] = splitId(d.test_id);
+  setCrumbs([["Tests"], ["Flaky tests", "#/flaky"]], name);
   const q = d.quarantine;
-  let qblock = "";
-  if (q) qblock = `<p>${tag("quarantined")} <span class="muted">Added ${esc(rel(q.added_at))}${q.added_by === "auto" ? " by sweep" : " by hand"}: ${esc(q.reason || "no reason given")}</span></p>${LIVE ? `<button class="btn ghost" id="unq">Release from quarantine</button>` : ""}`;
-  else if (LIVE) qblock = `<form class="qform" id="qf"><input type="text" id="reason" placeholder="Reason, e.g. times out waiting for the search index" aria-label="Quarantine reason" required minlength="3"><button class="btn" type="submit">Quarantine</button></form>`;
-  const commitsAsCells = d.commits.map(c => [c.passes, c.fails]);
+  let action = "";
+  if (q && LIVE) action = `<button class="btn ghost" type="button" data-act="u" data-id="${esc(d.test_id)}">Release from quarantine</button>`;
+  else if (!q && LIVE) action = `<form class="qform" id="qf"><input type="text" class="inp" id="reason" placeholder="Reason, e.g. times out waiting for the index" aria-label="Quarantine reason" required minlength="3"><button class="btn" type="submit">Quarantine</button></form>`;
+  const issues = (d.issues || []).map(i => `<span>${isUrl(i.url) ? `<a class="lnk" href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">#${i.number}</a>` : `<b>#${i.number}</b>`} ${esc(i.managed_key.split(":")[0] === "perf" ? "perf issue" : "flaky test issue")}, ${esc(i.state)}</span>`).join("");
+  const m = d.metrics, perf = m && m.points && m.points.length && m.names.includes("value_ms");
+  const budget = perf ? m.points.map(p => p.budget_ms).find(v => v != null) : null;
+  const execCols = [
+    { h: "When", cell: e => when(e.started_at), sort: e => e.started_at, cls: "nw" },
+    { h: "Commit", cell: e => `<a href="#/run/${e.run_id}">${sha(e.sha)}</a>`, cls: "nw" },
+    { h: "Attempt", cell: e => `${e.attempt}${e.retry ? `<span class="dim">, retry ${e.retry}</span>` : ""}`, sort: e => e.attempt, cls: "num hide-sm" },
+    { h: "Result", cell: e => e.outcome === "pass" ? tag("PASS", (e.flags || "").includes("slower") ? "passed, slower" : (e.flags || "").includes("inferred") ? "passed (suite)" : "passed") : e.outcome === "skip" ? tag("skipped", "skipped") : tag("failing", (e.flags || "").includes("known") ? "failed, known" : "failed"), sort: e => e.outcome, dir: 1 },
+    { h: "Duration", cell: e => dur(e.duration_ms), sort: e => e.duration_ms, cls: "num" },
+  ];
   view.innerHTML = `
-    <a class="crumb" href="#/flaky">All flaky tests</a>
-    <div class="tid-class">${esc(cls)}</div>
-    <div class="tid-name">${esc(name)}</div>
-    <div class="tags" style="margin-bottom:12px">${tag(s.classification)}</div>
-    ${(d.issues || []).length ? `<p class="issue-links">${d.issues.map(i => `${i.url && /^https:\/\//.test(i.url) ? `<a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">#${i.number}</a>` : `#${i.number}`} <span class="muted">${esc(i.managed_key.split(":")[0] === "perf" ? "perf regression" : "flaky test")} issue, ${esc(i.state)}</span>`).join(" ")}</p>` : ""}
-    <p style="max-width:70ch">In the last ${DAYS} days it flipped on ${s.flip_shas} of the ${plural(s.eligible_shas, "commit")} it ran on more than once, and failed ${plural(s.failures, "time")} in ${plural(s.executions, "execution")} with ${plural(s.distinct_failure_sigs, "distinct failure message")}.</p>
-    ${qblock}
-    <section>
-      <h2>By commit</h2>
-      <p class="note">Last ${plural(d.commits.length, "commit")} this test ran on, oldest on the left.</p>
-      <div class="field">${d.commits.length ? `<div class="frow" style="grid-template-columns:1fr">${cells(commitsAsCells, d.commits)}</div>` : '<p class="empty">No executions yet.</p>'}</div>
-      ${fieldLegend()}
-    </section>
-    ${perfSection(d.metrics)}
-    <section>
-      <h2>Duration</h2>
-      <p class="note" id="dur-note">Daily median of passing runs.</p>
-      <div class="chart" id="c-dur"></div>
-      <div id="dur-legend">${legend([["var(--ink)", "Daily median"]])}</div>
-    </section>
-    <section>
-      <h2>Failure messages</h2>
-      ${d.signatures.length ? d.signatures.map(g => `<div class="sig"><strong>${plural(g.count, "failure")}</strong> <span class="muted">last seen ${esc(rel(g.last_at))}</span><div class="msg">${esc(g.sample || "(no message)")}</div></div>`).join("") : `<p class="empty">No failures in the last ${DAYS} days.</p>`}
-    </section>
-    <section>
-      <h2>Recent executions</h2>
-      <div class="list">
-        <div class="row head exec-grid"><span>When</span><span>Commit</span><span>Attempt</span><span>Result</span><span>Duration</span></div>
-        ${d.executions.map((e, i) => `<div class="row exec-grid"${i >= 20 ? " hidden data-more" : ""}>
-          <span>${esc(rel(e.started_at))}</span>
-          <span><a href="#/run/${e.run_id}"><code>${sha(e.sha)}</code></a></span>
-          <span><span class="lbl">Attempt</span>${e.attempt}${e.retry ? `, retry ${e.retry}` : ""}</span>
-          <span>${e.outcome === "pass" ? tag("PASS", (e.flags || "").includes("slower") ? "passed, slower than base" : (e.flags || "").includes("inferred") ? "passed (suite passed)" : "passed") : e.outcome === "skip" ? tag("stable", "skipped") : tag("failing", (e.flags || "").includes("known") ? "failed, known" : "failed")}</span>
-          <span><span class="lbl">Duration</span>${dur(e.duration_ms)}</span></div>`).join("")}
-      </div>
-      ${d.executions.length > 20 ? `<p style="margin-top:14px"><button class="btn ghost" id="more">Show ${d.executions.length - 20} more</button></p>` : ""}
-    </section>`;
-  const more = document.getElementById("more");
-  if (more) more.addEventListener("click", () => { view.querySelectorAll("[data-more]").forEach(r => r.hidden = false); more.remove(); });
+    <div class="grid">
+      <section class="panel s12 ent">
+        ${cls ? `<div class="cls">${esc(cls)}</div>` : ""}
+        <div class="name">${esc(name)}</div>
+        <div class="bar2"><span class="tags">${tag(s.classification)}${q ? tag("quarantined") : ""}</span>${action}</div>
+        ${q ? `<div class="kv"><span>Quarantined ${when(q.added_at)}${/^github#/.test(q.added_by) ? "" : ` ${esc(addedBy(q.added_by))}`}</span><span>${esc(q.reason || "no reason given")}</span></div>` : ""}
+        ${issues ? `<div class="kv">${issues}</div>` : ""}
+      </section>
+    </div>
+    <div class="grid">
+      ${stat({ cls: "s3", k: "Flipped on", v: s.flip_shas, unit: `of ${s.eligible_shas}`, s: "commits run 2+ times", tip: "Commits where this test both passed and failed." })}
+      ${stat({ cls: "s3", k: "Failures", v: s.failures, unit: `of ${s.executions}`, s: "executions" })}
+      ${stat({ cls: "s3", k: "Failure messages", v: s.distinct_failure_sigs, s: "distinct" })}
+      ${stat({ cls: "s3", k: "Confidence", v: (s.flake_score || 0).toFixed(2), s: s.last_flip_at ? `last flip ${ago(s.last_flip_at)}` : "no flips", tip: "How sure greenlight is that this test is flaky, from 0 to 1." })}
+    </div>
+    <div class="grid">
+      ${panel({ title: "By commit", tip: "Each commit this test ran on, oldest on the left.", actions: `<span class="dim">${plural(d.commits.length, "commit")}</span>`, body: d.commits.length ? cells(d.commits.map(c => [c.passes, c.fails]), d.commits) : `<p class="empty">No executions yet.</p>`, foot: d.commits.length ? fieldLegend() : "" })}
+    </div>
+    <div class="grid">
+      ${panel({ cls: perf ? "s6" : "s12", title: "Duration", tip: "Daily median of passing runs.", body: `<div class="chart" id="c-dur"></div>`, foot: `<div id="dur-foot">${legend([["var(--series)", "Daily median", true]])}</div>` })}
+      ${perf ? panel({ cls: "s6", title: "Measured", tip: `This check's number on each run${m.names.includes("base_ms") ? ", next to the base build it was measured against" : ""}.${budget != null ? ` Budget ${budget} ms.` : ""}`, body: `<div class="chart" id="c-perf"></div>`, foot: m.names.includes("base_ms") ? legend([["var(--series)", "This build", true], ["var(--ink-3)", "Base build", true]]) : "" }) : ""}
+    </div>
+    <div class="grid">
+      ${panel({ cls: "s5", title: "Failure messages", flush: true, body: d.signatures.length ? `<div class="sigs">${d.signatures.map(g => `<div class="sig"><div class="kv"><span><b>${plural(g.count, "failure")}</b></span><span>last ${when(g.last_at)}</span></div><div class="msg">${esc(g.sample || "(no message)")}</div></div>`).join("")}</div>` : `<p class="empty">No failures in the last ${DAYS} days.</p>` })}
+      ${panel({ cls: "s7", title: "Executions", flush: true, actions: `<span class="dim">${d.executions.length}</span>`, body: table("t-exec", execCols, d.executions, { limit: 15, href: e => `#/run/${e.run_id}` }) })}
+    </div>`;
   const el = document.getElementById("c-dur");
-  chart(el, { days: d.durations.days, label: "Daily median duration", format: "ms", lines: [{ values: d.durations.values, color: "var(--ink)", label: "Median" }] });
-  drawPerf(d.metrics);
-
-  if (LIVE) {
-    const qf = document.getElementById("qf");
-    if (qf) qf.addEventListener("submit", async ev => {
-      ev.preventDefault();
-      try { await post("/api/quarantine", { test_id: d.test_id, reason: document.getElementById("reason").value }); toast(`Quarantined ${name}`); render(); }
-      catch (e) { toast(e.message); }
-    });
-    const un = document.getElementById("unq");
-    if (un) un.addEventListener("click", async () => {
-      try { await post("/api/unquarantine", { test_id: d.test_id }); toast(`Released ${name} from quarantine`); render(); }
-      catch (e) { toast(e.message); }
-    });
-  }
-
+  chart(el, { days: d.durations.days, label: "Daily median duration", format: "ms", lines: [{ values: d.durations.values, color: "var(--series)", label: "Median", area: true }] });
+  if (perf) drawPerf(m);
+  const qf = document.getElementById("qf");
+  if (qf) qf.addEventListener("submit", async ev => {
+    ev.preventDefault();
+    try { await post("/api/quarantine", { test_id: d.test_id, reason: document.getElementById("reason").value }); toast(`Quarantined ${name}`); render(); }
+    catch (e) { toast(e.message); }
+  });
   try {
     const f = await api("/api/test/forecast", { id: d.test_id });
     if (tok !== renderToken) return;
     const hold = f.backtest.p50.length;
-    chart(el, { days: f.days, future: f.future_days, format: "ms", label: "Duration with Toto forecast",
-      lines: [{ values: f.values, color: "var(--ink)", label: "Median" }],
+    chart(el, { days: f.days, future: f.future_days, format: "ms", label: "Duration with forecast",
+      lines: [{ values: f.values, color: "var(--series)", label: "Median" }],
       band: { from: f.days.length - hold, p10: f.backtest.p10.concat(f.future.p10), p50: f.backtest.p50.concat(f.future.p50), p90: f.backtest.p90.concat(f.future.p90) } });
-    document.getElementById("dur-note").textContent = `Daily median of passing runs. The shaded band is Toto's forecast. Its first ${hold} days are predicted from the days before them, so a line above the band means the test got slower.`;
-    document.getElementById("dur-legend").innerHTML = legend([["var(--ink)", "Daily median"], ["var(--band)", "Toto forecast, p10 to p90"]]);
+    document.getElementById("dur-foot").innerHTML = legend([["var(--series)", "Daily median", true], ["var(--ink-2)", "Forecast", true], ["var(--band)", "Likely range"]]) + `<div class="dim" style="margin-top:4px">The first ${hold} forecast days are predicted from the days before them. A line above the range means it got slower.</div>`;
   } catch (e) {
     if (tok !== renderToken) return;
-    document.getElementById("dur-note").textContent = `Daily median of passing runs. No forecast: ${e.message}`;
+    if (e.status !== 501 && !(SNAP && e.status === 404)) document.getElementById("dur-foot").insertAdjacentHTML("beforeend", `<div class="dim" style="margin-top:4px">No forecast: ${esc(e.message)}</div>`);
   }
 }
 
 async function runsView(tok) {
-  view.innerHTML = loading("Triaging recent runs");
   const d = await api("/api/runs", { limit: 50 });
   if (tok !== renderToken) return;
-  const label = { PASS: "Pass", RERUN_TARGETED: "Rerun flaky", REAL_FAILURE: "Real failure" };
+  const by = k => d.runs.filter(r => r.decision === k).length;
+  const cols = [
+    { h: "When", cell: r => when(r.started_at), sort: r => r.started_at, cls: "nw" },
+    { h: "Commit", cell: r => `<a href="#/run/${r.run_id}">${sha(r.commit_sha)}</a>`, cls: "nw" },
+    { h: "Branch", cell: r => esc(r.branch || ""), sort: r => r.branch, dir: 1, cls: "hide-sm" },
+    { h: "Attempt", cell: r => r.attempt, sort: r => r.attempt, cls: "num hide-sm" },
+    { h: "Source", cell: r => `<span class="muted">${esc(r.source || "")}</span>`, sort: r => r.source, dir: 1, cls: "hide-sm" },
+    { h: "Failed", cell: r => `${r.failing}<span class="dim"> / ${r.tests}</span>`, sort: r => r.failing, cls: "num" },
+    { h: "Duration", cell: r => dur(r.duration_ms), sort: r => r.duration_ms, cls: "num hide-sm" },
+    { h: "Decision", cell: r => tag(r.decision, DECISION[r.decision]), sort: r => r.decision, dir: 1 },
+  ];
   view.innerHTML = `
-    <h1>Runs</h1>
-    <p class="note">The last ${plural(d.runs.length, "recorded run")} and what the gate decided for each.</p>
-    ${d.runs.length ? `<div class="list">
-      <div class="row head runs-grid"><span>When</span><span>Commit</span><span>Attempt</span><span>Source</span><span>Failed</span><span>Decision</span></div>
-      ${d.runs.map(r => `<a class="row runs-grid" href="#/run/${r.run_id}">
-        <span>${esc(rel(r.started_at))}</span>
-        <span><code>${sha(r.commit_sha)}</code></span>
-        <span><span class="lbl">Attempt</span>${r.attempt}</span>
-        <span><span class="lbl">Source</span>${esc(r.source || "n/a")}</span>
-        <span><span class="lbl">Failed</span>${r.failing} of ${r.tests}</span>
-        <span class="c-wide">${tag(r.decision, label[r.decision])}</span></a>`).join("")}
-    </div>` : `<p class="empty">No runs recorded yet. Run <code>greenlight ingest reports/*.xml --sha &lt;commit&gt;</code> after a test run.</p>`}`;
+    <div class="grid">
+      ${stat({ cls: "s4", k: "Passed", v: by("PASS"), s: `of the last ${d.runs.length}` })}
+      ${stat({ cls: "s4", k: "Rerun flaky", v: by("RERUN_TARGETED"), s: "only flaky tests failed" })}
+      ${stat({ cls: "s4", k: "Real failures", v: by("REAL_FAILURE"), s: "blocked" })}
+    </div>
+    <div class="grid">${panel({ title: "Runs", tip: "The newest recorded runs and what the gate decided for each.", flush: true, actions: `<span class="dim">${plural(d.runs.length, "run")}</span>`,
+      body: table("t-runs", cols, d.runs, { href: r => `#/run/${r.run_id}`, empty: "No runs yet. Record one with <code>greenlight run -- pytest</code>." }) })}</div>`;
 }
 
 const WHY = {
   quarantined: () => "Quarantined, so the gate ignores it.",
   known_flaky: f => `Flipped on ${f.flip_shas} of ${plural(f.eligible_shas, "commit")}. Rerun this test only.`,
   suspect_flaky: f => `Flipped on ${plural(f.flip_shas, "commit")} before. Rerun this test only.`,
-  new_test: () => "First time this test has run, so there's no history to call it flaky. Blocks.",
-  real_failure: f => f.flip_shas ? `Has flaked before, but failed ${plural(f.this_sha.fails, "time")} on this commit without passing once. Treated as real.` : "No flake history. Blocks.",
+  new_test: () => "First run of this test, so no history to call it flaky. Blocks.",
+  real_failure: f => f.flip_shas ? `Has flaked before, but failed ${plural(f.this_sha.fails, "time")} on this commit without passing. Treated as real.` : "No flake history. Blocks.",
 };
 async function runView(tok, id) {
-  view.innerHTML = loading();
   const t = await api("/api/run", { id });
   if (tok !== renderToken) return;
+  setCrumbs([["Tests"], ["Runs", "#/runs"]], `Run ${t.run.run_id}`);
   const order = { real_failure: 0, new_test: 1, known_flaky: 2, suspect_flaky: 3, quarantined: 4 };
   const fails = [...t.failures].sort((a, b) => order[a.category] - order[b.category]);
-  const r = t.run, link = u => u && /^https:\/\//.test(u);
-  const runMeta = `<div class="meta-list">
-      ${r.source ? `<span>From <b>${esc(r.source)}</b></span>` : ""}
-      ${r.git_commit && r.git_commit !== r.commit_sha ? `<span>Commit <code>${esc(r.git_commit.slice(0, 8))}</code></span>` : ""}
-      ${r.command ? `<span><code>${esc(r.command)}</code></span>` : ""}
-      ${r.session ? (link(r.url) ? `<a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.session)}</a>` : `<span>${esc(r.session)}</span>`) : link(r.url) ? `<a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">Open the run</a>` : ""}
-    </div>`;
-  const partial = r.results_named < r.tests ? ` The record names only the checks that failed or ran slower, so ${plural(r.tests - r.results_named, "other check")} aren't listed.` : "";
+  const r = t.run;
+  const meta = [
+    r.source ? `<span>Source <b>${esc(r.source)}</b></span>` : "",
+    r.git_commit && r.git_commit !== r.commit_sha ? `<span>Git commit <code>${esc(r.git_commit.slice(0, 8))}</code></span>` : "",
+    r.command ? `<span><code>${esc(r.command)}</code></span>` : "",
+    r.session ? (isUrl(r.url) ? `<a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.session)}</a>` : `<span>${esc(r.session)}</span>`) : isUrl(r.url) ? `<a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">Open the run</a>` : "",
+  ].join("");
+  const partial = r.results_named < r.tests ? `Only the checks that failed or ran slower are named; ${plural(r.tests - r.results_named, "other check")} not listed.` : "";
+  const cols = [
+    { h: "Verdict", cell: f => `${tag(f.category)}${f.new_signature ? `<div style="margin-top:4px">${tag("failing", "new message")}</div>` : ""}`, sort: f => order[f.category], dir: 1, cls: "fit" },
+    { h: "Test", cell: f => `${testCell(f.test_id)}<div class="why">${esc(WHY[f.category](f))}</div>${f.message ? `<div class="msg">${esc(f.message)}</div>` : ""}`, sort: f => f.test_id, dir: 1, cls: "wrap" },
+    { h: "Flipped", cell: f => `${f.flip_shas}<span class="dim"> / ${f.eligible_shas}</span>`, sort: f => f.flip_shas, cls: "num fit hide-sm" },
+  ];
   view.innerHTML = `
-    <a class="crumb" href="#/runs">All runs</a>
-    ${verdictBlock(t)}
-    ${runMeta}
-    <section>
-      <h2>${t.failures.length ? plural(t.failures.length, "failing test") : "No failing tests"}</h2>
-      <p class="note">${plural(t.run.tests, "test")} ran${t.failures.length ? `, ${t.failures.length} failed on the final attempt` : ""}. Blocking failures are listed first.${partial}</p>
-      ${fails.map(f => `<div class="fail-item">
-        ${tag(f.category)}${f.new_signature ? ` <span class="tag t-failing">new failure message</span>` : ""}
-        <div style="margin-top:4px"><a href="${testHref(f.test_id)}"><code>${esc(f.test_id)}</code></a></div>
-        <p class="why">${esc(WHY[f.category](f))}</p>
-        ${f.message ? `<div class="msg">${esc(f.message)}</div>` : ""}
-      </div>`).join("")}
-    </section>
-    ${t.passed_on_retry.length ? `<section><h2>Passed only on retry</h2><p class="note">These failed at least once in this run, then passed. They count toward flake history but don't block.</p><ul class="idlist">${t.passed_on_retry.map(id => `<li><a href="${testHref(id)}"><code>${esc(id)}</code></a></li>`).join("")}</ul></section>` : ""}`;
+    <div class="grid">
+      ${panel({ cls: "s12", title: "Gate decision", body: gate(t) + (meta ? `<div class="kv" style="margin-top:6px">${meta}</div>` : "") })}
+    </div>
+    <div class="grid">
+      ${panel({ title: t.failures.length ? "Failing tests" : "No failing tests", tip: `${plural(r.tests, "test")} ran. Blocking failures come first.`, flush: true, actions: `<span class="dim">${t.failures.length} of ${r.tests}</span>`,
+        body: t.failures.length ? table("t-fails", cols, fails, { sort: 0, dir: 1 }) : `<p class="empty">Every test passed on the final attempt.</p>`, foot: partial })}
+    </div>
+    ${t.passed_on_retry.length ? `<div class="grid">${panel({ title: "Passed only on retry", tip: "Failed at least once in this run, then passed. Counts toward flake history, doesn't block.", body: `<ul class="ids">${t.passed_on_retry.map(id => `<li><a href="${testHref(id)}">${esc(id)}</a></li>`).join("")}</ul>` })}</div>` : ""}`;
 }
 
 const SUITE = [["reruns", "Reruns", "count"], ["failure_rate", "Failure rate", "pct"], ["suite_duration_ms", "Suite duration", "ms"], ["runs", "All runs", "count"]];
 let suiteMetric = "reruns";
 async function trendsView(tok) {
-  view.innerHTML = `<h1>Trends</h1><p class="note">Forecasts from Toto 2.0, running on your machine. The first load downloads the model.</p>${loading("Running forecasts")}`;
+  view.innerHTML = skeleton() + `<p class="dim" style="margin:10px 2px">Running forecasts. The first load downloads the model.</p>`;
   let reg;
   try { reg = await api("/api/trends/durations"); }
-  catch (e) { if (tok !== renderToken) return; view.innerHTML = `<h1>Trends</h1>${errorBox(e)}`; return; }
+  catch (e) { if (tok !== renderToken) return; view.innerHTML = errorBox(e); return; }
   if (tok !== renderToken) return;
   view.innerHTML = `
-    <h1>Trends</h1>
-    <p class="note">Forecasts from Toto 2.0 (<code>${esc(reg.model)}</code>), running on your machine.</p>
-    <section style="margin-top:28px">
-      <h2>Rerun churn and suite health</h2>
-      <p class="note">Last 60 days and Toto's forecast for the next 7. If the gate is doing its job, reruns should trend down.</p>
-      <div class="seg" id="metric" role="group" aria-label="Metric">${SUITE.map(([k, l]) => `<button type="button" data-m="${k}" aria-pressed="${k === suiteMetric}">${l}</button>`).join("")}</div>
-      <div class="chart" id="c-suite" style="margin-top:16px"></div>
-      <div id="suite-note"></div>
-    </section>
-    <section>
-      <h2>Getting slower</h2>
-      <p class="note">Each test's last ${plural(reg.holdout_days, "day")} compared with what Toto predicted from its history. Flagged when a day lands above the forecast range and at least 20% over the expected value. Slowdowns tend to show up before timeout flakes do. Checked ${plural(reg.tests_checked, "test")}.</p>
-      <div id="regs">${reg.regressions.length ? "" : `<p class="empty">Nothing ran slower than forecast in the last ${plural(reg.holdout_days, "day")}.</p>`}</div>
-    </section>`;
+    <div class="grid">
+      ${panel({ title: "Suite forecast", tip: `Last 60 days and the next 7 from Toto (${reg.model}), running locally. Reruns should trend down if the gate is working.`,
+        actions: `<div class="seg" id="metric" role="group" aria-label="Metric">${SUITE.map(([k, l]) => `<button type="button" data-m="${k}" aria-pressed="${k === suiteMetric}">${l}</button>`).join("")}</div>`,
+        body: `<div class="chart" id="c-suite"></div>`, foot: `<div id="suite-note"></div>` })}
+    </div>
+    <div class="row-title">${icon("trends")}Getting slower <span class="dim" style="font-weight:400">${plural(reg.regressions.length, "test")} of ${reg.tests_checked} checked</span>${info(`Each test's last ${plural(reg.holdout_days, "day")} against what Toto predicted from its history. Flagged when a day lands above the likely range and at least 20% over the expected value. Slowdowns often show up before timeout flakes.`)}</div>
+    <div class="grid" id="regs">${reg.regressions.length ? "" : `<div class="panel s12"><p class="empty">Nothing ran slower than forecast in the last ${plural(reg.holdout_days, "day")}.</p></div>`}</div>`;
   const regs = document.getElementById("regs");
   reg.regressions.forEach((r, i) => {
     const worst = r.breaches.reduce((a, b) => b.pct_over_expected > a.pct_over_expected ? b : a);
-    regs.insertAdjacentHTML("beforeend", `<div class="sig">
-      <a href="${testHref(r.series)}"><code>${esc(r.series)}</code></a>
-      <p class="muted" style="margin:4px 0 6px">${Math.round(worst.pct_over_expected)}% over forecast on ${esc(fmtDay(worst.day))}: ${dur(worst.actual)} against an expected ${dur(worst.expected_p50)}.</p>
-      <div class="chart" id="c-reg-${i}"></div></div>`);
+    regs.insertAdjacentHTML("beforeend", panel({ cls: "s6", title: splitId(r.series)[1], actions: `<a class="lnk" href="${testHref(r.series)}">Open</a>`,
+      body: `<div class="chart" id="c-reg-${i}"></div>`, foot: `${tag("failing", `${Math.round(worst.pct_over_expected)}% over`)} <span class="muted">${esc(fmtDay(worst.day))}: ${dur(worst.actual)}, expected ${dur(worst.expected_p50)}</span>` }));
     chart(document.getElementById(`c-reg-${i}`), { days: r.days, height: 130, format: "ms", label: `Duration of ${r.series}`,
-      lines: [{ values: r.values, color: "var(--ink)", label: "Median" }],
+      lines: [{ values: r.values, color: "var(--series)", label: "Median" }],
       band: { from: r.days.length - r.forecast.p50.length, ...r.forecast } });
   });
   const drawSuite = async () => {
     const el = document.getElementById("c-suite"), note = document.getElementById("suite-note");
     const [key, label, fmt] = SUITE.find(s => s[0] === suiteMetric);
+    const color = key === "failure_rate" ? "var(--fail)" : "var(--series)";
     document.querySelectorAll("#metric button").forEach(b => b.setAttribute("aria-pressed", b.dataset.m === key));
     try {
       const f = await api("/api/trends/suite", { metric: key });
       if (tok !== renderToken) return;
-      chart(el, { days: f.recent.map(r => r.day), future: f.forecast.map(r => r.day), format: fmt, label,
-        lines: [{ values: f.recent.map(r => r.value), color: key === "failure_rate" ? "var(--fail)" : "var(--ink)", label }],
+      chart(el, { days: f.recent.map(r => r.day), future: f.forecast.map(r => r.day), format: fmt, label, height: 220,
+        lines: [{ values: f.recent.map(r => r.value), color, label, area: true }],
         band: { from: f.recent.length, p10: f.forecast.map(r => r.p10), p50: f.forecast.map(r => r.p50), p90: f.forecast.map(r => r.p90) } });
       const a = f.recent_anomaly;
-      note.innerHTML = legend([[key === "failure_rate" ? "var(--fail)" : "var(--ink)", label], ["var(--band)", "Forecast, p10 to p90"]]) +
-        (a ? `<p style="margin-top:10px">${tag("failing", "Above forecast")} ${a.map(b => `${esc(fmtDay(b.day))}: ${esc(FMT[fmt](b.actual))} vs ${esc(FMT[fmt](b.expected_p50))} expected`).join("; ")}.</p>` : "");
+      note.innerHTML = legend([[color, label, true], ["var(--ink-2)", "Forecast", true], ["var(--band)", "Likely range"]]) +
+        (a ? `<div style="margin-top:6px">${tag("failing", "Above forecast")} <span class="muted">${a.map(b => `${esc(fmtDay(b.day))}: ${esc(FMT[fmt](b.actual))}, expected ${esc(FMT[fmt](b.expected_p50))}`).join("; ")}</span></div>` : "");
     } catch (e) { el.innerHTML = ""; note.innerHTML = errorBox(e); }
   };
   document.getElementById("metric").addEventListener("click", ev => { const b = ev.target.closest("button"); if (b) { suiteMetric = b.dataset.m; drawSuite(); } });
@@ -780,288 +952,370 @@ async function trendsView(tok) {
 }
 
 async function quarantineView(tok) {
-  view.innerHTML = loading();
   const d = await api("/api/quarantine", { days: DAYS });
   if (tok !== renderToken) return;
-  const act = (label, attrs) => LIVE ? `<button class="btn ghost" ${attrs}>${label}</button>` : "";
+  const act = (label, attrs) => LIVE ? `<button class="btn ghost sm" type="button" ${attrs}>${label}</button>` : "";
+  const flips = r => `${r.flip_shas}<span class="dim"> / ${r.eligible_shas}</span>`;
+  const sugCols = [
+    { h: "Test", cell: r => testCell(r.test_id), sort: r => r.test_id, dir: 1, cls: "wrap" },
+    { h: "Flipped", cell: flips, sort: r => r.flip_shas, cls: "num" },
+    { h: "Confidence", cell: r => score(r.flake_score), sort: r => r.flake_score, cls: "num hide-sm" },
+    { h: "Last 30 runs", cell: r => strip(r.recent), cls: "hide-sm" },
+    ...(LIVE ? [{ h: "", cell: r => act("Quarantine", `data-act="q" data-id="${esc(r.test_id)}" data-why="${esc(`flipped on ${r.flip_shas}/${r.eligible_shas} commits`)}"`), cls: "act" }] : []),
+  ];
+  const qCols = [
+    { h: "Test", cell: r => testCell(r.test_id, `<div class="why">${esc(r.reason || "no reason given")}</div>`), sort: r => r.test_id, dir: 1, cls: "wrap" },
+    { h: "Added", cell: r => `${when(r.added_at)} <span class="dim">${esc(addedBy(r.added_by))}</span>`, sort: r => r.added_at },
+    { h: "Flipped", cell: flips, sort: r => r.flip_shas, cls: "num hide-sm" },
+    { h: "Last 30 runs", cell: r => strip(r.recent), cls: "hide-sm" },
+    ...(LIVE ? [{ h: "", cell: r => act("Release", `data-act="u" data-id="${esc(r.test_id)}"`), cls: "act" }] : []),
+  ];
+  const relCols = [
+    { h: "Test", cell: r => testCell(r.test_id), sort: r => r.test_id, dir: 1, cls: "wrap" },
+    { h: "Clean runs", cell: r => r.executions, sort: r => r.executions, cls: "num" },
+  ];
   view.innerHTML = `
-    <h1>Quarantine</h1>
-    <p class="note">Quarantined tests keep running and keep being recorded. They just stop blocking the gate.</p>
-    <section style="margin-top:28px">
-      <h2>Suggested</h2>
-      <p class="note">Flipped on 2 or more commits in the last ${DAYS} days and not quarantined yet.</p>
-      ${d.suggested.length ? `${LIVE ? `<p><button class="btn" id="qall">Quarantine all ${d.suggested.length}</button></p>` : ""}<div class="list">${d.suggested.map(s => `
-        <div class="row q-grid"><span class="c-test"><a href="${testHref(s.test_id)}"><code>${esc(s.test_id)}</code></a></span>
-        <span>Flipped on ${s.flip_shas} of ${plural(s.eligible_shas, "commit")}</span><span>${strip(s.recent)}</span>
-        <span>${act("Quarantine", `data-q="${esc(s.test_id)}" data-why="${esc(`flipped on ${s.flip_shas}/${s.eligible_shas} commits`)}"`)}</span></div>`).join("")}</div>`
-      : `<p class="empty">Nothing to suggest.</p>`}
-    </section>
-    <section>
-      <h2>Quarantined</h2>
-      ${d.quarantined.length ? `<div class="list">${d.quarantined.map(r => `
-        <div class="row q-grid"><span class="c-test"><a href="${testHref(r.test_id)}"><code>${esc(r.test_id)}</code></a><br><span class="muted">${esc(r.reason || "no reason given")}</span></span>
-        <span class="muted">Added ${esc(rel(r.added_at))}${r.added_by === "auto" ? " by sweep" : " by hand"}</span><span>${strip(r.recent)}</span>
-        <span>${act("Release", `data-u="${esc(r.test_id)}"`)}</span></div>`).join("")}</div>`
-      : `<p class="empty">No tests are quarantined.</p>`}
-    </section>
-    <section>
-      <h2>Clean enough to release</h2>
-      <p class="note">Quarantined tests with 10 or more runs and no failures in the last 14 days. Releasing is always your call.</p>
-      ${d.release_candidates.length ? `<ul class="idlist">${d.release_candidates.map(r => `<li><a href="${testHref(r.test_id)}"><code>${esc(r.test_id)}</code></a> <span class="muted">${r.executions} clean runs</span></li>`).join("")}</ul>` : `<p class="empty">None yet.</p>`}
-    </section>`;
-  if (!LIVE) return;
-  view.addEventListener("click", quarantineClicks);
-}
-async function quarantineClicks(ev) {
-  const b = ev.target.closest("button"); if (!b) return;
-  try {
-    if (b.id === "qall") { b.disabled = true; const r = await post("/api/sweep", { apply: true }); toast(`Quarantined ${plural(r.to_quarantine.length, "test")}`); }
-    else if (b.dataset.q) { b.disabled = true; await post("/api/quarantine", { test_id: b.dataset.q, reason: b.dataset.why }); toast(`Quarantined ${splitId(b.dataset.q)[1]}`); }
-    else if (b.dataset.u) { b.disabled = true; await post("/api/unquarantine", { test_id: b.dataset.u }); toast(`Released ${splitId(b.dataset.u)[1]} from quarantine`); }
-    else return;
-    render();
-  } catch (e) { b.disabled = false; toast(e.message); }
+    <div class="grid">
+      ${stat({ cls: "s4", k: "Quarantined", v: d.quarantined.length, s: "ignored by the gate", tip: "Quarantined tests keep running and being recorded. They just stop blocking." })}
+      ${stat({ cls: "s4", k: "Suggested", v: d.suggested.length, s: "flipped on 2+ commits" })}
+      ${stat({ cls: "s4", k: "Ready to release", v: d.release_candidates.length, s: "clean for 14 days" })}
+    </div>
+    <div class="grid">
+      ${panel({ title: "Suggested", tip: `Flipped on 2 or more commits in the last ${DAYS} days and not quarantined yet.`, flush: true, actions: LIVE && d.suggested.length ? `<button class="btn sm" type="button" data-act="qall">Quarantine all ${d.suggested.length}</button>` : "",
+        body: table("t-sug", sugCols, d.suggested, { sort: 1, href: r => testHref(r.test_id), empty: "Nothing to suggest." }) })}
+    </div>
+    <div class="grid">
+      ${panel({ cls: "s8", title: "Quarantined", flush: true, body: table("t-quar", qCols, d.quarantined, { sort: 1, href: r => testHref(r.test_id), empty: "No tests are quarantined." }) })}
+      ${panel({ cls: "s4", title: "Ready to release", tip: "Quarantined, 10 or more runs and no failures in the last 14 days. Releasing is your call.", flush: true, body: table("t-rel", relCols, d.release_candidates, { sort: 1, href: r => testHref(r.test_id), empty: "None yet." }) })}
+    </div>`;
 }
 
 /* ---------- pipelines (GitHub Actions) ---------- */
-const STATUS_LABEL = { success: "passed", failure: "failed", timed_out: "timed out", cancelled: "cancelled", skipped: "skipped", in_progress: "running", queued: "queued", startup_failure: "failed to start", neutral: "neutral", action_required: "needs approval" };
-const statusTag = st => tag(st || "unknown", STATUS_LABEL[st] || st || "unknown");
-const pipeHref = id => "#/pipeline/" + encodeURIComponent(id);
-function noData(what, how) { return `<p class="empty">${what}</p>${how ? `<p class="note">${how}</p>` : ""}`; }
-
+const noData = (what, how) => `<div class="panel s12"><p class="empty">${what}${how ? `<br><span class="dim">${how}</span>` : ""}</p></div>`;
 async function pipelinesView(tok) {
-  view.innerHTML = loading();
   const d = await api("/api/pipelines", { days: DAYS });
   if (tok !== renderToken) return;
   if (!d.recent.length) {
-    view.innerHTML = `<h1>Pipelines</h1>${noData(`No GitHub Actions runs in the last ${DAYS} days.`,
-      "Set <code>[github] repo</code> in <code>greenlight.toml</code> and run <code>greenlight sync</code>. Every workflow run, attempt, job and step lands here, with flaky jobs called out the same way flaky tests are.")}`;
+    view.innerHTML = `<div class="grid">${noData(`No GitHub Actions runs in the last ${DAYS} days.`, "Set <code>[github] repo</code> in <code>greenlight.toml</code> and run <code>greenlight sync</code>.")}</div>`;
     return;
   }
   const t = d.totals;
+  const failShare = d.days.map((_, i) => { const all = d.success_per_day[i] + d.failed_per_day[i]; return all ? d.failed_per_day[i] / all : null; });
+  const wfCols = [
+    { h: "Workflow", cell: w => `<b style="font-weight:500">${esc(w.workflow)}</b>`, sort: w => w.workflow, dir: 1, cls: "wrap" },
+    { h: "Runs", cell: w => w.runs, sort: w => w.runs, cls: "num" },
+    { h: "Passed", cell: w => pct(w.success_rate), sort: w => w.success_rate, cls: "num" },
+    { h: "p50", cell: w => dur(w.p50_duration_ms), sort: w => w.p50_duration_ms, cls: "num hide-sm" },
+    { h: "p95", cell: w => dur(w.p95_duration_ms), sort: w => w.p95_duration_ms, cls: "num hide-sm" },
+    { h: "Queue p50", cell: w => dur(w.p50_queue_ms), sort: w => w.p50_queue_ms, cls: "num hide-sm" },
+    { h: "Reran", cell: w => w.rerun_runs, sort: w => w.rerun_runs, cls: "num hide-sm" },
+    { h: "Duration", cell: w => `<span style="display:inline-flex;width:110px;height:22px">${spark(w.durations || [], "var(--series)")}</span>`, cls: "hide-sm", tip: "Duration of each run, oldest on the left" },
+    { h: "Last", cell: w => statusTag(w.last_status), sort: w => w.last_status, dir: 1 },
+  ];
+  const fjCols = [
+    { h: "Job", cell: j => `${esc(j.name)}<div class="sub">${esc(j.workflow)}</div>`, sort: j => j.name, dir: 1, cls: "wrap" },
+    { h: "Flipped", cell: j => `${j.flips}<span class="dim"> / ${j.eligible}</span>`, sort: j => j.flips, cls: "num" },
+    { h: "Last", cell: j => when(j.last_flip_at), sort: j => j.last_flip_at, cls: "num" },
+  ];
+  const sjCols = [
+    { h: "Job", cell: j => `${esc(j.job)}<div class="sub">${esc(j.workflow)}, ${plural(j.runs, "run")}</div>`, sort: j => j.job, dir: 1, cls: "wrap" },
+    { h: "p50", cell: j => dur(j.p50_ms), sort: j => j.p50_ms, cls: "num" },
+    { h: "p95", cell: j => dur(j.p95_ms), sort: j => j.p95_ms, cls: "num" },
+  ];
+  const recentCols = [
+    { h: "When", cell: r => when(r.created_at), sort: r => r.created_at, cls: "nw" },
+    { h: "Workflow", cell: r => `<a href="${pipeHref(r.pipeline_id)}">${esc(r.workflow)} <span class="dim">#${esc(r.run_number)}</span></a>${r.attempt > 1 ? ` <span class="dim">attempt ${r.attempt}</span>` : ""}`, sort: r => r.workflow, dir: 1, cls: "wrap" },
+    { h: "Branch", cell: r => esc(r.branch || ""), sort: r => r.branch, dir: 1, cls: "hide-sm" },
+    { h: "Commit", cell: r => sha(r.commit_sha), cls: "nw hide-sm" },
+    { h: "Event", cell: r => `<span class="muted">${esc(r.event || "")}</span>`, sort: r => r.event, dir: 1, cls: "hide-sm" },
+    { h: "Duration", cell: r => dur(r.duration_ms), sort: r => r.duration_ms, cls: "num hide-sm" },
+    { h: "Result", cell: r => statusTag(r.status), sort: r => r.status, dir: 1 },
+  ];
   view.innerHTML = `
-    <h1>Pipelines</h1>
-    <p class="note">GitHub Actions runs from the last ${DAYS} days. A rerun is a second or later attempt of the same run.</p>
-    <section class="stats" style="margin-top:20px" aria-label="Pipeline summary">
-      <div class="stat"><div class="k">Runs</div><div class="v">${t.runs}</div><div class="s">${(t.runs / DAYS).toFixed(1)} a day</div></div>
-      <div class="stat"><div class="k">Failed</div><div class="v">${t.runs ? pct(t.failed / t.runs) : "0%"}</div><div class="s">${plural(t.failed, "run")} on its latest attempt</div></div>
-      <div class="stat"><div class="k">Rerun</div><div class="v">${t.rerun}</div><div class="s">${plural(t.rerun, "run")} needed another attempt</div></div>
-      <div class="stat"><div class="k">CI time</div><div class="v">${dur(t.minutes * 60000)}</div><div class="s">Wall time across every attempt</div></div>
-    </section>
-    <section>
-      <h2>Runs per day</h2><p class="note">By the latest attempt's result.</p>
-      <div class="chart" id="c-pipes"></div>${legend([["var(--pass)", "Passed"], ["var(--fail)", "Failed"]])}
-    </section>
-    <section>
-      <h2>Workflows</h2>
-      <div class="list"><div class="row head wf-grid"><span>Workflow</span><span>Runs</span><span>Passed</span><span>Duration p50 / p95</span><span>Queue p50</span><span>Reran</span><span>Last</span></div>
-      ${d.workflows.map(w => `<div class="row wf-grid"><span><b>${esc(w.workflow)}</b></span>
-        <span><span class="lbl">Runs</span>${w.runs}</span>
-        <span><span class="lbl">Passed</span>${pct(w.success_rate)}</span>
-        <span><span class="lbl">Duration p50 / p95</span>${dur(w.p50_duration_ms)} / ${dur(w.p95_duration_ms)}</span>
-        <span><span class="lbl">Queue p50</span>${dur(w.p50_queue_ms)}</span>
-        <span><span class="lbl">Reran</span>${w.rerun_runs}</span>
-        <span>${statusTag(w.last_status)}</span></div>`).join("")}</div>
-    </section>
-    <section class="two">
-      <div><h2>Flaky jobs</h2><p class="note">Jobs that both failed and passed on the same commit, usually a failed attempt that passed on rerun.</p>
-        ${d.flaky_jobs.length ? `<div class="list">${d.flaky_jobs.map(j => `<div class="row" style="grid-template-columns:minmax(0,1fr) auto">
-          <span><b>${esc(j.name)}</b><br><span class="muted">${esc(j.workflow)}</span></span>
-          <span>Flipped on ${j.flips} of ${plural(j.eligible, "commit")}<br><span class="muted">last ${esc(rel(j.last_flip_at))}</span></span></div>`).join("")}</div>`
-          : `<p class="empty">No job both failed and passed on the same commit.</p>`}</div>
-      <div><h2>Slowest jobs</h2><p class="note">Passing runs only.</p>
-        ${d.slow_jobs.length ? `<div class="list">${d.slow_jobs.map(j => `<div class="row" style="grid-template-columns:minmax(0,1fr) auto">
-          <span><b>${esc(j.job)}</b><br><span class="muted">${esc(j.workflow)}, ${plural(j.runs, "run")}</span></span>
-          <span>${dur(j.p50_ms)} <span class="muted">p50</span><br>${dur(j.p95_ms)} <span class="muted">p95</span></span></div>`).join("")}</div>`
-          : `<p class="empty">No passing jobs yet.</p>`}</div>
-    </section>
-    <section>
-      <h2>Recent runs</h2>
-      <div class="list"><div class="row head pipe-grid"><span>When</span><span>Workflow</span><span>Branch</span><span>Commit</span><span>Duration</span><span>Result</span></div>
-      ${d.recent.map(r => `<a class="row pipe-grid" href="${pipeHref(r.pipeline_id)}">
-        <span>${esc(rel(r.created_at))}</span>
-        <span class="c-wide">${esc(r.workflow)} #${esc(r.run_number)}${r.attempt > 1 ? ` <span class="muted">attempt ${r.attempt}</span>` : ""}</span>
-        <span><span class="lbl">Branch</span>${esc(r.branch || "n/a")}</span>
-        <span><span class="lbl">Commit</span><code>${sha(r.commit_sha)}</code></span>
-        <span><span class="lbl">Duration</span>${dur(r.duration_ms)}</span>
-        <span>${statusTag(r.status)}</span></a>`).join("")}</div>
-    </section>`;
+    <div class="grid">
+      ${stat({ cls: "s3", k: "Runs", v: t.runs, s: `${(t.runs / DAYS).toFixed(1)} a day`, spark: d.days.map((_, i) => d.success_per_day[i] + d.failed_per_day[i]) })}
+      ${stat({ cls: "s3", k: "Failed", v: t.runs ? pct(t.failed / t.runs) : "0%", s: `${plural(t.failed, "run")} on the latest attempt`, spark: failShare, color: "var(--fail)" })}
+      ${stat({ cls: "s3", k: "Reran", v: t.rerun, s: "needed another attempt" })}
+      ${stat({ cls: "s3", k: "CI time", v: dur(t.minutes * 60000), s: "wall time, every attempt" })}
+    </div>
+    <div class="grid">
+      ${panel({ cls: "s8", title: "Runs per day", tip: "By the latest attempt's result.", body: `<div class="chart" id="c-pipes"></div>`, foot: legend([["var(--pass)", "Passed"], ["var(--fail)", "Failed"]]) })}
+      ${panel({ cls: "s4", title: "Flaky jobs", tip: "Jobs that failed and passed on the same commit, usually a failed attempt that passed on rerun.", flush: true, body: table("t-fj", fjCols, d.flaky_jobs, { sort: 1, empty: "No job flipped." }) })}
+    </div>
+    <div class="grid">
+      ${panel({ title: "Workflows", flush: true, body: table("t-wf", wfCols, d.workflows, { sort: 1 }) })}
+    </div>
+    <div class="grid">
+      ${panel({ cls: "s8", title: "Recent runs", flush: true, actions: `<span class="dim">${d.recent.length}</span>`, body: table("t-recent", recentCols, d.recent, { limit: 20, href: r => pipeHref(r.pipeline_id) }) })}
+      ${panel({ cls: "s4 start", title: "Slowest jobs", tip: "Passing runs only.", flush: true, body: table("t-sj", sjCols, d.slow_jobs, { sort: 1, empty: "No passing jobs yet." }) })}
+    </div>`;
   chart(document.getElementById("c-pipes"), { days: d.days, label: "Runs per day",
     bars: [{ values: d.success_per_day, color: "var(--pass)", label: "Passed" }, { values: d.failed_per_day, color: "var(--fail)", label: "Failed" }] });
 }
 
+function waterfall(jobs) {
+  const span = Math.max(1, ...jobs.map(j => (j.offset_ms || 0) + (j.duration_ms || 0)));
+  const ticks = timeTicks(span), top = ticks[ticks.length - 1] || span, step = ticks[1] - ticks[0];
+  const at = v => `${(100 * Math.max(0, v) / top).toFixed(3)}%`;
+  const grid = `background-size:${(100 * step / top).toFixed(3)}% 100%`;
+  const bar = (off, d, st, label, thin) => `<i class="bar st-${ST[st] || "neutral"}${thin ? " thin" : ""}" style="left:${at(off)};width:${at(d)}" data-tip="${esc(label)}"></i>`;
+  const rows = jobs.map(j => {
+    const steps = j.steps || [], start = Date.parse(j.started_at);
+    const label = `${j.name}: ${STATUS_LABEL[j.status] || j.status}, ${dur(j.duration_ms)}${j.queue_ms != null ? `, waited ${dur(j.queue_ms)} for a runner` : ""}`;
+    const head = `<span class="wn">${steps.length ? icon("right") : `<span style="width:12px;flex:none"></span>`}${esc(j.name)}</span><span class="track" style="${grid}">${bar(j.offset_ms || 0, j.duration_ms || 0, j.status, label)}</span><span class="num">${dur(j.duration_ms)}</span>`;
+    if (!steps.length) return `<div class="wr">${head}</div>`;
+    const sub = steps.map(s => {
+      const off = (j.offset_ms || 0) + (s.started_at && !isNaN(start) ? Date.parse(s.started_at) - start : 0);
+      return `<div class="wr sub"><span class="wn">${esc(s.name)}</span><span class="track" style="${grid}">${bar(off, s.duration_ms || 0, s.status, `${s.name}: ${STATUS_LABEL[s.status] || s.status}, ${dur(s.duration_ms)}`, true)}</span><span class="num">${dur(s.duration_ms)}</span></div>`;
+    }).join("");
+    return `<details class="wj"><summary class="wr">${head}</summary>${sub}</details>`;
+  }).join("");
+  return `<div class="wf"><div class="wr wax"><span>Job</span><span class="track">${ticks.map(t => `<b style="left:${at(t)}">${esc(AXIS.ms(t))}</b>`).join("")}</span><span></span></div>${rows}</div>`;
+}
 async function pipelineView(tok, id) {
-  view.innerHTML = loading();
   const d = await api("/api/pipeline", { id });
   if (tok !== renderToken) return;
   const p = d.pipeline;
-  const span = Math.max(1, ...d.jobs.map(j => (j.offset_ms || 0) + (j.duration_ms || 0)));
+  setCrumbs([["Delivery"], ["Pipelines", "#/pipelines"]], `${p.workflow} #${p.run_number}`);
   view.innerHTML = `
-    <a class="crumb" href="#/pipelines">All pipelines</a>
-    <h1>${esc(p.workflow)} #${esc(p.run_number)}</h1>
-    <div class="tags" style="margin-bottom:8px">${statusTag(p.status)}</div>
-    <div class="meta-list">
-      <span>Attempt <b>${p.attempt}</b> of ${d.attempts.length}${d.attempts.length > 1 ? `: ${d.attempts.map(a => a.pipeline_id === p.pipeline_id ? `<b>${a.attempt}</b>` : `<a href="${pipeHref(a.pipeline_id)}">${a.attempt}</a>`).join(", ")}` : ""}</span>
-      <span>Branch <b>${esc(p.branch || "n/a")}</b></span>
-      <span>Commit <code>${sha(p.commit_sha)}</code></span>
-      <span>Event <b>${esc(p.event || "n/a")}</b></span>
-      <span>Took <b>${dur(p.duration_ms)}</b></span>
-      <span>Queued <b>${dur(p.queue_ms)}</b></span>
-      ${p.actor ? `<span>By <b>${esc(p.actor)}</b></span>` : ""}
-      ${p.url && /^https:\/\//.test(p.url) ? `<a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">Open on GitHub</a>` : ""}
+    <div class="grid">
+      <section class="panel s12 ent">
+        <div class="bar2"><span class="title">${esc(p.workflow)} <span class="dim">#${esc(p.run_number)}</span></span>${isUrl(p.url) ? `<a class="lnk" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">Open on GitHub ${icon("ext")}</a>` : ""}</div>
+        <div><span class="tags">${statusTag(p.status)}</span></div>
+        <div class="kv">
+          <span>Attempt <b>${p.attempt}</b> of ${d.attempts.length}${d.attempts.length > 1 ? `: ${d.attempts.map(a => a.pipeline_id === p.pipeline_id ? `<b>${a.attempt}</b>` : `<a href="${pipeHref(a.pipeline_id)}">${a.attempt}</a>`).join(", ")}` : ""}</span>
+          <span>Branch <b>${esc(p.branch || "n/a")}</b></span>
+          <span>Commit ${sha(p.commit_sha)}</span>
+          <span>Event <b>${esc(p.event || "n/a")}</b></span>
+          <span>Took <b>${dur(p.duration_ms)}</b></span>
+          <span>Queued <b>${dur(p.queue_ms)}</b></span>
+          ${p.actor ? `<span>By <b>${esc(p.actor)}</b></span>` : ""}
+          <span>${when(p.created_at)}</span>
+        </div>
+      </section>
     </div>
-    <section style="margin-top:24px">
-      <h2>Jobs</h2><p class="note">Each bar starts when its job started and runs for as long as it took, on the same scale.</p>
-      ${d.jobs.length ? `<div class="wfall">${d.jobs.map(j => `<div class="wrow">
-        <span class="name" title="${esc(j.name)}">${esc(j.name)}</span>
-        <span class="track"><span class="seg s-${esc(j.status)}" style="left:${(100 * (j.offset_ms || 0) / span).toFixed(2)}%;width:${(100 * (j.duration_ms || 0) / span).toFixed(2)}%" title="${esc(STATUS_LABEL[j.status] || j.status)}"></span></span>
-        <span class="dur">${dur(j.duration_ms)}</span>
-        ${j.steps.length ? `<details class="steps"><summary>${plural(j.steps.length, "step")}${j.queue_ms != null ? `, waited ${dur(j.queue_ms)} for a runner` : ""}</summary><ol>${j.steps.map(st => `<li><span>${esc(st.name)}</span> ${dur(st.duration_ms)}${st.status !== "success" ? `, ${esc(STATUS_LABEL[st.status] || st.status)}` : ""}</li>`).join("")}</ol></details>` : ""}
-      </div>`).join("")}</div>${legend([["var(--pass)", "Passed"], ["var(--fail)", "Failed"], ["var(--ink-2)", "Other"]])}`
-        : `<p class="empty">No jobs recorded for this attempt.</p>`}
-    </section>
-    ${d.test_runs.length ? `<section><h2>Test results from this commit</h2><ul class="idlist">${d.test_runs.map(r => `<li><a href="#/run/${r.run_id}">Run ${r.run_id}</a> <span class="muted">attempt ${r.attempt}</span></li>`).join("")}</ul></section>` : ""}`;
+    <div class="grid">
+      ${panel({ title: "Jobs", tip: "Each bar starts when its job started, on one time scale. Open a job for its steps.", flush: true, actions: `<span class="dim">${plural(d.jobs.length, "job")}</span>`,
+        body: d.jobs.length ? waterfall(d.jobs) : `<p class="empty">No jobs recorded for this attempt.</p>`, foot: d.jobs.length ? legend([["var(--pass)", "Passed"], ["var(--fail)", "Failed"], ["var(--ink-3)", "Other"]]) : "" })}
+    </div>
+    ${d.test_runs.length ? `<div class="grid">${panel({ title: "Test runs on this commit", body: `<ul class="ids">${d.test_runs.map(r => `<li><a href="#/run/${r.run_id}">Run ${r.run_id}</a> <span class="dim">attempt ${r.attempt}</span></li>`).join("")}</ul>` })}</div>` : ""}`;
 }
 
 /* ---------- delivery: DORA, pull requests, issues ---------- */
 let deliveryEnv = null;
 async function deliveryView(tok) {
-  view.innerHTML = loading();
   const params = { days: DAYS };
   if (deliveryEnv) params.env = deliveryEnv;
   const d = await api("/api/delivery", params);
   if (tok !== renderToken) return;
+  setSynced(d.synced);
   const o = d.dora, m = o.metrics, pr = d.prs, is = d.issues;
   const envs = o.environments || [];
-  const envSwitch = envs.length > 1 ? `<div class="seg" id="envs" role="group" aria-label="Environment">${envs.map(e => `<button type="button" data-env="${esc(e.environment)}" aria-pressed="${e.environment === o.environment}">${esc(e.environment)}</button>`).join("")}</div>` : "";
-  const synced = Object.entries(d.synced || {}).map(([k, v]) => `${k} ${rel(v)}`).join(", ");
-  const doraBlock = !envs.length ? noData("No deployments recorded yet.",
-      "Tell greenlight what a release is in <code>greenlight.toml</code> under <code>[delivery]</code>: pushes to a branch (<code>deploy_branch = \"release\"</code>), files added in git such as patch notes (<code>deploy_files</code>), GitHub Deployments (<code>deploy_environment</code>) or GitHub Releases (<code>deploy_releases = true</code>). Then run <code>greenlight sync</code>.")
-    : `
-    <section class="stats" style="margin-top:20px" aria-label="DORA metrics for ${esc(o.environment)}">
-      <div class="stat"><div class="k">Deployment frequency</div><div class="v">${m.deploys_per_day}<small>a day</small></div><div class="s">${plural(m.deployments, "deployment")} on ${plural(m.deploy_days, "day")}</div></div>
-      <div class="stat"><div class="k">Lead time for changes</div><div class="v">${hrs(m.lead_time_p50_h)}</div><div class="s">Median from commit to deploy; p90 ${hrs(m.lead_time_p90_h)}</div></div>
-      <div class="stat"><div class="k">Change failure rate</div><div class="v">${m.change_failure_rate == null ? "n/a" : pct(m.change_failure_rate)}</div><div class="s">${m.failed_deployments} failed or led to an incident</div></div>
-      <div class="stat"><div class="k">Time to restore</div><div class="v">${hrs(m.time_to_restore_p50_h)}</div><div class="s">${plural(m.incidents, "incident")}, ${m.open_incidents} still open</div></div>
-    </section>
-    <section class="two">
-      <div><h2>Deployments per day</h2><div class="chart" id="c-dep"></div></div>
-      <div><h2>Lead time</h2><p class="note">Median per day, from each shipped commit to its deployment.</p><div class="chart" id="c-lead"></div></div>
-    </section>
-    <section>
-      <h2>Deployments</h2>
-      <p class="note">An incident is an issue labeled ${(o.incident_labels || []).map(l => `<code>${esc(l)}</code>`).join(", ")}, tied to the last deployment before it opened.</p>
-      ${o.deployments.length ? `<div class="list"><div class="row head dep-grid"><span>When</span><span>Version</span><span>Commit</span><span>Commits</span><span>Lead time</span><span>Result</span></div>
-      ${o.deployments.map(r => `<div class="row dep-grid">
-        <span>${esc(rel(r.deployed_at))}</span>
-        <span class="c-wide">${esc(r.version || r.source)}</span>
-        <span><span class="lbl">Commit</span><code>${sha(r.commit_sha)}</code></span>
-        <span><span class="lbl">Commits</span>${r.commits}</span>
-        <span><span class="lbl">Lead time</span>${hrs(r.lead_time_p50_h)}</span>
-        <span>${r.failed ? tag("failure", r.incidents.length ? `incident ${r.incidents.map(n => "#" + n).join(", ")}` : "failed") : tag("success", "shipped")}</span></div>`).join("")}</div>`
-        : `<p class="empty">No deployments to ${esc(o.environment)} in the last ${DAYS} days.</p>`}
-    </section>`;
-  view.innerHTML = `
-    <h1>Delivery</h1>
-    <p class="note">How often you ship and how long changes take to get there, from synced git and GitHub data.${synced ? ` Last synced: ${esc(synced)}.` : ""}</p>
-    ${envSwitch ? `<div class="subnav"><span class="muted">Environment</span>${envSwitch}</div>` : ""}
-    ${doraBlock}
-    <section>
-      <h2>Pull requests</h2>
-      ${pr.metrics.merged + pr.metrics.open + pr.metrics.opened ? `
-      <section class="stats" style="margin-top:12px" aria-label="Pull requests">
-        <div class="stat"><div class="k">Merged</div><div class="v">${pr.metrics.merged}</div><div class="s">${pr.metrics.opened} opened in ${DAYS} days</div></div>
-        <div class="stat"><div class="k">Time to merge</div><div class="v">${hrs(pr.metrics.time_to_merge_p50_h)}</div><div class="s">Median; p90 ${hrs(pr.metrics.time_to_merge_p90_h)}</div></div>
-        <div class="stat"><div class="k">Open</div><div class="v">${pr.metrics.open}</div><div class="s">${pr.open.length ? `Oldest ${hrs(pr.open[0].age_h)}` : "None waiting"}</div></div>
-        <div class="stat"><div class="k">Closed unmerged</div><div class="v">${pr.metrics.closed_unmerged}</div><div class="s">Abandoned or replaced</div></div>
-      </section>
-      <div class="two" style="margin-top:28px">
-        <div><h2>Merged per day</h2><div class="chart" id="c-prs"></div></div>
-        <div><h2>Open pull requests</h2>${pr.open.length ? `<div class="list">${pr.open.slice(0, 8).map(x => `<div class="row pr-grid">
-          <span>#${x.number}</span><span class="c-wide">${x.url && /^https:\/\//.test(x.url) ? `<a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title)}</a>` : esc(x.title)}</span>
-          <span class="muted">${esc(x.head || "")}</span><span>${hrs(x.age_h)}</span></div>`).join("")}</div>` : `<p class="empty">Nothing open.</p>`}</div>
-      </div>` : noData("No pull requests synced.", "Run <code>greenlight sync</code> with a <code>[github] repo</code> set.")}
-    </section>
-    <section>
-      <h2>Issues</h2>
-      ${is.metrics.open + is.metrics.opened + is.managed.length ? `
-      <section class="stats" style="margin-top:12px" aria-label="Issues">
-        <div class="stat"><div class="k">Open</div><div class="v">${is.metrics.open}</div><div class="s">Median age ${hrs(is.metrics.open_age_p50_h)}</div></div>
-        <div class="stat"><div class="k">Opened</div><div class="v">${is.metrics.opened}</div><div class="s">In ${DAYS} days</div></div>
-        <div class="stat"><div class="k">Closed</div><div class="v">${is.metrics.closed}</div><div class="s">Median ${hrs(is.metrics.time_to_close_p50_h)} to close</div></div>
-        <div class="stat"><div class="k">Tracked by greenlight</div><div class="v">${is.managed.filter(i => i.state === "open").length}</div><div class="s">Flaky tests and perf regressions</div></div>
-      </section>
-      <div class="two" style="margin-top:28px">
-        <div><h2>Open issues</h2><p class="note">How many were open at the end of each day.</p><div class="chart" id="c-iss"></div></div>
-        <div><h2>Flaky tests and perf regressions</h2>${is.managed.length ? `<div class="list">${is.managed.slice(0, 12).map(i => `<div class="row iss-grid">
-          <span>${i.url && /^https:\/\//.test(i.url) ? `<a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">#${i.number}</a>` : `#${i.number}`}</span>
-          <span>${i.kind === "flaky" ? tag("flaky", "flaky") : tag("perf", "perf")}</span>
-          <span class="c-wide"><a href="${testHref(i.test_id)}"><code>${esc(i.test_id)}</code></a></span>
-          <span>${i.state === "open" ? tag("open-ok", "open") : tag("closed", "closed")}</span></div>`).join("")}</div>`
-          : `<p class="empty">None yet. <code>greenlight issues</code> shows what it would open.</p>`}</div>
-      </div>
-      ${is.oldest_open.length ? `<h2 style="margin-top:32px">Oldest open issues</h2><div class="list">${is.oldest_open.slice(0, 8).map(i => `<div class="row pr-grid">
-        <span>#${i.number}</span><span class="c-wide">${i.url && /^https:\/\//.test(i.url) ? `<a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">${esc(i.title)}</a>` : esc(i.title)}</span>
-        <span class="muted">${esc((i.labels || []).slice(0, 2).join(", "))}</span><span>${hrs(i.age_h)}</span></div>`).join("")}</div>` : ""}`
-      : noData("No issues synced.", "Run <code>greenlight sync</code> with a <code>[github] repo</code> set.")}
-    </section>`;
+  const link = (url, text) => isUrl(url) ? `<a class="tl" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${text}</a>` : text;
+  const depCols = [
+    { h: "When", cell: r => when(r.deployed_at), sort: r => r.deployed_at, cls: "nw" },
+    { h: "Version", cell: r => link(r.url, esc(r.version || r.source)), sort: r => r.version, dir: 1, cls: "wrap" },
+    { h: "Commit", cell: r => sha(r.commit_sha), cls: "nw hide-sm" },
+    { h: "Commits", cell: r => r.commits, sort: r => r.commits, cls: "num hide-sm" },
+    { h: "Lead time", cell: r => hrs(r.lead_time_p50_h), sort: r => r.lead_time_p50_h, cls: "num" },
+    { h: "Result", cell: r => r.failed ? tag("failure", r.incidents.length ? `incident ${r.incidents.map(n => "#" + n).join(", ")}` : "failed") : tag("success", "shipped"), sort: r => r.failed ? 1 : 0 },
+  ];
+  const prCols = [
+    { h: "#", cell: x => `<span class="dim">${x.number}</span>`, sort: x => x.number, cls: "num" },
+    { h: "Title", cell: x => `${link(x.url, esc(x.title))}<div class="sub">${esc(x.head || "")}${x.author ? `, ${esc(x.author)}` : ""}</div>`, sort: x => x.title, dir: 1, cls: "wrap" },
+    { h: "Age", cell: x => hrs(x.age_h), sort: x => x.age_h, cls: "num" },
+  ];
+  const mgCols = [
+    { h: "#", cell: i => link(i.url, `#${i.number}`), sort: i => i.number, cls: "num" },
+    { h: "Kind", cell: i => i.kind === "flaky" ? tag("flaky", "flaky") : tag("perf", "perf"), sort: i => i.kind, dir: 1 },
+    { h: "Test", cell: i => testCell(i.test_id), sort: i => i.test_id, dir: 1, cls: "wrap" },
+    { h: "State", cell: i => i.state === "open" ? tag("open-ok", "open") : tag("closed", "closed"), sort: i => i.state, dir: 1 },
+  ];
+  const oldCols = [
+    { h: "#", cell: i => `<span class="dim">${i.number}</span>`, sort: i => i.number, cls: "num" },
+    { h: "Title", cell: i => link(i.url, esc(i.title)), sort: i => i.title, dir: 1, cls: "wrap" },
+    { h: "Labels", cell: i => `<span class="muted">${esc((i.labels || []).slice(0, 3).join(", "))}</span>`, cls: "hide-sm" },
+    { h: "Age", cell: i => hrs(i.age_h), sort: i => i.age_h, cls: "num" },
+  ];
+  const vars = envs.length > 1 ? `<div class="vars"><label class="var"><span>Environment</span><select id="env">${envs.map(e => `<option value="${esc(e.environment)}"${e.environment === o.environment ? " selected" : ""}>${esc(e.environment)} (${e.deployments})</option>`).join("")}</select></label></div>` : "";
+  const dora = !envs.length ? `<div class="grid">${noData("No deployments recorded yet.", "Say what a release is under <code>[delivery]</code> in <code>greenlight.toml</code>: <code>deploy_branch</code>, <code>deploy_files</code>, <code>deploy_environment</code> or <code>deploy_releases</code>. Then run <code>greenlight sync</code>.")}</div>` : `
+    <div class="grid">
+      ${stat({ cls: "s3", k: "Deployment frequency", v: m.deploys_per_day, unit: "a day", s: `${plural(m.deployments, "deployment")} on ${plural(m.deploy_days, "day")}`, spark: o.deploys_per_day })}
+      ${stat({ cls: "s3", k: "Lead time for changes", v: hrs(m.lead_time_p50_h), s: `median, p90 ${hrs(m.lead_time_p90_h)}`, tip: "From each shipped commit to its deployment.", spark: o.lead_time_per_day })}
+      ${stat({ cls: "s3", k: "Change failure rate", v: m.change_failure_rate == null ? "n/a" : pct(m.change_failure_rate), s: `${m.failed_deployments} failed or caused an incident`, tip: `An incident is an issue labeled ${(o.incident_labels || []).join(", ")}, tied to the last deployment before it opened.` })}
+      ${stat({ cls: "s3", k: "Time to restore", v: hrs(m.time_to_restore_p50_h), s: `${plural(m.incidents, "incident")}, ${m.open_incidents} open` })}
+    </div>
+    <div class="grid">
+      ${panel({ cls: "s6", title: "Deployments per day", body: `<div class="chart" id="c-dep"></div>` })}
+      ${panel({ cls: "s6", title: "Lead time", tip: "Median per day, from each shipped commit to its deployment.", body: `<div class="chart" id="c-lead"></div>` })}
+    </div>
+    <div class="grid">
+      ${panel({ title: `Deployments to ${o.environment}`, flush: true, actions: `<span class="dim">${o.deployments.length}</span>`, body: table("t-dep", depCols, o.deployments, { limit: 15, empty: `No deployments to ${esc(o.environment)} in the last ${DAYS} days.` }) })}
+    </div>`;
+  const prs = pr.metrics.merged + pr.metrics.open + pr.metrics.opened ? `
+    <div class="grid">
+      ${stat({ cls: "s3", k: "Merged", v: pr.metrics.merged, s: `${pr.metrics.opened} opened`, spark: pr.merged_per_day })}
+      ${stat({ cls: "s3", k: "Time to merge", v: hrs(pr.metrics.time_to_merge_p50_h), s: `median, p90 ${hrs(pr.metrics.time_to_merge_p90_h)}` })}
+      ${stat({ cls: "s3", k: "Open", v: pr.metrics.open, s: pr.open.length ? `oldest ${hrs(pr.open[0].age_h)}` : "none waiting" })}
+      ${stat({ cls: "s3", k: "Closed unmerged", v: pr.metrics.closed_unmerged, s: "abandoned or replaced" })}
+    </div>
+    <div class="grid">
+      ${panel({ cls: "s6", title: "Merged per day", body: `<div class="chart" id="c-prs"></div>` })}
+      ${panel({ cls: "s6", title: "Open pull requests", flush: true, actions: `<span class="dim">${pr.open.length}</span>`, body: table("t-pr", prCols, pr.open, { sort: 2, limit: 8, empty: "Nothing open." }) })}
+    </div>` : `<div class="grid">${noData("No pull requests synced.", "Run <code>greenlight sync</code> with <code>[github] repo</code> set.")}</div>`;
+  const issues = is.metrics.open + is.metrics.opened + is.managed.length ? `
+    <div class="grid">
+      ${stat({ cls: "s3", k: "Open", v: is.metrics.open, s: `median age ${hrs(is.metrics.open_age_p50_h)}`, spark: is.open_per_day })}
+      ${stat({ cls: "s3", k: "Opened", v: is.metrics.opened, s: `in ${DAYS} days`, spark: is.opened_per_day })}
+      ${stat({ cls: "s3", k: "Closed", v: is.metrics.closed, s: `median ${hrs(is.metrics.time_to_close_p50_h)} to close`, spark: is.closed_per_day })}
+      ${stat({ cls: "s3", k: "Opened by greenlight", v: is.managed.filter(i => i.state === "open").length, s: "flaky tests and perf, open" })}
+    </div>
+    <div class="grid">
+      ${panel({ cls: "s6", title: "Open issues", tip: "How many were open at the end of each day.", body: `<div class="chart" id="c-iss"></div>` })}
+      ${panel({ cls: "s6", title: "Flaky test and perf issues", flush: true, body: table("t-mg", mgCols, is.managed, { limit: 10, empty: "None yet. <code>greenlight issues</code> shows what it would open." }) })}
+    </div>
+    ${is.oldest_open.length ? `<div class="grid">${panel({ title: "Oldest open issues", flush: true, body: table("t-old", oldCols, is.oldest_open, { sort: 3, limit: 8 }) })}</div>` : ""}`
+    : `<div class="grid">${noData("No issues synced.", "Run <code>greenlight sync</code> with <code>[github] repo</code> set.")}</div>`;
+  view.innerHTML = `${vars}${dora}
+    <div class="row-title">Pull requests</div>${prs}
+    <div class="row-title">Issues</div>${issues}`;
   if (envs.length) {
-    chart(document.getElementById("c-dep"), { days: o.days, label: "Deployments per day", bars: [{ values: o.deploys_per_day, color: "var(--quar)", label: "Deployments" }] });
-    chart(document.getElementById("c-lead"), { days: o.days, label: "Median lead time per day", format: "h", lines: [{ values: o.lead_time_per_day, color: "var(--ink)", label: "Lead time", dots: true }] });
+    chart(document.getElementById("c-dep"), { days: o.days, label: "Deployments per day", bars: [{ values: o.deploys_per_day, color: "var(--series)", label: "Deployments" }] });
+    chart(document.getElementById("c-lead"), { days: o.days, label: "Median lead time per day", format: "h", lines: [{ values: o.lead_time_per_day, color: "var(--series)", label: "Lead time", dots: true }] });
   }
   const prEl = document.getElementById("c-prs");
-  if (prEl) chart(prEl, { days: pr.days, label: "Pull requests merged per day", bars: [{ values: pr.merged_per_day, color: "var(--quar)", label: "Merged" }] });
+  if (prEl) chart(prEl, { days: pr.days, label: "Pull requests merged per day", bars: [{ values: pr.merged_per_day, color: "var(--series)", label: "Merged" }] });
   const isEl = document.getElementById("c-iss");
-  if (isEl) chart(isEl, { days: is.days, label: "Open issues at the end of each day", lines: [{ values: is.open_per_day, color: "var(--quar)", label: "Open" }] });
-  const sw = document.getElementById("envs");
-  if (sw) sw.addEventListener("click", ev => { const b = ev.target.closest("button"); if (b) { deliveryEnv = b.dataset.env; render(); } });
+  if (isEl) chart(isEl, { days: is.days, label: "Open issues at the end of each day", lines: [{ values: is.open_per_day, color: "var(--series)", label: "Open", area: true }] });
+  const env = document.getElementById("env");
+  if (env) env.addEventListener("change", () => { deliveryEnv = env.value; render(); });
 }
+
+/* ---------- actions (quarantine, show all) ---------- */
+document.addEventListener("click", async ev => {
+  const th = ev.target.closest("th[data-col]");
+  if (th) { sortBy(th); return; }
+  const b = ev.target.closest("button[data-act]");
+  if (b) {
+    const a = b.dataset.act;
+    if (a === "more") { TABLES[b.dataset.t].limit = 0; document.getElementById(b.dataset.t).innerHTML = tableInner(b.dataset.t); return; }
+    if (!LIVE) return;
+    b.disabled = true;
+    try {
+      if (a === "qall") { const r = await post("/api/sweep", { apply: true }); toast(`Quarantined ${plural(r.to_quarantine.length, "test")}`); }
+      else if (a === "q") { await post("/api/quarantine", { test_id: b.dataset.id, reason: b.dataset.why }); toast(`Quarantined ${splitId(b.dataset.id)[1]}`); }
+      else if (a === "u") { await post("/api/unquarantine", { test_id: b.dataset.id }); toast(`Released ${splitId(b.dataset.id)[1]}`); }
+      render();
+    } catch (e) { b.disabled = false; toast(e.message); }
+    return;
+  }
+  const tr = ev.target.closest("tr[data-href]");
+  if (tr && !ev.target.closest("a, button, input, select, summary, label")) location.hash = tr.dataset.href;
+});
+document.addEventListener("keydown", ev => {
+  if (ev.key === "Enter" && ev.target.matches && ev.target.matches("th[data-col]")) sortBy(ev.target);
+  if (ev.key === "Escape") { closeMenu(); document.body.classList.remove("nav-open"); tipOff(); }
+});
+
+/* ---------- shell: crumbs, sync status, time range, theme, nav drawer ---------- */
+function setCrumbs(trail, title) {
+  document.getElementById("crumbs").innerHTML = trail.map(([label, href]) => `${href ? `<a href="${href}">${esc(label)}</a>` : `<span>${esc(label)}</span>`}${icon("right")}`).join("") + `<h1>${esc(title)}</h1>`;
+  document.title = `${title} · greenlight`;
+}
+function setSynced(synced) {
+  const box = document.getElementById("sync");
+  if (SNAP) { box.innerHTML = `<span class="pulse off"></span><span>Snapshot, ${esc(full(SNAP.generated_at))}</span>`; return; }
+  const entries = Object.entries(synced || {});
+  if (!entries.length) return;
+  const latest = entries.map(e => e[1]).sort().pop();
+  const stale = (NOW - new Date(latest)) / 3600000 > 24;
+  box.innerHTML = `<span class="pulse${stale ? " off" : ""}"></span><span data-tip="${esc(entries.map(([k, v]) => `${k} ${ago(v)}`).join(", "))}">Synced ${esc(ago(latest))}</span>`;
+}
+const range = document.getElementById("range"), rangeMenu = document.getElementById("range-menu");
+let windowed = true;
+function syncRange() {
+  document.getElementById("range-label").textContent = `Last ${DAYS} days`;
+  rangeMenu.innerHTML = RANGES.map(n => `<button type="button" role="menuitemradio" aria-checked="${n === DAYS}" data-days="${n}">${icon("check")}Last ${n} days</button>`).join("");
+}
+function closeMenu() { rangeMenu.hidden = true; range.setAttribute("aria-expanded", "false"); }
+range.addEventListener("click", () => {
+  if (!windowed || SNAP) return;
+  const open = rangeMenu.hidden;
+  rangeMenu.hidden = !open; range.setAttribute("aria-expanded", String(open));
+  if (open) rangeMenu.querySelector('[aria-checked="true"]').focus();
+});
+rangeMenu.addEventListener("click", ev => {
+  const b = ev.target.closest("button[data-days]"); if (!b) return;
+  DAYS = Number(b.dataset.days);
+  try { localStorage.setItem("greenlight-days", String(DAYS)); } catch { /* storage unavailable */ }
+  closeMenu(); syncRange(); render();
+});
+document.addEventListener("pointerdown", ev => { if (!ev.target.closest("#picker")) closeMenu(); });
+const themeBtn = document.getElementById("theme");
+function syncTheme() {
+  const light = document.documentElement.dataset.theme === "light";
+  themeBtn.innerHTML = icon(light ? "moon" : "sun");
+  themeBtn.dataset.tip = light ? "Dark theme" : "Light theme";
+  themeBtn.setAttribute("aria-label", themeBtn.dataset.tip);
+}
+themeBtn.addEventListener("click", () => {
+  const light = document.documentElement.dataset.theme !== "light";
+  if (light) document.documentElement.dataset.theme = "light"; else delete document.documentElement.dataset.theme;
+  try { localStorage.setItem("greenlight-theme", light ? "light" : "dark"); } catch { /* storage unavailable */ }
+  syncTheme(); tipOff();
+});
+document.getElementById("menu-btn").addEventListener("click", () => document.body.classList.toggle("nav-open"));
+document.getElementById("scrim").addEventListener("click", () => document.body.classList.remove("nav-open"));
+document.getElementById("refresh").addEventListener("click", () => render());
 
 /* ---------- router ---------- */
 const ROUTES = [
-  [/^#?\/?$/, "overview", tok => overviewView(tok), true],
-  [/^#\/flaky$/, "flaky", tok => flakyView(tok), true],
-  [/^#\/test\/(.+)$/, "flaky", (tok, m) => testView(tok, decodeURIComponent(m[1])), true],
-  [/^#\/runs$/, "runs", tok => runsView(tok), false],
-  [/^#\/run\/(\d+)$/, "runs", (tok, m) => runView(tok, Number(m[1])), false],
-  [/^#\/pipelines$/, "pipelines", tok => pipelinesView(tok), true],
-  [/^#\/pipeline\/(.+)$/, "pipelines", (tok, m) => pipelineView(tok, decodeURIComponent(m[1])), false],
-  [/^#\/delivery$/, "delivery", tok => deliveryView(tok), true],
-  [/^#\/trends$/, "trends", tok => trendsView(tok), false],
-  [/^#\/quarantine$/, "quarantine", tok => quarantineView(tok), true],
+  [/^#?\/?$/, "overview", [["Tests"]], "Overview", tok => overviewView(tok), true],
+  [/^#\/flaky$/, "flaky", [["Tests"]], "Flaky tests", tok => flakyView(tok), true],
+  [/^#\/test\/(.+)$/, "flaky", [["Tests"], ["Flaky tests", "#/flaky"]], "Test", (tok, m) => testView(tok, decodeURIComponent(m[1])), true],
+  [/^#\/runs$/, "runs", [["Tests"]], "Runs", tok => runsView(tok), false],
+  [/^#\/run\/(\d+)$/, "runs", [["Tests"], ["Runs", "#/runs"]], "Run", (tok, m) => runView(tok, Number(m[1])), false],
+  [/^#\/quarantine$/, "quarantine", [["Tests"]], "Quarantine", tok => quarantineView(tok), true],
+  [/^#\/trends$/, "trends", [["Tests"]], "Trends", tok => trendsView(tok), false],
+  [/^#\/pipelines$/, "pipelines", [["Delivery"]], "Pipelines", tok => pipelinesView(tok), true],
+  [/^#\/pipeline\/(.+)$/, "pipelines", [["Delivery"], ["Pipelines", "#/pipelines"]], "Pipeline run", (tok, m) => pipelineView(tok, decodeURIComponent(m[1])), false],
+  [/^#\/delivery$/, "delivery", [["Delivery"]], "DORA and GitHub", tok => deliveryView(tok), true],
 ];
+let lastHash = null;
 async function render() {
   const tok = ++renderToken;
-  tip.hidden = true;
-  view.removeEventListener("click", quarantineClicks);
+  tipOff(); closeMenu();
   const hash = location.hash || "#/";
-  const hit = ROUTES.map(([re, nav, fn, windowed]) => [hash.match(re), nav, fn, windowed]).find(r => r[0]);
-  const [m, nav, fn, windowed] = hit || [null, "overview", tok => overviewView(tok), true];
-  win.style.visibility = windowed ? "visible" : "hidden";
+  const hit = ROUTES.map(r => [hash.match(r[0]), ...r.slice(1)]).find(r => r[0]) || [null, ...ROUTES[0].slice(1)];
+  const [m, nav, trail, title, fn, isWindowed] = hit;
+  windowed = isWindowed;
+  range.setAttribute("aria-disabled", String(!windowed || !!SNAP));
+  if (!windowed) range.dataset.tip = "This view isn't filtered by time"; else delete range.dataset.tip;
   document.querySelectorAll("#nav a").forEach(a => { if (a.dataset.nav === nav) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
+  setCrumbs(trail, title);
+  if (hash !== lastHash) { view.innerHTML = skeleton(); lastHash = hash; } else view.classList.add("busy");
+  const bar = document.getElementById("bar"); bar.hidden = false;
   try { await fn(tok, m); }
   catch (e) { if (tok === renderToken) view.innerHTML = errorBox(e); }
+  finally { if (tok === renderToken) { bar.hidden = true; view.classList.remove("busy"); } }
 }
 
 /* ---------- boot ---------- */
-const win = document.getElementById("window");
-function syncWindow() { win.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", Number(b.dataset.days) === DAYS)); }
 if (SNAP) {
-  win.hidden = true;
-  const b = document.getElementById("banner");
-  b.hidden = false;
-  b.textContent = `Read-only snapshot taken ${new Date(SNAP.generated_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}, covering the last ${SNAP.days} days.`;
-} else {
-  win.addEventListener("click", ev => {
-    const b = ev.target.closest("button"); if (!b) return;
-    DAYS = Number(b.dataset.days);
-    try { localStorage.setItem("greenlight-days", String(DAYS)); } catch { /* storage unavailable */ }
-    syncWindow(); render();
-  });
+  document.getElementById("picker").hidden = true;
+  document.getElementById("refresh").hidden = true;
+  const chip = document.getElementById("snapchip");
+  chip.hidden = false;
+  chip.textContent = `Snapshot, last ${SNAP.days} days`;
+  chip.dataset.tip = `Read-only, taken ${full(SNAP.generated_at)}`;
+  setSynced(null);
 }
-syncWindow();
-window.addEventListener("hashchange", () => { render(); view.focus({ preventScroll: true }); window.scrollTo(0, 0); });
-render();
+syncRange(); syncTheme();
+window.addEventListener("hashchange", () => { document.body.classList.remove("nav-open"); render(); view.focus({ preventScroll: true }); window.scrollTo(0, 0); });
+render().then(() => {
+  /* the sidebar's sync status comes with the overview; fetch it once when starting elsewhere */
+  if (location.hash && location.hash !== "#/" && LIVE) api("/api/overview", { days: DAYS }).then(d => setSynced(d.synced)).catch(() => {});
+});
 </script>
 </body>
 </html>
