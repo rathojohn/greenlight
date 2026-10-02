@@ -34,46 +34,59 @@ The core idea: **a flaky test is one that both passed and failed on the same cod
 
 ## Quick start
 
-Python 3.11+. The CLI and dashboard use only the standard library; the MCP server needs `mcp`.
+Needs Python 3.11 or newer. The `python3` that ships with macOS is 3.9, which is too old (pip then fails with "No matching distribution found for mcp"). [uv](https://docs.astral.sh/uv/) fetches a current Python for you.
+
+macOS or Linux:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env
+uv venv -p 3.12 .venv
+source .venv/bin/activate
+uv pip install "greenlight @ git+https://github.com/rathojohn/greenlight"
+```
+
+Windows PowerShell:
 
 ```powershell
-# Windows PowerShell
 py -3.12 -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install "greenlight @ git+https://github.com/rathojohn/greenlight"
 ```
 
-```bash
-# macOS / Linux
-python3 -m venv .venv && . .venv/bin/activate
-pip install "greenlight @ git+https://github.com/rathojohn/greenlight"
-```
+If you already have Python 3.11 or newer, a plain venv and `pip install` work too. The CLI and dashboard use only the standard library; the MCP server needs `mcp`, which installs with it.
 
-Try it on fake data first (60 days of runs, pipelines, releases, PRs and issues):
+Try it on fake data first. `greenlight demo` writes 60 days of runs, pipelines, releases, pull requests and issues into a separate file:
 
 ```bash
-python examples/seed_demo.py --db demo.db     # from a clone of this repo
-greenlight --db demo.db gate                  # REAL_FAILURE: one stable test broke
+greenlight demo --db demo.db
+greenlight --db demo.db gate
 greenlight --db demo.db flaky
-greenlight --db demo.db ui                    # http://127.0.0.1:8765
+greenlight --db demo.db ui
 ```
+
+`gate` reports REAL_FAILURE (one stable test broke on the last commit) and exits 1. `ui` opens the dashboard at http://127.0.0.1:8765.
 
 On a real repo:
 
 ```bash
 cd your-repo
-greenlight init        # writes greenlight.toml, guessing what it can
-greenlight auth        # where the GitHub token comes from and what it can do
-greenlight sync        # pulls runs, PRs, issues, Actions and deployments; exports to OTel if configured
+greenlight init
+greenlight auth
+greenlight sync
 greenlight ui
 ```
+
+`init` writes a `greenlight.toml` with what it can guess, `auth` shows where the GitHub token comes from and what it can do, and `sync` pulls runs, PRs, issues, Actions and deployments (and exports to OTel if an endpoint is set).
 
 After a local test run, record it and gate on it:
 
 ```bash
 greenlight ingest reports/*.xml --sha $(git rev-parse HEAD) --branch $(git branch --show-current)
-greenlight gate --sha $(git rev-parse HEAD)   # exit 0 PASS, 2 RERUN_TARGETED, 1 REAL_FAILURE, 3 error
+greenlight gate --sha $(git rev-parse HEAD)
 ```
+
+`gate` exits 0 for PASS, 2 for RERUN_TARGETED, 1 for REAL_FAILURE and 3 for an error.
 
 Any runner that writes JUnit XML works: pytest `--junitxml`, vitest `--reporter=junit`, jest-junit, Playwright's junit reporter, go-junit-report, Surefire.
 
@@ -117,12 +130,12 @@ greenlight keeps its own history in SQLite either way, so a short backend retent
 
 Some Tempo (TraceQL) searches to start with:
 
-```
-{ span.cicd.pipeline.result = "failure" }                       failed pipeline runs
-{ span.greenlight.gate.decision = "REAL_FAILURE" }              test runs with a real failure
-{ span.greenlight.test.category = "known_flaky" }               flaky failures the gate reran
-{ span.cicd.pipeline.task.name != "" && duration > 5m }         slow jobs
-```
+| Finds | TraceQL |
+| --- | --- |
+| failed pipeline runs | `{ span.cicd.pipeline.result = "failure" }` |
+| test runs with a real failure | `{ span.greenlight.gate.decision = "REAL_FAILURE" }` |
+| flaky failures the gate reran | `{ span.greenlight.test.category = "known_flaky" }` |
+| slow jobs | `{ span.cicd.pipeline.task.name != "" && duration > 5m }` |
 
 ### Receiving spans
 

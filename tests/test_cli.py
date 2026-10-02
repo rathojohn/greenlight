@@ -86,3 +86,17 @@ def test_bad_config_is_a_clean_error(tmp_path, capsys, no_token):
     cfg.write_text("[nope]\nx = 1\n")
     assert cli.main(["--config", str(cfg), "flaky"]) == 3
     assert "unknown section" in capsys.readouterr().err
+
+
+def test_demo_seeds_and_never_touches_a_real_db(tmp_path, capsys, no_token):
+    demo = tmp_path / "demo.db"
+    assert cli.main(["demo", "--db", str(demo), "--days", "5"]) == 0
+    assert "next: greenlight --db" in capsys.readouterr().out
+    assert cli.main(["demo", "--db", str(demo), "--days", "5"]) == 0  # reseeding a demo DB is fine
+    real = tmp_path / "real.db"
+    from greenlight.db import connect
+    from greenlight.ingest import TestResult, record_run
+    with connect(str(real)) as conn:
+        record_run(conn, [TestResult("a::b", None, "pass", 1)], commit_sha="abc", source="local")
+    assert cli.main(["demo", "--db", str(real)]) == 3
+    assert "already holds real runs" in capsys.readouterr().err
