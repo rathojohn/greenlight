@@ -131,7 +131,7 @@ A greenlight server is one container holding one database. Everything sends it r
 
 | It needs | |
 | --- | --- |
-| Image | `ghcr.io/rathojohn/greenlight` (amd64 and arm64) |
+| Image | `ghcr.io/rathojohn/greenlight` (amd64 and arm64). The `:toto` tag adds the forecasts on the Trends page: a 2.2 GB image instead of 400 MB, and it wants 1 GB of memory instead of 512 MB |
 | Port | 8000, or `$PORT` when the host sets one |
 | Disk | a persistent volume at `/data`, for the database (a few hundred MB at most) |
 | Environment | `GREENLIGHT_REPO` (owner/name), `GREENLIGHT_TOKEN` (any long random string, the one password for everything), `GITHUB_TOKEN` (reads the repo; required for a private one) |
@@ -451,7 +451,7 @@ It's dark by default with a light theme one click away. The time range (7, 14, 3
 - **Flaky tests**, **test pages** (results by commit, duration, failure messages, measured numbers against a baseline, linked issues, quarantine controls), **Runs** and **run pages** (why each failure did or didn't block).
 - **Pipelines**: runs per day, per-workflow success rate, p50/p95 duration and queue time, flaky and slow jobs, and a job waterfall per run.
 - **DORA and GitHub**: the four DORA numbers, the deployments behind them, pull request flow and the issue backlog.
-- **Trends**: forecasts from the Toto 2.0 time series model (optional, `pip install "greenlight[toto]"`, Python 3.12+): rerun churn, failure rate and suite duration with a 7-day band, and tests running slower than forecast.
+- **Trends**: forecasts from the Toto 2.0 time series model (optional: the server's `:toto` image, or `uv tool install --python 3.12 "greenlight[toto] @ git+https://github.com/rathojohn/greenlight"` on your machine): rerun churn, failure rate and suite duration with a 7-day band, and tests running slower than forecast.
 - **Quarantine**: suggestions, what's quarantined, what's clean enough to release.
 
 ## Configuration

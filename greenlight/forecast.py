@@ -38,7 +38,9 @@ def _load_model():
                 import torch
                 from toto2 import Toto2Model
             except ImportError as e:
-                raise RuntimeError("Toto is not installed. Run `pip install toto-models` (requires Python 3.12+).") from e
+                raise RuntimeError("Forecasts need Toto 2.0, which isn't installed here. On a server, run the "
+                                   "ghcr.io/rathojohn/greenlight:toto image and give it 1 GB of memory. Elsewhere, "
+                                   "install greenlight with the toto extra (Python 3.12 or later).") from e
             logging.getLogger("httpx").setLevel(logging.WARNING)  # quiet Hugging Face checks
             device = "cuda" if torch.cuda.is_available() else "cpu"
             _model = Toto2Model.from_pretrained(MODEL_ID).to(device).eval()
