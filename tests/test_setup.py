@@ -177,6 +177,8 @@ def test_project_files_merge_into_what_the_repo_has(tmp_path):
     assert servers["greenlight"] == {"type": "stdio", "command": "uvx", "args": setup.UVX_COMMAND[1:]}
     settings = json.loads((repo / ".claude" / "settings.json").read_text())
     assert settings["hooks"] == hooks["hooks"] and settings["enabledMcpjsonServers"] == ["greenlight"]
+    assert "mcp__greenlight__greenlight_overview" in settings["permissions"]["allow"]
+    assert "mcp__greenlight__greenlight_quarantine" not in settings["permissions"]["allow"]  # changes things: asks
     codex = tomllib.loads((repo / ".codex" / "config.toml").read_text())["mcp_servers"]["greenlight"]
     assert codex["command"] == "uvx" and codex["args"] == setup.UVX_COMMAND[1:] and codex["startup_timeout_sec"] == 120
     assert all("already" in line for line in setup.project_files(repo))
@@ -224,3 +226,12 @@ def test_project_files_can_point_at_a_server(tmp_path):
                                                   "bearer_token_env_var": "GREENLIGHT_TOKEN"}
     assert all("already" in line or "approved" in line
                for line in setup.project_files(repo, url="https://ci.example.com"))
+
+
+def test_the_approved_tools_are_exactly_the_read_only_ones():
+    """setup.py can't import the MCP server (the CLI is standard library only), so it keeps its own list."""
+    import asyncio
+    from greenlight import server
+    tools = asyncio.run(server.mcp.list_tools())
+    read_only = {t.name for t in tools if t.annotations and t.annotations.model_dump(by_alias=True).get("readOnlyHint")}
+    assert set(setup.READ_TOOLS) == read_only
