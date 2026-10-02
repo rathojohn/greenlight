@@ -9,7 +9,7 @@ import pytest
 
 from greenlight import cli, config, setup
 from greenlight.gitrepo import Repo
-from tests.conftest import junit_xml
+from tests.conftest import child_env, hide_clis, junit_xml
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -97,7 +97,7 @@ def test_run_finds_reports_or_says_why_not(checkout, monkeypatch, tmp_path, caps
 
 def test_setup_writes_config_and_rules_once(checkout, monkeypatch, capsys):
     repo, _ = checkout
-    monkeypatch.setenv("PATH", "/usr/bin:/bin")  # no claude CLI: setup prints the command instead
+    hide_clis(monkeypatch)  # no claude CLI: setup prints the command instead
     assert cli.main(["setup", str(repo)]) == 0
     out = capsys.readouterr().out
     assert "config: wrote" in out and setup.RULES_MARKER in out
@@ -141,7 +141,7 @@ def test_mcp_server_uses_the_claude_project(checkout, tmp_path):
     (repo / "reports/junit.xml").write_text(junit_xml([("app::ok", "pass", 0.1, None), ("app::flip", "fail", 0.1, "x")]))
     elsewhere = tmp_path / "dot-claude"
     elsewhere.mkdir()
-    env = {"CLAUDE_PROJECT_DIR": str(repo), "PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(ROOT)}
+    env = child_env(CLAUDE_PROJECT_DIR=str(repo))
 
     async def go():
         params = StdioServerParameters(command=sys.executable, args=["-m", "greenlight.server"], env=env,
@@ -158,3 +158,50 @@ def test_mcp_server_uses_the_claude_project(checkout, tmp_path):
     from greenlight.db import connect
     with closing(connect(str(db), readonly=True)) as conn:
         assert tuple(conn.execute("SELECT commit_sha, branch, source FROM runs").fetchone()) == (sha, "main", "agent")
+
+
+def test_project_files_merge_into_what_the_repo_has(tmp_path):
+    import tomllib
+    repo = tmp_path / "proj"
+    (repo / ".claude").mkdir(parents=True)
+    hooks = {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo hi"}]}]}}
+    (repo / ".claude" / "settings.json").write_text(json.dumps(hooks))
+    (repo / ".mcp.json").write_text('﻿{"mcpServers": {"other": {"command": "x"}}}')  # BOM, as Notepad writes
+    assert setup.project_files(repo, dry_run=True)[0] == ".mcp.json: would add the greenlight server"
+    assert not (repo / ".codex").exists()
+    first = setup.project_files(repo)
+    assert all("added" in line or "approved" in line for line in first), first
+    servers = json.loads((repo / ".mcp.json").read_text())["mcpServers"]
+    assert servers["other"] == {"command": "x"}
+    assert servers["greenlight"] == {"type": "stdio", "command": "uvx", "args": setup.UVX_COMMAND[1:]}
+    settings = json.loads((repo / ".claude" / "settings.json").read_text())
+    assert settings["hooks"] == hooks["hooks"] and settings["enabledMcpjsonServers"] == ["greenlight"]
+    codex = tomllib.loads((repo / ".codex" / "config.toml").read_text())["mcp_servers"]["greenlight"]
+    assert codex["command"] == "uvx" and codex["args"] == setup.UVX_COMMAND[1:] and codex["startup_timeout_sec"] == 120
+    assert all("already" in line for line in setup.project_files(repo))
+
+
+def test_claude_desktop_gets_one_entry_per_repo(tmp_path):
+    path = tmp_path / "Claude" / "claude_desktop_config.json"
+    assert "added greenlight-game" in setup.claude_desktop("acme/game", path)
+    assert "already" in setup.claude_desktop("acme/game", path)
+    setup.claude_desktop("acme/tools", path)
+    servers = json.loads(path.read_text())["mcpServers"]
+    assert servers["greenlight-game"] == {"command": sys.executable, "args": ["-m", "greenlight", "mcp", "--repo", "acme/game"]}
+    assert set(servers) == {"greenlight-game", "greenlight-tools"}
+    path.write_text("{not json")
+    with pytest.raises(ValueError, match="isn't valid JSON"):
+        setup.claude_desktop("acme/game", path)
+
+
+def test_setup_project_mode_writes_repo_files_not_user_config(checkout, monkeypatch, tmp_path, capsys):
+    repo, _ = checkout
+    desktop = tmp_path / "desktop.json"
+    monkeypatch.setattr(setup, "claude_desktop_path", lambda: desktop)
+    monkeypatch.setattr(setup, "claude_mcp", lambda dry_run=False: pytest.fail("project mode registered at user scope"))
+    assert cli.main(["setup", str(repo), "--project", "--claude-desktop", "--repo", "acme/proj"]) == 0
+    out = capsys.readouterr().out
+    assert "project: .mcp.json: added" in out and "commit .mcp.json" in out
+    assert "greenlight-proj" in json.loads(desktop.read_text())["mcpServers"]
+    assert cli.main(["setup", str(repo), "--no-claude", "--claude-desktop"]) == 3  # no --repo, no GitHub remote
+    assert "needs the GitHub repo" in capsys.readouterr().err

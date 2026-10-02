@@ -29,6 +29,7 @@ def test_token_precedence(monkeypatch, tmp_path):
     for var in github.TOKEN_VARS:
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("PATH", str(tmp_path))  # no gh on PATH
+    monkeypatch.setattr(github, "_GH_FALLBACKS", [])
     assert github.resolve_token() == (None, "none")
     monkeypatch.setenv("GITHUB_TOKEN", "a")
     monkeypatch.setenv("GH_TOKEN", "b")
@@ -40,10 +41,14 @@ def test_token_precedence(monkeypatch, tmp_path):
 def test_token_from_gh_cli(monkeypatch, tmp_path):
     for var in github.TOKEN_VARS:
         monkeypatch.delenv(var, raising=False)
-    gh_bin = tmp_path / "gh"
-    gh_bin.write_text("#!/bin/sh\n[ \"$1 $2\" = \"auth token\" ] && echo from-gh\n")
-    gh_bin.chmod(0o755)
+    if os.name == "nt":
+        (tmp_path / "gh.bat").write_text('@echo off\r\nif "%1 %2"=="auth token" echo from-gh\r\n')
+    else:
+        gh_bin = tmp_path / "gh"
+        gh_bin.write_text("#!/bin/sh\n[ \"$1 $2\" = \"auth token\" ] && echo from-gh\n")
+        gh_bin.chmod(0o755)
     monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setattr(github, "_GH_FALLBACKS", [])
     assert github.resolve_token() == ("from-gh", "gh auth token")
 
 

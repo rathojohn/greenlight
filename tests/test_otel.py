@@ -13,6 +13,7 @@ import pytest
 
 from greenlight import analysis, otel
 from greenlight.db import connect
+from tests.conftest import child_env
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -60,7 +61,7 @@ class Collector:
 def demo(tmp_path_factory):
     db = tmp_path_factory.mktemp("otel") / "demo.db"
     subprocess.run([sys.executable, "-m", "greenlight.demo", "--db", str(db), "--days", "14"],
-                   check=True, capture_output=True, cwd=ROOT, env={"PYTHONPATH": str(ROOT), "PATH": "/usr/bin:/bin"})
+                   check=True, capture_output=True, cwd=ROOT, env=child_env())
     return str(db)
 
 

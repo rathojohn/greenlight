@@ -13,7 +13,9 @@ CI/CD observability on OpenTelemetry, built from git, GitHub and test reports. I
 - `issues.py`: plans and applies one GitHub issue per flaky test and perf regression.
 - `ci.py` + `action.yml`: GitHub Actions history on the `greenlight-data` branch, gate, step summary, PR comment.
 - `otel.py`: OTLP/HTTP JSON export (traces and metrics, semantic conventions) and receive/import.
-- `config.py`: `greenlight.toml`. `cli.py`: every command. `server.py`: MCP (stdio); a user-scoped server starts in `~/.claude`, so it finds the project from `CLAUDE_PROJECT_DIR`. `setup.py`: `greenlight setup` (config, `claude mcp add` at user scope with this install's interpreter, Codex config, agent rules). `web.py` + `dashboard.py` + `ui/index.html`: dashboard and `--export` snapshot.
+- `config.py`: `greenlight.toml`. `cli.py`: every command. `server.py`: MCP over stdio (`greenlight mcp`) and streamable HTTP (`greenlight serve`). Checkout mode reads the project the agent works in (a user-scoped Claude Code server starts in `~/.claude`, so it finds the project from `CLAUDE_PROJECT_DIR`); repo mode (`--repo`, `GREENLIGHT_REPO`) reads a GitHub repo through `remote.py`. `setup.py`: `greenlight setup` (config, Claude Code user scope, `--project` files, `--claude-desktop`, `--codex`, agent rules).
+- `remote.py`: repo mode. A cache clone per repo under `GREENLIGHT_HOME` (blobless, no checkout), the config for it (a committed greenlight.toml, else guesses), and the `Refresher` that syncs it in the background.
+- `Dockerfile` + the `container` CI job: the image on ghcr.io, smoke-tested with `.github/scripts/smoke_mcp.py` before it's published. `web.py` + `dashboard.py` + `ui/index.html`: dashboard and `--export` snapshot.
 - `forecast.py`: optional Toto 2.0 forecasts.
 - `deploy/otel/`: local Grafana (otel-lgtm) behind a Collector. `integrations/survive-project/`: worked example.
 - `demo.py`: synthetic history for every view (`greenlight demo`).
@@ -26,7 +28,7 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/greenlight demo --db demo.db && .venv/bin/greenlight --db demo.db ui
 ```
 
-Tests use a fake GitHub (`tests/fakegithub.py`) and a fake OTLP collector; nothing calls real GitHub or a real backend. `tests/test_otel.py` parses every exported payload with the official OTLP protobuf messages (`opentelemetry-proto`, a dev dependency).
+Tests use a fake GitHub (`tests/fakegithub.py`), a fake OTLP collector and a local bare repo standing in for GitHub clones (`GREENLIGHT_GIT_BASE`); nothing calls real GitHub or a real backend. CI runs them on Linux, macOS and Windows. Subprocesses get `child_env()` (built from `os.environ`: Python won't start on Windows without `SYSTEMROOT`), and tests that must not find `gh` or `claude` use `hide_clis()`. `tests/test_otel.py` parses every exported payload with the official OTLP protobuf messages (`opentelemetry-proto`, a dev dependency).
 
 ## Decisions worth knowing
 
@@ -39,6 +41,10 @@ Tests use a fake GitHub (`tests/fakegithub.py`) and a fake OTLP collector; nothi
 - The dashboard binds to 127.0.0.1 and checks Host; writes need `X-Greenlight: 1`. Off loopback it needs a token, traded for an HttpOnly SameSite=Strict cookie. The OTLP receiver needs a Bearer token off loopback.
 - Dashboard charts follow the dataviz rules: status colors validated in both themes, rounded bar ends, 2px gaps in stacks, text in ink tokens, the flake grid's bar height carries fail share so amber vs red never rests on hue. Snapshot keys built by `snapKey()` in the page must match `snap_key()` in `web.py`.
 - The CLI imports only the standard library (the Action installs with `--no-deps`); `mcp`/`pydantic` are for the MCP server, Toto is optional.
+- Project MCP config (`setup --project`) starts the server with `uvx`, never a binary a SessionStart hook installs: Claude Code starts project MCP servers before hooks run (measured in a cloud session: the servers started 0.1 s before the hook, which took 13 s to install).
+- Partial clones fetch blobs one round trip each in `cat-file`, so `Repo.read_blobs` prefetches them in one `git fetch` (68 playtest records: 33 s down to under 1 s). Git calls go through `gitrepo.run_git`, which carries a cache clone's token in the environment, never in a config file.
+- The HTTP server takes its token in the URL path because claude.ai and ChatGPT connectors can't send an API key header; access logs are off so the token never lands in a log.
+- Windows: paths handed to git are made relative with forward slashes (`gitrepo._rel`), JSON files are read as `utf-8-sig`, and the Action converts `RUNNER_TEMP` to forward slashes and uses `python` (`python3` can be the Store stub).
 
 ## Writing conventions
 

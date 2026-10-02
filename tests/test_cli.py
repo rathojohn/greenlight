@@ -1,8 +1,10 @@
 import json
+from pathlib import Path
 
 import pytest
 
 from greenlight import cli, github
+from tests.conftest import hide_clis
 from tests.fakegithub import FakeGitHub
 from tests.test_playtest import game, record, sh, write_record  # noqa: F401 - fixture
 
@@ -14,7 +16,7 @@ def no_token(monkeypatch, tmp_path):
     monkeypatch.delenv("GREENLIGHT_CONFIG", raising=False)
     monkeypatch.delenv("GREENLIGHT_DB", raising=False)
     monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
-    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    hide_clis(monkeypatch)
 
 
 def test_init_writes_a_config_the_loader_accepts(game, no_token, capsys):  # noqa: F811
@@ -100,3 +102,11 @@ def test_demo_seeds_and_never_touches_a_real_db(tmp_path, capsys, no_token):
         record_run(conn, [TestResult("a::b", None, "pass", 1)], commit_sha="abc", source="local")
     assert cli.main(["demo", "--db", str(real)]) == 3
     assert "already holds real runs" in capsys.readouterr().err
+
+
+def test_version_says_which_copy_runs(capsys):
+    with pytest.raises(SystemExit) as e:
+        cli.main(["--version"])
+    assert e.value.code == 0
+    out = capsys.readouterr().out
+    assert out.startswith("greenlight ") and str(Path(cli.__file__).resolve().parent) in out and "\n" == out[-1]

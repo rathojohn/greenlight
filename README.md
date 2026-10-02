@@ -2,11 +2,14 @@
 
 CI/CD observability on OpenTelemetry, built from git, GitHub and your test reports.
 
-greenlight answers one question after every red test run: is this real, or is it the same flaky test again? Around that it tracks flaky tests, CI pipelines, deployments and DORA metrics from git and GitHub, sends all of it to any OpenTelemetry backend as traces and metrics, and gives you a local dashboard and an MCP server so Claude Code or Codex can ask it before rerunning anything.
+greenlight answers one question after every red test run: is this real, or is it the same flaky test again? Around that it tracks flaky tests, CI pipelines, deployments and DORA metrics from git and GitHub, sends all of it to any OpenTelemetry backend as traces and metrics, and gives you a local dashboard and an MCP server, so Claude and ChatGPT (Claude Code, Codex, Claude Desktop, claude.ai, ChatGPT) can ask it before rerunning anything.
+
+It runs on macOS, Linux and Windows (CI tests all three) and in a container.
 
 - [How it works](#how-it-works)
 - [Set up](#set-up)
-- [Claude Code, Codex and other agents](#claude-code-codex-and-other-agents)
+- [Use it from Claude or ChatGPT](#use-it-from-claude-or-chatgpt)
+- [Run it in a container](#run-it-in-a-container)
 - [OpenTelemetry](#opentelemetry)
 - [How auth works](#how-auth-works)
 - [GitHub: sync, issues and CI](#github-sync-issues-and-ci)
@@ -43,6 +46,7 @@ macOS or Linux:
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source $HOME/.local/bin/env
 uv tool install --python 3.12 "greenlight @ git+https://github.com/rathojohn/greenlight"
+uv tool update-shell
 ```
 
 Windows PowerShell (open a new terminal after the first line so PATH picks up uv):
@@ -50,7 +54,16 @@ Windows PowerShell (open a new terminal after the first line so PATH picks up uv
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 uv tool install --python 3.12 "greenlight @ git+https://github.com/rathojohn/greenlight"
+uv tool update-shell
 ```
+
+`uv tool update-shell` puts uv's tool folder (`~/.local/bin` on macOS and Linux) on your PATH. Open a new terminal afterwards and check which copy runs:
+
+```bash
+greenlight --version
+```
+
+It should print a version and a path inside the folder `uv tool dir` prints. If it says `command not found`, the new terminal didn't pick up the PATH change yet. If the path points into some other `.venv`, an older install is shadowing this one: run `deactivate`, or open a terminal without that venv active. An old copy also shows up as `invalid choice: 'setup'`.
 
 It doesn't update itself. To get the latest:
 
@@ -60,7 +73,7 @@ uv tool upgrade greenlight
 
 Then restart any open Claude Code or Codex sessions so they load the new MCP server. Nothing else needs redoing.
 
-Already installed it into a venv with pip? That still works; `greenlight setup` registers whichever install you run it from. `uv tool install` just means one copy instead of one per folder.
+Installed it into a venv before? Delete that venv once the uv install works, so there's one copy. `greenlight setup` registers whichever copy you run it from.
 
 ### 2. Try it on fake data (optional)
 
@@ -76,8 +89,9 @@ greenlight --db demo.db ui
 
 ### 3. Point it at a repo
 
+Go to your project's folder (your own clone, wherever it lives, like `cd ~/code/my-app`), then:
+
 ```bash
-cd your-repo
 greenlight setup
 greenlight auth
 greenlight sync
@@ -87,7 +101,7 @@ greenlight ui
 `setup` is safe to run again. It:
 
 - writes `greenlight.toml` with what it can guess from the clone (GitHub repo, release branch or notes, a test ledger), unless there is one already. It has no secrets, so commit it or ignore it, either works.
-- registers the MCP server with Claude Code for every project on this machine (`--codex` adds it to Codex too, `--no-claude` skips it).
+- registers the MCP server with Claude Code for every project on this machine (`--codex` adds it to Codex too, `--no-claude` skips it). For a team repo, `--project` writes the repo's own MCP config instead: see [Use it from Claude or ChatGPT](#use-it-from-claude-or-chatgpt).
 - prints a short rule for `CLAUDE.md` / `AGENTS.md` that tells agents to record test runs and follow the gate (`--agent-rules` appends it for you).
 
 `auth` shows where the GitHub token comes from and what it can do, `sync` pulls PRs, issues, Actions runs and deployments (and exports to OTel if an endpoint is set), and `ui` opens the dashboard.
@@ -111,39 +125,95 @@ Any runner that writes JUnit XML works: pytest, vitest `--reporter=junit`, jest 
 
 See [CI with the GitHub Action](#ci-with-the-github-action). CI runs land in the same history, so a test that flaked in CI is known to be flaky on your laptop too, once you `sync`.
 
-## Claude Code, Codex and other agents
+## Use it from Claude or ChatGPT
 
-`greenlight setup` covers the usual case. Here's what it does, if you'd rather do it by hand.
+greenlight is an MCP server, so any Claude or ChatGPT app that takes MCP servers can ask it what's flaky, judge a test run, or report on CI and deploys. Pick the row for where you work:
 
-Claude Code, available in every project:
+| Where | Do this once | Data comes from |
+| --- | --- | --- |
+| Claude Code (terminal, desktop, or claude.ai/code on the web) and Codex, in a repo | `greenlight setup --project` in the repo, then commit the three files it writes | the checkout the agent works in |
+| Claude Code or Codex, in every project on your machine | `greenlight setup` (Claude Code), `greenlight setup --codex` (Codex CLI, IDE and the ChatGPT desktop app) | the checkout the agent works in |
+| Claude Desktop chat | `greenlight setup --claude-desktop` | GitHub, no clone |
+| claude.ai or ChatGPT, on the web or your phone | run `greenlight serve` (or the container) where they can reach it, then add its URL as a connector | GitHub, no clone |
+| Codex cloud tasks | no MCP servers there yet: install the CLI in the environment's setup script and use `greenlight run` | the task's checkout |
+
+### Claude Code and Codex in a repo
+
+In the repo:
+
+```bash
+greenlight setup --project
+git add .mcp.json .claude/settings.json .codex/config.toml
+git commit -m "Start greenlight in Claude Code and Codex sessions"
+```
+
+That writes the repo's own MCP config: `.mcp.json` for Claude Code, `.codex/config.toml` for Codex, and `.claude/settings.json` approving the server so nobody gets asked. Each starts greenlight through `uvx`, which downloads it on first use, so nobody installs anything by hand. Anyone with [uv](https://docs.astral.sh/uv/) gets it, and Claude Code on the web already has uv.
+
+That's also why it works in Claude Code on the web: each session is a fresh container, and Claude Code starts project MCP servers before SessionStart hooks run, so a server that a hook installs isn't there yet when Claude looks for it. `uvx` installs it on the spot. Codex only reads `.codex/config.toml` in projects you've marked as trusted.
+
+### Every project on your machine
+
+`greenlight setup` registers the server with Claude Code at user scope, run by the Python greenlight was installed with. By hand, that's:
 
 ```bash
 claude mcp add --transport stdio --scope user greenlight -- ~/.local/share/uv/tools/greenlight/bin/python -m greenlight.server
 ```
 
-That path is where `uv tool install` puts it on macOS and Linux. `greenlight setup --dry-run` prints the exact command for your install, Windows included.
+That path is where `uv tool install` puts it on macOS and Linux. `greenlight setup --dry-run` prints the exact command for your install, Windows included. `greenlight setup --codex` adds the same server to `~/.codex/config.toml`, which the Codex CLI, its IDE extension and the ChatGPT desktop app share.
 
-Codex, in `~/.codex/config.toml` (what `greenlight setup --codex` adds):
+One server covers every repo: Claude Code tells it which project the session is in, and Codex starts it in the project folder, so it reads that repo's `greenlight.toml`. Restart open sessions after `setup` or an upgrade.
 
-```toml
-[mcp_servers.greenlight]
-command = "/Users/you/.local/share/uv/tools/greenlight/bin/python"
-args = ["-m", "greenlight.server"]
+### Claude Desktop
+
+```bash
+greenlight setup --claude-desktop --repo rathojohn/greenlight
 ```
 
-One server covers every repo. Claude Code tells it which project the session is in, and Codex starts it in the project folder, so it reads that repo's `greenlight.toml` for the DB and settings. Restart open sessions after `setup` or an upgrade.
+That example adds this repo; give it yours, or run it inside a clone and leave `--repo` off. Quit and reopen Claude Desktop. setup adds one entry per repo (`greenlight-<name>`) to Claude Desktop's config file on macOS or Windows, run by the Python greenlight was installed with, since Claude Desktop doesn't get your shell's PATH. greenlight keeps a small clone of the repo under `~/.greenlight` and refreshes it every 10 minutes.
 
-For a team, a project-scoped `.mcp.json` in the repo works too, as long as everyone has greenlight installed (`uv tool install` puts `greenlight-mcp` on PATH). Claude Code asks each person once before starting it:
+For a private repo, greenlight needs a token Claude Desktop can see. It asks the GitHub CLI if you're logged in (`gh auth login`), and finds Homebrew's `gh` even though Claude Desktop doesn't have Homebrew on its PATH.
 
-```json
-{
-  "mcpServers": {
-    "greenlight": { "type": "stdio", "command": "greenlight-mcp" }
-  }
-}
+### claude.ai and ChatGPT (web and phone)
+
+These connect to MCP servers by URL from their own servers, so greenlight has to run somewhere on the internet with HTTPS. It reads the repo from GitHub and refreshes it every 10 minutes, so wherever it runs needs no clone.
+
+1. Run it. With Docker on macOS or Linux:
+
+   ```bash
+   docker run -d --name greenlight -p 8000:8000 -v greenlight-data:/data \
+     -e GREENLIGHT_REPO=rathojohn/greenlight \
+     -e GREENLIGHT_MCP_TOKEN=$(openssl rand -hex 16) \
+     ghcr.io/rathojohn/greenlight
+   docker logs greenlight
+   ```
+
+   Windows PowerShell:
+
+   ```powershell
+   docker run -d --name greenlight -p 8000:8000 -v greenlight-data:/data `
+     -e GREENLIGHT_REPO=rathojohn/greenlight `
+     -e GREENLIGHT_MCP_TOKEN=$([guid]::NewGuid().ToString("N")) `
+     ghcr.io/rathojohn/greenlight
+   docker logs greenlight
+   ```
+
+   Use your repo instead of `rathojohn/greenlight`. For a private one, also pass a token: add `-e GITHUB_TOKEN=$(gh auth token)` (the same in PowerShell). `docker logs` prints the path to connect to, like `http://localhost:8000/9f2c4e.../mcp`. Without Docker, `greenlight serve --repo rathojohn/greenlight --host 0.0.0.0` does the same.
+
+2. Give it an HTTPS address. To try it from your own machine, a Cloudflare quick tunnel is free and needs no account: `cloudflared tunnel --url http://localhost:8000` prints an `https://...trycloudflare.com` address. It changes every run, and your machine has to stay on. To keep it up, run the same container on any host that runs containers; it listens on `$PORT` when the host sets one.
+
+3. Add the connector. The URL is the address from step 2 plus the path from `docker logs`: with `https://abc.trycloudflare.com` and `/9f2c4e.../mcp`, it's `https://abc.trycloudflare.com/9f2c4e.../mcp`.
+   - claude.ai: Settings, Connectors, Add custom connector. It shows up in Claude Desktop too. Free plans get one custom connector.
+   - ChatGPT: turn on Developer mode (Settings, Security and login), then add it at chatgpt.com/plugins with the plus button. Developer mode is on paid plans, and ChatGPT asks before running a tool that changes something.
+
+The token in that URL is the password: anyone with the URL can read the repo's test and CI history through it, quarantine tests, and, if the server's GitHub token can write issues, open flaky-test issues. Start the container with a new token to revoke it. Clients that can send headers (Claude Code with `--header`, Codex with `bearer_token_env_var`) can use `/mcp` with `Authorization: Bearer <token>` instead. `--no-auth` turns the token off, which only makes sense for a public repo.
+
+### Codex cloud and other cloud agents
+
+Codex cloud doesn't start MCP servers yet. Install the CLI in the environment's setup script and let the agent rule below do the rest:
+
+```bash
+uv tool install "greenlight @ git+https://github.com/rathojohn/greenlight"
 ```
-
-Claude Code on the web and other cloud sessions start from a fresh container every time, so the server registered on your laptop isn't there. Install greenlight in a SessionStart hook and have the agent use the CLI (`greenlight run -- <test command>`). `integrations/survive-project/` has a working hook and skill.
 
 ### What agents should do
 
@@ -165,6 +235,7 @@ In practice: the agent runs the tests through greenlight, reruns only the flaky 
 
 | Tool | Writes | Purpose |
 | --- | --- | --- |
+| greenlight_overview | no | start here: the latest run's decision, flakiest tests, Actions health and DORA in one call |
 | greenlight_gate_junit | local DB | record a JUnit report from the project and return the decision, in one call |
 | greenlight_triage_run | no | the gate's decision for a run already recorded, with per-failure detail |
 | greenlight_playtest_gate | local DB | sync a test ledger in git, then gate the run just made |
@@ -176,6 +247,34 @@ In practice: the agent runs the tests through greenlight, reruns only the flaky 
 | greenlight_sync | local DB, reads GitHub | pull everything configured |
 | greenlight_duration_regressions, greenlight_suite_forecast | no | Toto forecasts |
 | greenlight_query | no | read-only SQL over every table |
+
+Read from GitHub (Claude Desktop with `--repo`, claude.ai and ChatGPT connectors, the container), there's no checkout of yours, so the two tools that record a local test run (`greenlight_gate_junit`, `greenlight_playtest_gate`) aren't offered.
+
+## Run it in a container
+
+The image is `ghcr.io/rathojohn/greenlight`, for amd64 and arm64 (Apple Silicon too), built from this repo's `Dockerfile` on every push to main. CI starts it and checks the MCP server against GitHub before publishing.
+
+```bash
+docker run --rm ghcr.io/rathojohn/greenlight --version
+```
+
+- With no command it serves MCP over HTTP: see [claude.ai and ChatGPT](#claudeai-and-chatgpt-web-and-phone).
+- Any CLI command works in place of that, like `--version` above, or `mcp --repo <owner/name>` for the stdio server (run with `docker run -i`, as in the Claude Desktop example below).
+- Cache clones and the database live in `/data`. Mount a volume there (`-v greenlight-data:/data`) to keep them across restarts.
+
+Claude Desktop can run it too, in its config file:
+
+```json
+{
+  "mcpServers": {
+    "greenlight": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "-v", "greenlight-data:/data", "ghcr.io/rathojohn/greenlight",
+               "mcp", "--repo", "rathojohn/greenlight"]
+    }
+  }
+}
+```
 
 ## OpenTelemetry
 
@@ -239,7 +338,9 @@ If your tests already emit OpenTelemetry, skip JUnit. `greenlight otel receive` 
 | OTLP backend | `OTEL_EXPORTER_OTLP_HEADERS` | your environment or a CI secret |
 | Dashboard | none on `127.0.0.1`; with `--host`, a token traded once for an HttpOnly, SameSite=Strict cookie | in memory, printed once at start |
 | OTLP receiver | none on loopback; `--token` (Bearer) when it listens elsewhere | in memory |
-| MCP server | none: it's a local stdio process your agent starts | |
+| MCP server over stdio | none: it's a local process your agent starts | |
+| MCP server over HTTP | a token in the URL path (`/<token>/mcp`) or an `Authorization: Bearer` header | `$GREENLIGHT_MCP_TOKEN`; never logged |
+| Clones greenlight keeps itself | the GitHub token above, handed to git in its environment for each call | never written to disk |
 
 `greenlight auth` prints where the token came from (never the token), the access it has and the rate limit left. Public repos sync without a token at 60 requests an hour.
 
@@ -393,6 +494,21 @@ junit = "reports/*.xml"          # what `greenlight run` records (default: any J
 enabled = false
 ```
 
+Read from GitHub (`--repo`), greenlight uses a `greenlight.toml` committed on the default branch if there is one, and otherwise guesses what marks a release the way `init` does: release notes, then a `release` branch, then GitHub Releases.
+
+Environment variables:
+
+| Variable | What |
+| --- | --- |
+| `GREENLIGHT_REPO` | `owner/name` for `greenlight mcp` and `greenlight serve` to read from GitHub |
+| `GREENLIGHT_MCP_TOKEN` | the HTTP server's token |
+| `GREENLIGHT_HOME` | where greenlight keeps its clones, databases and `config.toml` (default `~/.greenlight`; `/data` in the container) |
+| `GREENLIGHT_DB` | one database file, overriding everything else |
+| `GREENLIGHT_CONFIG` | one `greenlight.toml`, overriding the lookup |
+| `GREENLIGHT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` | GitHub token (see [How auth works](#how-auth-works)) |
+| `GREENLIGHT_GIT_BASE` | where repos are cloned from, for GitHub Enterprise (default `https://github.com`) |
+| `PORT` | the HTTP server's port, when a host sets it |
+
 ### Test ledgers in git
 
 Some projects run tests outside CI (in coding-agent sessions, on a laptop) and commit a small record of each run instead. `[playtest]` reads one such format, `tools/playtest/runs/*.json`, from every branch: each record names the commit, the uncommitted files it tested (by content hash), and per suite which checks failed or ran slower than a baseline. Records name only failures, so greenlight infers that a check passed when its suite passed, which is exact on the same code. `greenlight playtest gate` syncs and gates the run just made, and prints the command that reruns only the flaky suites. `integrations/survive-project/` is a worked example. Other ledger formats are a small adapter away (`greenlight/playtest.py` is about 300 lines).
@@ -400,6 +516,8 @@ Some projects run tests outside CI (in coding-agent sessions, on a laptop) and c
 ## Limits
 
 - Polling, not streaming: data is as fresh as the last `sync`.
+- Read from GitHub (Claude Desktop, connectors, the container), data is up to 10 minutes old, and a fresh server's first answer waits on its first sync (a few seconds for a small repo; a busy one can take a minute, and the tool says to try again).
+- Test runs recorded with `greenlight run` stay in the database of the machine that ran them. CI runs are shared through the data branch, and playtest ledgers through git.
 - The repo is the backup. The data branch grows by a few KB per CI job.
 - The OTel CI/CD conventions are still in development upstream, so attribute names may change in later releases.
 - One repo per DB. Point `db` at a different file per project.

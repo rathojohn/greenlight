@@ -16,12 +16,15 @@
   greenlight sweep [--apply]                   quarantine candidates / release candidates
   greenlight trends                            Toto duration regressions + rerun forecast
   greenlight ui                                dashboard at http://127.0.0.1:8765
+  greenlight mcp [--repo owner/name]           MCP server over stdio (Claude Code, Codex, Claude Desktop)
+  greenlight serve --repo owner/name           MCP server over HTTP (claude.ai and ChatGPT connectors)
 """
 from __future__ import annotations
 
 import argparse
 import glob
 import json
+import os
 import sys
 from contextlib import closing
 from datetime import datetime
@@ -107,7 +110,7 @@ def cmd_init(a: argparse.Namespace) -> int:
 
 def cmd_setup(a: argparse.Namespace) -> int:
     import importlib.util
-    from . import setup
+    from . import remote, setup
     target = Path(a.path or ".").resolve()
     out = target / config.FILE_NAME
     if out.exists():
@@ -120,8 +123,19 @@ def cmd_setup(a: argparse.Namespace) -> int:
     if importlib.util.find_spec("mcp") is None:
         print("MCP: the mcp package isn't installed here, so the server can't start. Reinstall greenlight with its "
               "dependencies (no --no-deps).")
-    if not a.no_claude:
+    if a.project:
+        for line in setup.project_files(target, a.dry_run):
+            print("project: " + line)
+        if not a.dry_run:
+            print("project: commit .mcp.json, .claude/settings.json and .codex/config.toml, and every Claude Code "
+                  "session on this repo (web included) and every Codex session starts greenlight. They need uv.")
+    elif not a.no_claude:
         print("Claude Code: " + setup.claude_mcp(a.dry_run))
+    if a.claude_desktop:
+        repo = a.repo or config.remote_repo(str(target))
+        if not repo:
+            raise ValueError("--claude-desktop needs the GitHub repo: run it in a clone, or pass --repo owner/name")
+        print("Claude Desktop: " + setup.claude_desktop(remote.check(repo), dry_run=a.dry_run))
     if a.codex:
         print("Codex: " + (f"would add to ~/.codex/config.toml:\n{setup.codex_snippet()}" if a.dry_run else setup.codex_mcp()))
     has_rules = any(setup.RULES_MARKER in (target / n).read_text(encoding="utf-8")
@@ -161,7 +175,7 @@ def _fresh_reports(root: str, since: float) -> list[str]:
 def _with_pytest_report(cmd: list[str], out_dir: str) -> tuple[list[str], str | None]:
     """pytest writes JUnit XML only when asked; ask, unless the command already does."""
     import os
-    is_pytest = any(os.path.basename(c) == "pytest" for c in cmd[:4])  # pytest, python -m pytest, uv run pytest
+    is_pytest = any(os.path.splitext(os.path.basename(c))[0] == "pytest" for c in cmd[:4])  # also pytest.exe
     if not is_pytest or any(c.startswith("--junitxml") or c.startswith("--junit-xml") for c in cmd):
         return cmd, None
     report = os.path.join(out_dir, "junit.xml")
@@ -446,6 +460,25 @@ def cmd_demo(a: argparse.Namespace) -> int:
     return 0
 
 
+def _server(a: argparse.Namespace):  # noqa: ANN202
+    import os
+    if a.db:  # the server opens the DB itself; --db still wins
+        os.environ["GREENLIGHT_DB"] = a.db
+    from . import server
+    server.configure(a.repo, getattr(a, "project", None))
+    return server
+
+
+def cmd_mcp(a: argparse.Namespace) -> int:
+    _server(a).run_stdio()
+    return 0
+
+
+def cmd_serve(a: argparse.Namespace) -> int:
+    _server(a).serve_http(a.host, a.port, a.token, a.no_auth)
+    return 0
+
+
 def cmd_ui(a: argparse.Namespace) -> int:
     from . import web
     web.set_incident_labels(a.cfg.get("delivery", "incident_labels"))
@@ -457,8 +490,19 @@ def cmd_ui(a: argparse.Namespace) -> int:
     return 0
 
 
+def _version() -> str:
+    """Version plus where this copy lives, so a stale install shadowing a new one is easy to spot."""
+    from importlib import metadata
+    try:
+        v = metadata.version("greenlight")
+    except metadata.PackageNotFoundError:
+        v = "unknown"
+    return f"greenlight {v} ({Path(__file__).resolve().parent}, Python {sys.version.split()[0]})"
+
+
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="greenlight")
+    p = argparse.ArgumentParser(prog="greenlight", formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--version", action="version", version=_version())
     p.add_argument("--db", help="SQLite path (default: $GREENLIGHT_DB, then greenlight.toml, then ~/.greenlight/greenlight.db)")
     p.add_argument("--config", help="greenlight.toml path (default: $GREENLIGHT_CONFIG, then this folder or a parent)")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -474,9 +518,15 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--force", action="store_true")
     s.set_defaults(fn=cmd_init)
 
-    s = sub.add_parser("setup", help="greenlight.toml, plus the MCP server in Claude Code (and Codex) for this repo")
+    s = sub.add_parser("setup", help="greenlight.toml, plus the MCP server in Claude Code, Codex or Claude Desktop")
     s.add_argument("path", nargs="?", help="repo folder (default: here)")
-    s.add_argument("--codex", action="store_true", help="also add the server to ~/.codex/config.toml")
+    s.add_argument("--project", action="store_true", help="write the repo's own .mcp.json, .claude/settings.json and "
+                   ".codex/config.toml (commit them) instead of registering at user scope")
+    s.add_argument("--claude-desktop", action="store_true", help="add the server to Claude Desktop, reading this repo "
+                   "from GitHub")
+    s.add_argument("--repo", help="owner/name for --claude-desktop (default: this clone's GitHub repo)")
+    s.add_argument("--codex", action="store_true", help="also add the server to ~/.codex/config.toml (Codex CLI, IDE "
+                   "and ChatGPT desktop)")
     s.add_argument("--agent-rules", action="store_true", help="append the gate rule to CLAUDE.md / AGENTS.md")
     s.add_argument("--no-claude", action="store_true", help="skip registering with Claude Code")
     s.add_argument("--dry-run", action="store_true", help="say what would change, change nothing")
@@ -604,6 +654,23 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--lookback-days", type=int, default=90)
     s.set_defaults(fn=cmd_trends)
 
+    s = sub.add_parser("mcp", help="the MCP server over stdio (what Claude Code, Codex and Claude Desktop start)")
+    s.add_argument("--repo", help="owner/name: read it from GitHub, no clone needed (default: $GREENLIGHT_REPO, "
+                                  "else the checkout you're in)")
+    s.add_argument("--project", help="the checkout to work in (default: $CLAUDE_PROJECT_DIR, else here)")
+    s.set_defaults(fn=cmd_mcp)
+
+    s = sub.add_parser("serve", help="the MCP server over HTTP, for claude.ai and ChatGPT connectors")
+    s.add_argument("--repo", help="owner/name to read from GitHub (default: $GREENLIGHT_REPO, else the checkout you're in)")
+    s.add_argument("--host", default="127.0.0.1", help="bind address; 0.0.0.0 in a container or behind a host")
+    s.add_argument("--port", type=int, default=int(os.environ.get("PORT") or 8000),
+                   help="default: $PORT (hosts like Render and Cloud Run set it), else 8000")
+    s.add_argument("--token", help="secret for the URL (/<token>/mcp) or an Authorization: Bearer header "
+                                   "(default: $GREENLIGHT_MCP_TOKEN, else a random one off loopback)")
+    s.add_argument("--no-auth", action="store_true", help="no token at all. Only for a public repo you don't mind "
+                                                          "anyone reading through this server")
+    s.set_defaults(fn=cmd_serve)
+
     s = sub.add_parser("ui", help="local dashboard on 127.0.0.1, or --export a read-only HTML snapshot")
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--host", default="127.0.0.1",
@@ -616,8 +683,12 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(fn=cmd_ui)
 
     a = p.parse_args(argv)
+    if sys.platform == "win32":  # a redirected stream there uses the legacy code page: don't crash on a test name
+        for stream in (sys.stdout, sys.stderr):
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(errors="replace")
     try:
-        a.cfg = config.load(a.config) if a.cmd not in ("init", "setup") else config.Config()
+        a.cfg = config.load(a.config) if a.cmd not in ("init", "setup", "mcp", "serve") else config.Config()
         set_config_db(a.cfg.db)
         return a.fn(a)
     except (LookupError, ValueError, FileNotFoundError, RuntimeError) as e:

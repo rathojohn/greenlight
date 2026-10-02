@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import shutil
 import sys
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
@@ -12,6 +14,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from greenlight.db import connect  # noqa: E402
 from greenlight.ingest import ingest_files  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def hide_clis(monkeypatch) -> None:
+    """Leave git on PATH and nothing else greenlight shells out to (gh, claude), on any OS."""
+    from greenlight import github
+    git = shutil.which("git")
+    monkeypatch.setenv("PATH", os.path.dirname(git) if git else "")
+    monkeypatch.setattr(github, "_GH_FALLBACKS", [])
+
+
+def child_env(**extra: str) -> dict[str, str]:
+    """The environment for a greenlight subprocess: this one, minus anything pointing at real data or
+    tokens. Copied rather than built from scratch, since Python won't start on Windows without SYSTEMROOT."""
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("GREENLIGHT_", "GH_", "GITHUB_")) and k != "CLAUDE_PROJECT_DIR"}
+    return {**env, "PYTHONPATH": str(ROOT), **extra}
 
 
 def junit_xml(cases: list[tuple[str, str, float, str | None]]) -> str:

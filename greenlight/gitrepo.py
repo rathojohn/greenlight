@@ -1,11 +1,13 @@
 """Read-only helpers over a local git clone: refs, files on refs, and commit metadata."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
 import subprocess
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 
 
@@ -22,15 +24,45 @@ class GitError(RuntimeError):
     pass
 
 
+_AUTH_ENV: dict[str, str] = {}
+
+
+def set_auth(token: str | None, host: str = "https://github.com/") -> None:
+    """Send a token with git's HTTPS requests to host, for the cache clones greenlight keeps itself. It
+    travels in each git call's environment (GIT_CONFIG_*), never in a config file on disk."""
+    _AUTH_ENV.clear()
+    if token:
+        basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+        _AUTH_ENV.update({"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"http.{host}.extraheader",
+                          "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic}"})
+
+
+def run_git(args: list[str], **kw) -> subprocess.CompletedProcess:  # noqa: ANN003
+    """Every git call goes through here, so the cache clones' credentials reach lazy blob fetches too.
+    GIT_TERMINAL_PROMPT=0: fail instead of waiting on a password prompt nobody can see."""
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", **_AUTH_ENV}
+    try:
+        return subprocess.run(["git", *args], env=env, **kw)
+    except FileNotFoundError as e:
+        raise GitError("git is not installed or not on PATH") from e
+
+
+def _rel(path: str, top: str) -> str:
+    """A path as git names it: from the repo root, with forward slashes (Windows included)."""
+    if not os.path.isabs(path):
+        return path.replace(os.sep, "/")
+    try:
+        return os.path.relpath(path, top).replace(os.sep, "/")
+    except ValueError:  # another drive on Windows: can't be inside the repo
+        return path
+
+
 @dataclass
 class Repo:
     path: str
 
     def git(self, *args: str, check: bool = True, input: bytes | None = None) -> str:
-        try:
-            out = subprocess.run(["git", "-C", self.path, *args], capture_output=True, check=False, input=input)
-        except FileNotFoundError as e:
-            raise GitError("git is not installed or not on PATH") from e
+        out = run_git(["-C", self.path, *args], capture_output=True, check=False, input=input)
         if check and out.returncode != 0:
             msg = out.stderr.decode(errors="replace").strip() or f"exit {out.returncode}"
             raise GitError(f"git {' '.join(args[:3])}: {msg}")
@@ -44,7 +76,7 @@ class Repo:
         if not top:
             return {}
         root = Repo(top)
-        skip = {os.path.relpath(e, top) if os.path.isabs(e) else e for e in (exclude or ())}
+        skip = {_rel(e, top) for e in (exclude or ())}
         names = set(filter(None, root.git("diff", "--name-only", "-z", "HEAD", check=False).split("\0")))
         names |= set(filter(None, root.git("ls-files", "--others", "--exclude-standard", "-z", check=False).split("\0")))
         names = sorted(n for n in names if n not in skip)
@@ -117,16 +149,30 @@ class Repo:
 
     def fetch(self, remote: str, branch: str) -> bool:
         """Fetch one branch into refs/remotes/<remote>/<branch>. False if it isn't there or the network is."""
-        out = subprocess.run(["git", "-C", self.path, "fetch", "-q", remote, f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}"],
-                             capture_output=True)
+        out = run_git(["-C", self.path, "fetch", "-q", remote, f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}"],
+                      capture_output=True)
         return out.returncode == 0
+
+    @cached_property
+    def partial(self) -> bool:
+        """A partial clone, like greenlight's own cache clones: file contents come from the server on demand."""
+        return self.git("config", "--get", "remote.origin.promisor", check=False).strip() == "true"
+
+    def prefetch(self, shas: list[str]) -> None:
+        """In a partial clone, fetch many blobs in one round trip each 200, instead of the one-by-one fetch
+        `cat-file` would do (68 records: 33 s down to under 1 s). Failures fall back to that slow path."""
+        for i in range(0, len(shas), 200):  # well under Windows' command line limit
+            run_git(["-C", self.path, "-c", "fetch.negotiationAlgorithm=noop", "fetch", "-q", "--no-tags",
+                     "--no-write-fetch-head", "--filter=blob:none", "origin", *shas[i:i + 200]], capture_output=True)
 
     def read_blobs(self, shas: list[str]) -> dict[str, bytes]:
         """Contents of many blobs in one `git cat-file --batch` call."""
         if not shas:
             return {}
-        raw = subprocess.run(["git", "-C", self.path, "cat-file", "--batch"], input="\n".join(shas).encode() + b"\n",
-                             capture_output=True, check=True).stdout
+        if self.partial:
+            self.prefetch(shas)
+        raw = run_git(["-C", self.path, "cat-file", "--batch"], input="\n".join(shas).encode() + b"\n",
+                      capture_output=True, check=True).stdout
         out: dict[str, bytes] = {}
         pos = 0
         while pos < len(raw):
@@ -141,7 +187,7 @@ class Repo:
         return out
 
     def show(self, ref: str, path: str) -> str | None:
-        out = subprocess.run(["git", "-C", self.path, "show", f"{ref}:{path}"], capture_output=True)
+        out = run_git(["-C", self.path, "show", f"{ref}:{path}"], capture_output=True)
         return out.stdout.decode("utf-8", errors="replace") if out.returncode == 0 else None
 
     def commits_between(self, base: str | None, head: str, limit: int = 2000) -> list[tuple[str, str]]:

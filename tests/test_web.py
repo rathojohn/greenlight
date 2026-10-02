@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from greenlight import web
+from tests.conftest import child_env
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -17,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def demo_db(tmp_path_factory):
     db = tmp_path_factory.mktemp("demo") / "demo.db"
     subprocess.run([sys.executable, "-m", "greenlight.demo", "--db", str(db), "--days", "21"],
-                   check=True, capture_output=True, cwd=ROOT, env={"PYTHONPATH": str(ROOT), "PATH": "/usr/bin:/bin"})
+                   check=True, capture_output=True, cwd=ROOT, env=child_env())
     return str(db)
 
 
