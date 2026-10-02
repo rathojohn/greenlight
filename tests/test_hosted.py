@@ -181,3 +181,58 @@ def test_otlp_spans_land_on_the_server(server):
     assert call(base + "/v1/traces", "POST", {**auth, "Content-Type": "application/json"}, payload)[0] == 200
     with closing(connect(str(db), readonly=True)) as conn:
         assert conn.execute("SELECT COUNT(*) FROM results WHERE test_id = 't.x::y'").fetchone()[0] == 1
+
+
+def test_sign_in_page_takes_the_token_in_a_form(server):
+    base, _ = server
+    form = {"Content-Type": "application/x-www-form-urlencoded"}
+    status, _, page = call(base + "/login")
+    assert status == 200 and b'type="password"' in page and b'autocomplete="current-password"' in page
+    status, _, page = call(base + "/login", "POST", form, b"username=greenlight&token=wrong")
+    assert status == 401 and b"doesn't match" in page
+    status, headers, _ = call(base + "/login", "POST", form, f"username=greenlight&token={TOKEN}".encode())
+    cookie = headers["Set-Cookie"]
+    assert status == 303 and headers["Location"] == "/" and "HttpOnly" in cookie and "Max-Age=34560000" in cookie
+    jar = {"Cookie": cookie.split(";")[0]}
+    assert call(base + "/", headers=jar)[0] == 200
+    assert json.loads(call(base + "/api/session", headers=jar)[2]) == {"auth": "cookie"}
+    assert json.loads(call(base + "/api/session", headers={"Authorization": f"Bearer {TOKEN}"})[2]) == {"auth": "bearer"}
+    status, headers, _ = call(base + "/logout", "POST", jar)
+    assert status == 303 and headers["Location"] == "/login" and "Max-Age=0" in headers["Set-Cookie"]
+
+
+def test_ui_opens_the_server_with_a_one_time_link(server, monkeypatch, tmp_path, capsys):
+    base, _ = server
+    use_server(monkeypatch, base)
+    assert cli.main(["ui", "--no-browser"]) == 0
+    link = capsys.readouterr().out.strip().split()[-1]
+    assert link.startswith(base + "/login?code=") and TOKEN not in link
+    status, headers, _ = call(link)
+    assert status == 303 and headers["Set-Cookie"].startswith(f"greenlight_token={TOKEN};")
+    status, _, page = call(link)  # it works once
+    assert status == 401 and b"already used" in page
+    assert call(base + "/api/login-code", "POST", {"Content-Type": "application/json"}, b"{}")[0] == 401
+    monkeypatch.setattr("webbrowser.open", lambda url: (_ for _ in ()).throw(AssertionError("opened a browser")))
+    assert cli.main(["--db", str(tmp_path / "x.db"), "ui", "--export", str(tmp_path / "s.html")]) == 0  # still local
+
+
+def test_forget_deletes_only_the_runs_named(server, checkout, monkeypatch, tmp_path, capsys):  # noqa: F811
+    base, db = server
+    repo, _ = checkout
+    monkeypatch.chdir(repo)
+    use_server(monkeypatch, base)
+    pytest_cmd = ["--", sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+    for _ in range(2):
+        assert cli.main(["--db", str(tmp_path / "l.db"), "run", *pytest_cmd]) == 0
+    with closing(connect(str(db), readonly=True)) as conn:
+        first, second = [r[0] for r in conn.execute("SELECT external_id FROM runs ORDER BY run_id")]
+    capsys.readouterr()
+    assert cli.main(["forget", "--dry-run", "1", "nope"]) == 0
+    assert "would forget run 1" in capsys.readouterr().out
+    assert cli.main(["forget", "1", second]) == 0
+    out = capsys.readouterr().out
+    assert "forgot run 1" in out and "forgot run 2" in out and "2 of 2 runs forgot on" in out
+    with closing(connect(str(db), readonly=True)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM results").fetchone()[0] == 0  # results went with them
+    assert first  # named by number above
