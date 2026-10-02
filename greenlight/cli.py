@@ -15,7 +15,8 @@
   greenlight flaky                             ranked flaky tests
   greenlight sweep [--apply]                   quarantine candidates / release candidates
   greenlight trends                            Toto duration regressions + rerun forecast
-  greenlight ui                                dashboard at http://127.0.0.1:8765
+  greenlight ui                                the dashboard (the server's, signed in, when GREENLIGHT_URL is set)
+  greenlight forget 82 run:6714b3...           delete runs recorded by mistake (--dry-run lists them first)
   greenlight mcp [--repo owner/name]           MCP server over stdio (Claude Code, Codex, Claude Desktop)
   greenlight serve --repo owner/name           MCP server over HTTP (claude.ai and ChatGPT connectors)
 """
@@ -506,8 +507,35 @@ def cmd_serve(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_forget(a: argparse.Namespace) -> int:
+    from . import client
+    remote = None if a.local else client.configured()
+    if remote:
+        gone = client.forget(a.runs, a.dry_run)
+    else:
+        with closing(connect(a.db)) as conn:
+            gone = analysis.forget_runs(conn, a.runs, a.dry_run)
+    verb = "would forget" if a.dry_run else "forgot"
+    for g in gone:
+        print(f"{verb} run {g['run_id']} ({g['external_id']}, commit {str(g['commit_sha'])[:8]}, {g['started_at']})")
+    where = f" on {remote[0]}" if remote else ""
+    print(f"{len(gone)} of {len(a.runs)} {'run' if len(a.runs) == 1 else 'runs'} {verb}{where}"
+          + ("; the rest matched nothing" if len(gone) < len(a.runs) else ""))
+    return 0
+
+
 def cmd_ui(a: argparse.Namespace) -> int:
-    from . import web
+    import webbrowser
+
+    from . import client, web
+    remote = None if (a.local or a.export or a.db) else client.configured()
+    if remote:  # with a server, its dashboard is the one with the history: open it signed in
+        link = client.login_link()
+        if a.no_browser or not webbrowser.open(link):
+            print(f"Open this within 2 minutes to sign in (it works once): {link}")
+        else:
+            print(f"Opened the dashboard on {remote[0]}")
+        return 0
     web.set_incident_labels(a.cfg.get("delivery", "incident_labels"))
     if a.export:
         n = web.export_snapshot(a.db, a.export, a.days, with_forecasts=not a.no_forecasts)
@@ -691,13 +719,21 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--port", type=int, default=int(os.environ.get("PORT") or 8000),
                    help="default: $PORT (hosts like Render and Cloud Run set it), else 8000")
     s.add_argument("--token", help="the one secret for everything: Authorization: Bearer, the URL path (/<token>/mcp) "
-                                   "or the dashboard's sign-in link (default: $GREENLIGHT_TOKEN, else a random one "
+                                   "or the dashboard's sign-in page (default: $GREENLIGHT_TOKEN, else a random one "
                                    "off loopback)")
     s.add_argument("--no-auth", action="store_true", help="no token at all. Only for a public repo you don't mind "
                                                           "anyone reading through this server")
     s.set_defaults(fn=cmd_serve)
 
-    s = sub.add_parser("ui", help="local dashboard on 127.0.0.1, or --export a read-only HTML snapshot")
+    s = sub.add_parser("forget", help="delete runs recorded by mistake, by number or external id (on the server "
+                                      "when GREENLIGHT_URL is set)")
+    s.add_argument("runs", nargs="+", help="run numbers as the dashboard shows them, or external ids")
+    s.add_argument("--dry-run", action="store_true", help="list what would be deleted, delete nothing")
+    s.add_argument("--local", action="store_true", help="this machine's database, even with GREENLIGHT_URL set")
+    s.set_defaults(fn=cmd_forget)
+
+    s = sub.add_parser("ui", help="the dashboard: the server's, signed in, when GREENLIGHT_URL is set; else a local "
+                                  "one on 127.0.0.1, or --export a read-only HTML snapshot")
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--host", default="127.0.0.1",
                    help="bind address. Anything but loopback (e.g. 0.0.0.0 for your phone on the LAN) needs a token")
@@ -706,6 +742,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--export", metavar="FILE", help="write a self-contained snapshot instead of serving")
     s.add_argument("--days", type=int, default=30, help="window for the snapshot")
     s.add_argument("--no-forecasts", action="store_true", help="skip Toto views in the snapshot")
+    s.add_argument("--local", action="store_true",
+                   help="this machine's database, even with GREENLIGHT_URL set (which otherwise opens the server's)")
     s.set_defaults(fn=cmd_ui)
 
     a = p.parse_args(argv)

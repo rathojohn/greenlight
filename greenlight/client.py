@@ -28,16 +28,13 @@ def configured() -> tuple[str, str] | None:
     return url, token
 
 
-def submit(records: list[dict[str, Any]], gate: str | None = None, window_days: int | None = None,
-           timeout: float = 120) -> dict[str, Any]:
-    """POST run records to /api/records. With gate, the reply carries that run's triage."""
+def _post(path: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
     conf = configured()
     if not conf:
-        raise ServerError("set GREENLIGHT_URL and GREENLIGHT_TOKEN to send runs to a greenlight server")
+        raise ServerError("set GREENLIGHT_URL and GREENLIGHT_TOKEN to use a greenlight server")
     url, token = conf
-    body = gzip.compress(json.dumps({"records": records, "gate": gate, "window_days": window_days},
-                                    separators=(",", ":"), default=str).encode())
-    req = urllib.request.Request(f"{url}/api/records", data=body, method="POST", headers={
+    body = gzip.compress(json.dumps(payload, separators=(",", ":"), default=str).encode())
+    req = urllib.request.Request(f"{url}{path}", data=body, method="POST", headers={
         "Authorization": f"Bearer {token}", "Content-Type": "application/json", "Content-Encoding": "gzip",
         "Accept": "application/json", "User-Agent": "greenlight"})
     try:
@@ -53,3 +50,21 @@ def submit(records: list[dict[str, Any]], gate: str | None = None, window_days: 
         raise ServerError(f"{url} answered {e.code}: {detail[:300]}{hint}") from None
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         raise ServerError(f"couldn't reach {url}: {getattr(e, 'reason', e)}") from None
+
+
+def submit(records: list[dict[str, Any]], gate: str | None = None, window_days: int | None = None,
+           timeout: float = 120) -> dict[str, Any]:
+    """POST run records to /api/records. With gate, the reply carries that run's triage."""
+    return _post("/api/records", {"records": records, "gate": gate, "window_days": window_days}, timeout)
+
+
+def login_link(timeout: float = 30) -> str:
+    """A one-time link that signs a browser in to the dashboard, good for two minutes, so the token itself
+    never goes in a URL or the browser's history."""
+    url = configured()[0]  # _post raises first when it isn't set
+    return url + _post("/api/login-code", {}, timeout)["path"]
+
+
+def forget(runs: list[str], dry_run: bool = False, timeout: float = 60) -> list[dict[str, Any]]:
+    """Delete runs on the server by number or external id."""
+    return _post("/api/forget", {"runs": runs, "dry_run": dry_run}, timeout)["forgotten"]

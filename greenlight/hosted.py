@@ -9,7 +9,8 @@
 
 One token guards the rest (GREENLIGHT_TOKEN): an `Authorization: Bearer` header (the CLI, CI, Claude Code,
 Codex), the URL path `/<token>/...` (claude.ai and ChatGPT connectors can't send headers), or the cookie a
-browser gets by opening `/?token=<token>` once.
+browser gets from the sign-in page (/login, a password field), a one-time link from `greenlight ui`
+(/login?code=..., minted by POST /api/login-code), or the older `/?token=<token>`.
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ import os
 import secrets
 import sqlite3
 import sys
+import time
 import zlib
 from contextlib import closing
 from typing import Any
@@ -32,11 +34,73 @@ MAX_BODY = 32 * 1024 * 1024
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
 HEADERS = [(b"cache-control", b"no-store"), (b"x-content-type-options", b"nosniff"),
            (b"referrer-policy", b"no-referrer"), (b"x-frame-options", b"DENY")]
-LOGIN_PAGE = b"""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>greenlight</title><body style="font:15px system-ui;max-width:32rem;margin:15vh auto;padding:0 16px;
-background:#0E1116;color:#D8DEE6"><h1 style="font-size:1.2rem">Sign in</h1>
-<p>Open this address once with your token: <code>/?token=&lt;GREENLIGHT_TOKEN&gt;</code>. The browser keeps a
-cookie after that.</p></body>"""
+COOKIE_MAX_AGE = 400 * 86400  # browsers cap a cookie's life at 400 days
+CODE_TTL = 120  # seconds a one-time sign-in link from `greenlight ui` stays good
+_codes: dict[str, float] = {}  # one-time codes in memory: the server is a single process
+LOGIN_PAGE = """<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in · greenlight</title>
+<script>try { if (localStorage.getItem("greenlight-theme") === "light") document.documentElement.dataset.theme = "light"; } catch {}</script>
+<style>
+:root { color-scheme: dark; --bg: #0b0d12; --panel: #12151c; --line: #262b36; --ink: #e3e6ed; --ink-2: #a0a7b4;
+  --accent: #9d87ff; --accent-ink: #0b0d12; --fail: #c2272d; --pass: #00aa82; }
+:root[data-theme="light"] { color-scheme: light; --bg: #f2f3f6; --panel: #ffffff; --line: #dde0e6; --ink: #161a22;
+  --ink-2: #545c6a; --accent: #6b4fdb; --accent-ink: #ffffff; --fail: #b8173f; --pass: #10916d; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; background: var(--bg);
+  color: var(--ink); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { width: 100%; max-width: 360px; padding: 24px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 650; margin-bottom: 20px; }
+.brand i { width: 10px; height: 10px; border-radius: 50%; background: var(--pass); }
+h1 { font-size: 16px; margin: 0 0 16px; }
+label { display: block; color: var(--ink-2); font-size: 12px; margin-bottom: 6px; }
+input[type=password] { width: 100%; height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 4px;
+  background: var(--bg); color: var(--ink); font: inherit; }
+input[type=password]:focus { outline: none; border-color: var(--accent); }
+button { width: 100%; height: 36px; margin-top: 12px; border: 0; border-radius: 4px; background: var(--accent);
+  color: var(--accent-ink); font: inherit; font-weight: 600; cursor: pointer; }
+.err { color: var(--ink); border-left: 3px solid var(--fail); padding-left: 10px; margin: 0 0 14px; }
+p.note { color: var(--ink-2); font-size: 12px; margin: 16px 0 0; }
+code { font-size: 11.5px; }
+</style>
+<main><div class="brand"><i></i>greenlight</div><h1>Sign in</h1>{error}
+<form method="post" action="/login">
+<input type="text" name="username" value="greenlight" autocomplete="username" hidden>
+<label for="token">Server token</label>
+<input id="token" name="token" type="password" autocomplete="current-password" required autofocus>
+<button type="submit">Sign in</button>
+</form>
+<p class="note">The GREENLIGHT_TOKEN this server runs with. This browser stays signed in for a year.
+From a terminal with GREENLIGHT_URL and GREENLIGHT_TOKEN set, <code>greenlight ui</code> opens the dashboard signed in.</p>
+</main></html>"""
+
+
+def login_page(error: str = "") -> bytes:
+    return LOGIN_PAGE.replace("{error}", f'<p class="err" role="alert">{error}</p>' if error else "").encode()
+
+
+def mint_code() -> str:
+    """A one-time sign-in code: `greenlight ui` opens /login?code=... so the token never goes in a URL."""
+    now = time.monotonic()
+    for c, expires in list(_codes.items()):
+        if expires < now:
+            del _codes[c]
+    code = secrets.token_urlsafe(24)
+    _codes[code] = now + CODE_TTL
+    return code
+
+
+def _redeem(code: str) -> bool:
+    expires = _codes.pop(code, None)
+    return expires is not None and expires >= time.monotonic()
+
+
+async def _read_body(receive: Any, limit: int = 8192) -> bytes:
+    body = b""
+    while True:
+        message = await receive()
+        body += message.get("body", b"")
+        if len(body) > limit or not message.get("more_body"):
+            return body[:limit]
 
 
 def _token() -> str | None:
@@ -62,11 +126,15 @@ async def _reply(send: Any, status: int, body: bytes, ctype: str = "text/plain; 
     await send({"type": "http.response.body", "body": body})
 
 
-def _login_cookie(scope: dict, token: str) -> list:
+def _login_cookie(scope: dict, token: str, max_age: int = COOKIE_MAX_AGE, to: bytes = b"/") -> list:
     secure = "; Secure" if (_header(scope, b"x-forwarded-proto") == "https" or scope.get("scheme") == "https") else ""
     # Lax so the link works when opened from a chat or an email; POSTs still need X-Greenlight (see api_post)
-    return [(b"set-cookie", f"{web.COOKIE}={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000{secure}".encode()),
-            (b"location", b"/")]
+    return [(b"set-cookie", f"{web.COOKIE}={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={max_age}{secure}".encode()),
+            (b"location", to)]
+
+
+def _html(status: int, body: bytes) -> tuple:
+    return status, body, "text/html; charset=utf-8"
 
 
 class Guard:
@@ -91,10 +159,25 @@ class Guard:
             return await self.app({**scope, "greenlight.auth": "open"}, receive, send)
         token = self.token
         query = parse_qs((scope.get("query_string") or b"").decode("latin-1"))
-        if path == "/" and "token" in query:  # the sign-in link: trade it for a cookie, drop it from the address
+        method = scope.get("method") or "GET"
+        if path == "/login":
+            if method == "POST":  # the sign-in form; a password manager can fill it
+                form = parse_qs((await _read_body(receive)).decode("utf-8", "replace"))
+                if _same((form.get("token") or [""])[0].strip(), token):
+                    return await _reply(send, 303, b"", headers=_login_cookie(scope, token))
+                return await _reply(send, *_html(401, login_page("That token doesn't match this server's.")))
+            if "code" in query:  # a one-time link from `greenlight ui`
+                if _redeem(query["code"][0]):
+                    return await _reply(send, 303, b"", headers=_login_cookie(scope, token))
+                return await _reply(send, *_html(401, login_page(
+                    "That sign-in link expired or was already used. Run greenlight ui again, or enter the token.")))
+            return await _reply(send, *_html(200, login_page()))
+        if path == "/logout" and method == "POST":
+            return await _reply(send, 303, b"", headers=_login_cookie(scope, "", 0, b"/login"))
+        if path == "/" and "token" in query:  # the older sign-in link: trade it for a cookie, drop it from the address
             if _same(query["token"][0], token):
                 return await _reply(send, 303, b"", headers=_login_cookie(scope, token))
-            return await _reply(send, 401, LOGIN_PAGE, "text/html; charset=utf-8")
+            return await _reply(send, *_html(401, login_page("That token doesn't match this server's.")))
         first, _, rest = path.lstrip("/").partition("/")
         if _same(first, token):
             if not rest:  # /<token> opened in a browser signs it in too
@@ -110,7 +193,7 @@ class Guard:
             elif _same(cookie, token):
                 scope = {**scope, "greenlight.auth": "cookie"}
             elif "text/html" in (_header(scope, b"accept") or ""):
-                return await _reply(send, 401, LOGIN_PAGE, "text/html; charset=utf-8")
+                return await _reply(send, *_html(401, login_page()))
             else:
                 return await _reply(send, 401, b"greenlight: missing or wrong token\n",
                                     headers=[(b"www-authenticate", b"Bearer")])
@@ -178,6 +261,8 @@ def _register_routes() -> None:
 
     @mcp.custom_route("/api/{name:path}", methods=["GET"])
     async def api_get(request: Any) -> Any:
+        if request.url.path == "/api/session":  # how this request got in: the dashboard offers sign out for a cookie
+            return _json(200, {"auth": request.scope.get("greenlight.auth")})
         route = web.GET_ROUTES.get(request.url.path)
         if route is None:
             return _json(404, {"error": f"No route {request.url.path}"})
@@ -197,6 +282,9 @@ def _register_routes() -> None:
             return _json(400, {"error": "Body must be a JSON object"})
         if request.scope.get("greenlight.auth") in ("cookie", "open") and request.headers.get("x-greenlight") != "1":
             return _json(403, {"error": "Missing X-Greenlight header"})
+        if request.url.path == "/api/login-code":
+            code = mint_code()
+            return _json(200, {"code": code, "path": f"/login?code={code}", "expires_in": CODE_TTL})
         if request.url.path == "/api/records":
             waiting = await run_in_threadpool(server.not_ready)  # judge against synced history, not an empty DB
             if waiting:
@@ -264,7 +352,7 @@ def serve_http(host: str = "127.0.0.1", port: int = 8000, token: str | None = No
     what = server.STATE.repo or server.STATE.cfg.repo or server.STATE.project
     lines = [f"greenlight for {what} on {base}"]
     if token:
-        lines += [f"  dashboard   {base}/?token={shown_token}  (once per browser)",
+        lines += [f"  dashboard   {base}/  (sign in with the token, or run greenlight ui where GREENLIGHT_URL is set)",
                   f"  MCP         {base}/{shown_token}/mcp  (claude.ai, ChatGPT), or {base}/mcp with Authorization: Bearer",
                   f"  runs        {base}  with GREENLIGHT_URL and GREENLIGHT_TOKEN set for the CLI and the Action"]
     else:

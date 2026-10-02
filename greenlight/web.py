@@ -74,6 +74,7 @@ POST_ROUTES: dict[str, Callable[[sqlite3.Connection, dict], Any]] = {
         c, _require(b, "test_id"), b.get("reason") or "quarantined from the dashboard")},
     "/api/unquarantine": lambda c, b: {"removed": analysis.unquarantine(c, _require(b, "test_id"))},
     "/api/sweep": lambda c, b: analysis.sweep(c, apply=bool(b.get("apply"))),
+    "/api/forget": lambda c, b: {"forgotten": analysis.forget_runs(c, _require(b, "runs"), bool(b.get("dry_run")))},
 }
 
 ERRORS = [(LookupError, 404), (ValueError, 400), (FileNotFoundError, 503), (RuntimeError, 501)]
