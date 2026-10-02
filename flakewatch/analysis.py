@@ -205,7 +205,7 @@ def triage_run(
         passes_sha, fails_sha = on_sha.get(t, (0, 0))
         if t in quarantined:
             category = "quarantined"
-        elif t in new_tests:
+        elif t in new_tests and run["total_tests"] is None:  # a partial run (playtest record) can't tell new from never-failed
             category = "new_test"
         elif cls in ("flaky", "suspect"):
             category = "known_flaky" if cls == "flaky" else "suspect_flaky"

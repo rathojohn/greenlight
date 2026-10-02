@@ -32,6 +32,7 @@ class TestResult:
     retry: int = 0
     failure_sig: str | None = None
     message: str | None = None
+    flags: str | None = None  # comma list: inferred, slower, known
 
 
 def failure_signature(text: str | None) -> str | None:
@@ -106,31 +107,53 @@ def record_run(
     source: str | None = None,
     external_id: str | None = None,
     started_at: datetime | None = None,
+    duration_ms: int | None = None,
+    git_commit: str | None = None,
+    total_tests: int | None = None,
+    session: str | None = None,
+    command: str | None = None,
+    url: str | None = None,
+    metrics: list[tuple[str, str, float]] | None = None,
 ) -> tuple[int, bool]:
-    """Insert a run and its results. Returns (run_id, created). Same external_id twice is a no-op."""
+    """Insert a run and its results. Returns (run_id, created). Same external_id twice is a no-op.
+    metrics: (test_id, name, value) numbers the run measured, e.g. a benchmark's median."""
     if external_id:
         row = conn.execute("SELECT run_id FROM runs WHERE external_id = ?", (external_id,)).fetchone()
         if row:
             return row["run_id"], False
 
-    if attempt is None:
-        attempt = 1 + conn.execute("SELECT COUNT(*) FROM runs WHERE commit_sha = ?", (commit_sha,)).fetchone()[0]
-
     started = started_at.astimezone(timezone.utc) if started_at else utcnow()
-    total_ms = sum(r.duration_ms or 0 for r in results) or None
+    if attempt is None:
+        # runs on this code that started earlier, so a record synced late still gets its own number
+        attempt = 1 + conn.execute("SELECT COUNT(*) FROM runs WHERE commit_sha = ? AND started_at <= ?",
+                                   (commit_sha, iso(started))).fetchone()[0]
+
+    if duration_ms is None:
+        duration_ms = sum(r.duration_ms or 0 for r in results) or None
     with conn:
         cur = conn.execute(
-            "INSERT INTO runs (external_id, commit_sha, branch, attempt, source, started_at, duration_ms) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (external_id, commit_sha, branch, attempt, source, iso(started), total_ms),
+            "INSERT INTO runs (external_id, commit_sha, branch, attempt, source, started_at, duration_ms, "
+            "git_commit, total_tests, session, command, url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (external_id, commit_sha, branch, attempt, source, iso(started), duration_ms,
+             git_commit, total_tests, session, command, url),
         )
         run_id = cur.lastrowid
-        conn.executemany(
-            "INSERT OR REPLACE INTO results (run_id, test_id, file, outcome, duration_ms, retry, failure_sig, message) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            [(run_id, r.test_id, r.file, r.outcome, r.duration_ms, r.retry, r.failure_sig, r.message) for r in results],
-        )
+        insert_results(conn, run_id, results)
+        if metrics:
+            conn.executemany("INSERT OR REPLACE INTO metrics (run_id, test_id, name, value) VALUES (?, ?, ?, ?)",
+                             [(run_id, t, n, v) for t, n, v in metrics])
     return run_id, True
+
+
+def insert_results(conn: sqlite3.Connection, run_id: int, results: list[TestResult], replace: bool = True) -> int:
+    verb = "INSERT OR REPLACE" if replace else "INSERT OR IGNORE"
+    cur = conn.executemany(
+        f"{verb} INTO results (run_id, test_id, file, outcome, duration_ms, retry, failure_sig, message, flags) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [(run_id, r.test_id, r.file, r.outcome, r.duration_ms, r.retry, r.failure_sig, r.message, r.flags)
+         for r in results],
+    )
+    return cur.rowcount
 
 
 def ingest_files(conn: sqlite3.Connection, paths: list[str | Path], **run_fields) -> tuple[int, bool, int]:
