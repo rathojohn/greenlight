@@ -95,3 +95,15 @@ def test_a_stdio_server_has_the_brief_for_its_first_and_only_connect(tmp_path, m
     monkeypatch.setattr(server.STATE, "refresher", None)
     monkeypatch.setattr(server, "BRIEF", server._Brief())  # never computed, like a server that just started
     assert "login" in server.mcp.instructions
+
+
+def test_what_rode_along_longest_becomes_advice():
+    rows = [{"label": "CLAUDE.md", "kind": "instructions", "adds": 10, "tokens": 210_000, "weighted": 50_000,
+             "avg_rides": 90, "max_rides": 300},
+            {"label": "task list reminders", "kind": "reminder", "adds": 40, "tokens": 90_000, "weighted": 40_000,
+             "avg_rides": 80, "max_rides": 200}]
+    groups = [{"grp": "out/shots/*.png", "kind": "image", "labels": 34, "adds": 34, "weighted": 30_000, "avg_rides": 85}]
+    found = {i["id"]: i for i in insights._item_insights({"items": rows, "groups": groups}, 1_000_000)}
+    assert found["item:instructions:CLAUDE.md"]["title"] == "CLAUDE.md is about 21k tokens and rides along with every request"
+    assert found["group:image:out/shots/*.png"]["title"] == "34 images from out/shots/*.png stayed in context for 85 requests on average"
+    assert "task list" in found["item:reminder:task list reminders"]["agent"]

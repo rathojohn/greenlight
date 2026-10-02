@@ -53,8 +53,8 @@ def transcript_files(path: str | Path) -> list[tuple[Path, str]]:
     return [(path, ""), *((p, p.stem) for p in sorted((path.parent / path.stem / "subagents").glob("*.jsonl")))]
 
 
-def read_files(path: str | Path, test: str | None = None) -> list[dict[str, Any]]:
-    return [context.read_file(p, agent, test) | {"agent": agent} for p, agent in transcript_files(path)]
+def read_files(path: str | Path, test: str | None = None, root: str | None = None) -> list[dict[str, Any]]:
+    return [context.read_file(p, agent, test, root) | {"agent": agent} for p, agent in transcript_files(path)]
 
 
 def entries(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -92,14 +92,17 @@ def payload_from_hook(hook: dict[str, Any], env: dict[str, str] | None = None) -
     if not transcript:
         return None
     repo = test = None
-    if hook.get("cwd"):
+    labels = True
+    root = hook.get("cwd")
+    if root:
         from . import config
-        repo = config.remote_repo(hook["cwd"])
+        repo = config.remote_repo(root)
         try:
-            test = config.load(start=Path(hook["cwd"])).get("usage", "test_commands")
+            cfg = config.load(start=Path(root))
+            test, labels = cfg.get("usage", "test_commands"), cfg.get("usage", "item_labels") is not False
         except (ValueError, OSError):
             pass
-    files = read_files(transcript, test)
+    files = read_files(transcript, test, root)
     me = agent_session(env)
     session_id = hook.get("session_id") or me["session_id"] or Path(transcript).stem
     remote = me["remote_session"] if me["session_id"] in (None, session_id) else None  # only for this session
@@ -107,7 +110,8 @@ def payload_from_hook(hook: dict[str, Any], env: dict[str, str] | None = None) -
                         "agent": "claude-code"},
             "rows": minute_rows(entries(files)), "context": context.rows(files),
             "rebuilds": [r | {"agent": f["agent"]} for f in files for r in f["rebuilds"]],
-            "switches": [r | {"agent": f["agent"]} for f in files for r in f["switches"]]}
+            "switches": [r | {"agent": f["agent"]} for f in files for r in f["switches"]],
+            **({"items": context.item_rows(files, context.instruction_files(root))} if labels else {})}
 
 
 CONTEXT_FIELDS = ("calls", "tokens", "carried_tokens", "repeat_reads", "repeat_tokens")
@@ -125,11 +129,11 @@ def store(conn: sqlite3.Connection, payload: dict[str, Any]) -> dict[str, Any]:
     report is the whole story). A payload without context or rebuilds (an older client) leaves those alone."""
     s = payload.get("session") if isinstance(payload, dict) else None
     rows = payload.get("rows") if isinstance(payload, dict) else None
-    extra = [payload.get(k) for k in ("context", "rebuilds", "switches")] if isinstance(payload, dict) else [None] * 3
+    extra = [payload.get(k) for k in ("context", "rebuilds", "switches", "items")] if isinstance(payload, dict) else [None] * 4
     if (not isinstance(s, dict) or not s.get("session_id") or not isinstance(rows, list) or len(rows) > MAX_ROWS
             or any(not isinstance(x, (list, type(None))) or len(x or ()) > MAX_ROWS for x in extra)):
         raise ValueError("send {\"session\": {\"session_id\": ...}, \"rows\": [...]}")
-    ctx, rebuilds, switches = extra
+    ctx, rebuilds, switches, items = extra
     sid = s["session_id"]
     clean = [(sid, _minute(r), str(r.get("model") or "unknown"), str(r.get("branch") or ""),
               int(r.get("requests") or 0), *(int(r.get(f) or 0) for f in FIELDS)) for r in rows]
@@ -142,6 +146,9 @@ def store(conn: sqlite3.Connection, payload: dict[str, Any]) -> dict[str, Any]:
     switch_rows = [(sid, str(r.get("agent") or "")[:200], _minute(r), str(r.get("from_branch") or ""),
                     str(r.get("to_branch") or ""), int(r.get("context_tokens") or 0), int(r.get("carried_tokens") or 0))
                    for r in switches or ()]
+    item_rows = [(sid, str(r.get("label") or "")[:300], str(r.get("kind") or "tool")[:32], str(r.get("group") or "")[:300],
+                  norm_time(str(r.get("first_at") or "")), str(r.get("branch") or ""),
+                  *(int(r.get(f) or 0) for f in context.ITEM_FIELDS)) for r in items or () if r.get("label")]
     first = min((c[1] for c in clean), default=None)
     last = max((c[1] for c in clean), default=None)
     with conn:
@@ -156,6 +163,11 @@ def store(conn: sqlite3.Connection, payload: dict[str, Any]) -> dict[str, Any]:
             conn.execute("DELETE FROM agent_cache_rebuilds WHERE session_id = ?", (sid,))
             conn.executemany("INSERT OR REPLACE INTO agent_cache_rebuilds (session_id, agent, at, branch, tokens, ttl, "
                              "idle_seconds, cause) VALUES (?,?,?,?,?,?,?,?)", rebuild_rows)
+        if items is not None:
+            conn.execute("DELETE FROM agent_context_items WHERE session_id = ?", (sid,))
+            conn.executemany(f"INSERT OR REPLACE INTO agent_context_items (session_id, label, kind, grp, first_at, branch, "
+                             f"{', '.join(context.ITEM_FIELDS)}) VALUES (?,?,?,?,?,?{',?' * len(context.ITEM_FIELDS)})",
+                             item_rows)
         if switches is not None:
             conn.execute("DELETE FROM agent_task_switches WHERE session_id = ?", (sid,))
             conn.executemany("INSERT OR REPLACE INTO agent_task_switches (session_id, agent, at, from_branch, to_branch, "
@@ -203,6 +215,34 @@ def _categories(rows: list[dict[str, Any]], write_weight: float) -> list[dict[st
     return sorted((c | {"share": round(c["weighted"] / total, 3)} for c in out), key=lambda c: -c["weighted"])
 
 
+def items_summary(conn: sqlite3.Connection, start: str, sessions: set[str] | None = None,
+                  where_extra: str = "", args_extra: tuple = ()) -> dict[str, Any]:
+    """The things that rode along in context longest, by label, and by group (a folder and extension, a program):
+    times added, tokens, requests that re-read them, and their cost (added at the cache write price, re-read at
+    the cache read price)."""
+    where, args = "first_at >= ?", [start]
+    if sessions is not None:
+        where += f" AND session_id IN ({','.join('?' * len(sessions))})"
+        args += sorted(sessions)
+    ww = _write_weight(conn, where.replace("first_at", "minute"), args)  # before the filter on items' own columns
+    if where_extra:
+        where += f" AND {where_extra}"
+        args += list(args_extra)
+    sums = ", ".join(f"SUM({f}) AS {f}" for f in ("adds", "tokens", "rides", "carried_tokens"))
+
+    def rows(by: str) -> list[dict[str, Any]]:
+        out = []
+        for r in conn.execute(f"SELECT {by}, kind, COUNT(DISTINCT session_id) AS sessions, {sums}, MAX(max_rides) AS "
+                              f"max_rides, COUNT(DISTINCT label) AS labels FROM agent_context_items WHERE {where} "
+                              f"GROUP BY {by}, kind", args):
+            d = dict(r)
+            d["weighted"] = round(d["tokens"] * ww + d["carried_tokens"] * WEIGHTS["cache_read_tokens"])
+            d["avg_rides"] = round(d["rides"] / d["adds"], 1) if d["adds"] else 0
+            out.append(d)
+        return sorted(out, key=lambda d: -d["weighted"])
+    return {"items": rows("label")[:50], "groups": [g for g in rows("grp") if g["labels"] > 1][:20]}
+
+
 def _meta(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
     out = {}
     for r in conn.execute("SELECT session_id, remote_session, repo FROM agent_sessions"):
@@ -226,6 +266,7 @@ def detail(conn: sqlite3.Connection, days: int, kind: str, key: str) -> dict[str
                                                       "branches": sorted({r["branch"] for r in rows if r["branch"]}),
                                                       "models": sorted({r["model"] for r in rows})} | _sum(rows),
                 "context": context_summary(conn, "0", {sid}), "prs": _by_pr(conn, rows)[0],
+                "items": items_summary(conn, "0", {sid})["items"][:20],
                 "rebuilds": [dict(r) for r in conn.execute(
                     "SELECT agent, at, branch, tokens, ttl, idle_seconds, cause FROM agent_cache_rebuilds "
                     "WHERE session_id = ? ORDER BY at", (sid,))],
@@ -252,6 +293,17 @@ def detail(conn: sqlite3.Connection, days: int, kind: str, key: str) -> dict[str
                 "context": {"categories": _categories(ctx, _write_weight(conn))}, "sessions": sessions}
     if kind == "test":
         return {"kind": kind, "test": summary(conn, days, test_id=key)["test"]}
+    if kind in ("item", "group"):
+        item_kind, _, label = key.partition(":")
+        col = "label" if kind == "item" else "grp"
+        found = items_summary(conn, start, where_extra=f"{col} = ? AND kind = ?", args_extra=(label, item_kind))
+        rows = [dict(r) | {k: v for k, v in meta.get(r["session_id"], {}).items() if k != "session_id"}
+                for r in conn.execute(f"SELECT * FROM agent_context_items WHERE {col} = ? AND kind = ? AND first_at >= ? "
+                                      "ORDER BY carried_tokens DESC LIMIT 50", (label, item_kind, start))]
+        if not rows:
+            raise LookupError(f"Nothing called {label} rode along in the last {days} days")
+        head = (found["items"] if kind == "item" else found["groups"] or rows)[0]
+        return {"kind": kind, "item": head, "rows": rows}
     ww = _write_weight(conn, "minute >= ?", (start,))
     if kind == "category":
         rows = [dict(r) for r in conn.execute("SELECT * FROM agent_context WHERE category = ? AND minute >= ?",
@@ -458,6 +510,7 @@ def summary(conn: sqlite3.Connection, days: int = 30, pr: int | None = None,
         "weighted_per_day": [weighted(daily[d]) for d in days_],
         "totals": _sum(rows) | {"sessions": len(per_session)},
         "context": context_summary(conn, start),
+        "items": items_summary(conn, start),
         "models": sorted(({"model": k} | _sum(v) for k, v in models.items()), key=lambda m: -m["output_tokens"]),
         "by_pr": by_pr, "unattributed": unattributed, "by_test": by_test, "sessions": sessions[:50],
     }

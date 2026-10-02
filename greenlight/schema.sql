@@ -220,6 +220,23 @@ CREATE TABLE IF NOT EXISTS agent_cache_rebuilds (
     PRIMARY KEY (session_id, agent, at)
 );
 
+-- Each thing that entered a session's context (a file, a screenshot, a command's output, a skill, CLAUDE.md) and
+-- how long it rode along: labels only, never contents
+CREATE TABLE IF NOT EXISTS agent_context_items (
+    session_id      TEXT NOT NULL,
+    label           TEXT NOT NULL,             -- a path from the repo root, a skill, a command's program and subcommand
+    kind            TEXT NOT NULL,             -- file, image, command, instructions, skill, mcp, web, subagent, tool, reminder
+    grp             TEXT NOT NULL DEFAULT '',  -- what it belongs with: a folder and extension, a program, an MCP server
+    first_at        TEXT,
+    branch          TEXT NOT NULL DEFAULT '',
+    adds            INTEGER NOT NULL DEFAULT 0,  -- times it entered the context
+    tokens          INTEGER NOT NULL DEFAULT 0,  -- over all of them
+    rides           INTEGER NOT NULL DEFAULT 0,  -- requests that read it from the cache after it entered
+    max_rides       INTEGER NOT NULL DEFAULT 0,  -- the most for one of them
+    carried_tokens  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (session_id, label, kind)
+);
+
 -- Requests that started work on a new branch while the earlier work was still in context
 CREATE TABLE IF NOT EXISTS agent_task_switches (
     session_id      TEXT NOT NULL,

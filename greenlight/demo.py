@@ -171,7 +171,7 @@ def seed(db: str, days: int = 60, seed_value: int = 7) -> None:
             shares = [("conversation", .34), ("system", .2), ("read", .15), ("test", .08), ("search", .05),
                       ("shell", .04), ("image", .04), ("git", .03), ("web", .02), ("mcp:github", .02), ("edit", .02),
                       ("subagent", .01)]
-            usage_rows, ctx_rows, rebuilds, switches = [], [], [], []
+            usage_rows, ctx_rows, rebuilds, switches, items = [], [], [], [], []
             for n, (s, c) in enumerate(commits, start=1):
                 sid, t = f"demo-session-{n}", opened_at[n]
                 end = last_run_at.get(n, c) + timedelta(minutes=20)
@@ -189,6 +189,27 @@ def seed(db: str, days: int = 60, seed_value: int = 7) -> None:
                                          rng.randint(500, 3000) if cat == "read" and rng.random() < .1 else 0))
                     minutes += 1
                     t += timedelta(minutes=rng.randint(2, 6))
+                # what rode along: CLAUDE.md every request, a few screenshots, files and command output
+                n_req = minutes * 2
+                items.append((sid, "CLAUDE.md", "instructions", "instructions", iso(opened_at[n]), f"work-{n}", 2,
+                              2 * 6_200, n_req, n_req, 6_200 * n_req))
+                for k in range(rng.randint(0, 6)):
+                    rides = rng.randint(5, max(6, n_req))
+                    items.append((sid, f"tests/screenshots/checkout-{n}-{k}.png", "image", "tests/screenshots/*.png",
+                                  iso(opened_at[n]), f"work-{n}", 1, 1_600, rides, rides, 1_600 * rides))
+                for path, size in (("src/cart.py", 4_200), ("src/search/index.py", 9_800), ("package-lock.json", 41_000)):
+                    if rng.random() < .5:
+                        rides = rng.randint(3, max(4, n_req))
+                        items.append((sid, path, "file", path.rsplit("/", 1)[0] + "/*." + path.rsplit(".", 1)[1] if "/" in path
+                                      else "*.json", iso(opened_at[n]), f"work-{n}", 1, size, rides, rides, size * rides))
+                for cmd, size in (("pytest", 2_400), ("npm run build", 900)):
+                    runs, rides = rng.randint(1, 6), rng.randint(5, max(6, n_req))
+                    items.append((sid, cmd, "command", cmd.split(" ")[0], iso(opened_at[n]), f"work-{n}", runs, size * runs,
+                                  rides * runs, rides, size * rides * runs))
+                if n % 2:
+                    adds = rng.randint(3, 20)
+                    items.append((sid, "task list reminders", "reminder", "reminders", iso(opened_at[n]), f"work-{n}", adds,
+                                  adds * 2_300, adds * n_req // 2, n_req, 2_300 * adds * n_req // 2))
                 if inherited:
                     switches.append((sid, "", iso(opened_at[n]), f"work-{n - 1}", f"work-{n}", inherited, inherited * minutes))
                 if n % 4 == 1:
@@ -203,6 +224,7 @@ def seed(db: str, days: int = 60, seed_value: int = 7) -> None:
             conn.executemany("INSERT OR REPLACE INTO agent_context VALUES (?,?,?,?,?,?,?,?,?)", ctx_rows)
             conn.executemany("INSERT OR REPLACE INTO agent_cache_rebuilds VALUES (?,?,?,?,?,?,?,?)", rebuilds)
             conn.executemany("INSERT OR REPLACE INTO agent_task_switches VALUES (?,?,?,?,?,?,?)", switches)
+            conn.executemany("INSERT OR REPLACE INTO agent_context_items VALUES (?,?,?,?,?,?,?,?,?,?,?)", items)
             # issues: two bugs after releases (incidents), the ones greenlight manages, and some plain ones
             now = utcnow()
             issues = [

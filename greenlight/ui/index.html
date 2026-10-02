@@ -1425,7 +1425,7 @@ const WASTE = {
   repeats: { title: "Files read again", advice: "Reads of the same file and range while the first read was still in context and nothing had edited it." },
 };
 const ctxName = c => CTX_NAMES[c] || (c.startsWith("mcp:") ? `MCP: ${c.slice(4)}` : c);
-const shareOf = (n, total) => total ? `${Math.round(n / total * 1000) / 10}%` : "0%";
+const shareOf = (n, total) => !total || !n ? "0%" : n / total < .001 ? "<0.1%" : `${Math.round(n / total * 1000) / 10}%`;
 const meter = (n, total) => `<span class="meter"><i style="width:${total ? Math.min(100, n / total * 100) : 0}%"></i></span> ${shareOf(n, total)}`;
 /* a claude.ai id when there is one; a local session's UUID is recognizable by its first block */
 const sessionName = x => x.remote_session || (/^[0-9a-f]{8}-[0-9a-f-]{27}$/.test(x.session_id || "") ? x.session_id.slice(0, 8) : String(x.session_id || ""));
@@ -1500,6 +1500,11 @@ PANELS.session = async id => {
     title: esc(sessionName(x)), sub: `${esc(x.branches.slice(0, 4).join(", "))}${x.branches.length > 4 ? ", ..." : ""}${x.first_at ? `<br>${esc(full(x.first_at))} to ${esc(full(x.last_at))}` : ""}`,
     actions: ext(x.url, "Open in Claude"),
     body: tokenFacts(x) + section("Where its context went", ctxTable("d-sctx", cx.categories, total))
+      + ((d.items || []).length ? section("What rode along longest", boxed(table("d-sitems", [
+          { h: "What", cell: r => `<span class="mono">${esc(r.label)}</span><div class="sub">${esc(kindName(r.kind))}</div>`, sort: r => r.label, dir: 1, cls: "wrap" },
+          { h: "Rode along", cell: r => tk(r.avg_rides), sort: r => r.avg_rides, cls: "num" },
+          { h: "Re-read", cell: r => tk(r.carried_tokens), sort: r => r.carried_tokens, cls: "num" },
+        ], d.items, { sort: 2, limit: 8, panel: r => `item:${r.kind}:${r.label}` }))) : "")
       + (sw.length ? section("Earlier tasks still in context", boxed(table("d-ssw", [
           { h: "When", cell: r => when(r.at), sort: r => r.at, cls: "nw" },
           { h: "New branch", cell: r => `${esc(r.to_branch)}<div class="sub">after ${esc(r.from_branch)}</div>`, cls: "wrap" },
@@ -1543,6 +1548,27 @@ PANELS.cat = async id => {
         ], d.prs, { sort: 2, limit: 6, panel: p => `pr:${p.number}` }))) : ""),
   };
 };
+async function itemPanel(kind, id) {
+  const [k, ...rest] = id.split(":"), label = rest.join(":");
+  const d = await api("/api/usage/detail", { days: DAYS, kind, key: `${k}:${label}` }), r = d.item;
+  const each = r.adds ? r.tokens / r.adds : 0;
+  return {
+    title: `<span class="mono">${esc(label)}</span>`, sub: `${esc(kindName(k))}${kind === "group" ? `, ${plural(r.labels || d.rows.length, "item")}` : ""}`,
+    body: facts([["Cost", tk(r.weighted), COST_TIP], ["Tokens each time", tk(each), "Its size when it entered the context"],
+                 ["Rode along", `${tk(r.avg_rides)} <small class="dim">requests</small>`, `On average each time it entered; ${tk(r.max_rides)} at most`],
+                 ["Times added", tk(r.adds), `In ${plural(r.sessions, "session")}`]])
+      + `<p class="advice">${esc(KIND_ADVICE[k] || "")}</p>`
+      + section(kind === "group" ? "Items" : "Sessions", boxed(table("d-item", [
+          kind === "group" ? { h: "Item", cell: x => `<span class="mono">${esc(x.label)}</span>`, sort: x => x.label, dir: 1, cls: "wrap" }
+                           : { h: "Session", cell: x => esc(sessionName(x)), sort: x => sessionName(x), dir: 1, cls: "mono" },
+          { h: "Added", cell: x => x.adds, sort: x => x.adds, cls: "num" },
+          { h: "Rode along", cell: x => tk(x.adds ? Math.round(x.rides / x.adds) : 0), sort: x => x.rides / (x.adds || 1), cls: "num" },
+          { h: "Re-read", cell: x => tk(x.carried_tokens), sort: x => x.carried_tokens, cls: "num" },
+        ], d.rows, { sort: 3, limit: 10, panel: x => kind === "group" ? `item:${x.kind}:${x.label}` : `session:${x.session_id}` }))),
+  };
+}
+PANELS.item = id => itemPanel("item", id);
+PANELS.group = id => itemPanel("group", id);
 PANELS.waste = async id => {
   const w = WASTE[id];
   if (!w) throw new ApiError("Nothing like that here.", 404);
@@ -1564,7 +1590,29 @@ PANELS.waste = async id => {
   };
 };
 
-const USAGE_TABS = [["", "Overview"], ["prs", "Pull requests"], ["tests", "Tests"], ["sessions", "Sessions"]];
+const USAGE_TABS = [["", "Overview"], ["items", "In context"], ["prs", "Pull requests"], ["tests", "Tests"], ["sessions", "Sessions"]];
+const KIND_NAMES = { instructions: "Instructions", image: "Image", file: "File", command: "Command output", skill: "Skill", reminder: "Claude Code note", mcp: "MCP tool", web: "Web", subagent: "Subagent report", tool: "Tool" };
+const KIND_ADVICE = {
+  instructions: "Loaded into every session and subagent, and read again by every request. Keep it to what most tasks need; what only some tasks need can move into a skill or a doc Claude reads when it needs it.",
+  image: "An image stays in context for the rest of the session. Look at screenshots in a subagent and keep only its verdict, or compact after a batch of them.",
+  file: "A file read stays until the session compacts. Read only the lines needed: an offset and limit, or Grep first.",
+  command: "Command output stays in context. Pipe long output through tail or grep, or into a file to read the part that matters.",
+  skill: "A skill's text loads once and stays. Fine for one used throughout a session; a one-off is cheaper in a subagent.",
+  reminder: "Notes Claude Code adds on its own. Task list reminders come while a task list is open and untouched: keeping it current, or clearing it when the work is done, stops them.",
+  mcp: "Results from this MCP tool stay in context. Prefer its narrow tools and small page sizes.",
+  web: "Fetched pages stay in context. Ask WebFetch a narrow question so it returns less.",
+  subagent: "A subagent's report stays in the main context. Ask for short reports.",
+  tool: "Results of this tool stay in context.",
+};
+const kindName = k => KIND_NAMES[k] || k;
+function itemCols(total, key) {
+  return [
+    { h: "What", cell: r => `<span class="mono">${esc(r[key])}</span><div class="sub">${esc(kindName(r.kind))}${r.labels > 1 ? `, ${plural(r.labels, "item")}` : ""}</div>`, sort: r => r[key], dir: 1, cls: "wrap" },
+    { h: "Added", cell: r => tk(r.adds), sort: r => r.adds, cls: "num hide-sm", tip: "Times it entered a context: a read, a command run, a session or subagent starting" },
+    { h: "Rode along", cell: r => `${tk(r.avg_rides)}<span class="dim"> / ${tk(r.max_rides)}</span>`, sort: r => r.avg_rides, cls: "num", tip: "Requests that read it again after it entered, on average and at most" },
+    { h: "Share of cost", cell: r => meter(r.weighted, total), sort: r => r.weighted, cls: "num nw" },
+  ];
+}
 async function usageView(tok, tab = "") {
   const d = await api("/api/usage", { days: DAYS });
   if (tok !== renderToken) return;
@@ -1580,7 +1628,7 @@ async function usageView(tok, tab = "") {
     { h: "Output", cell: r => tk(r.output_tokens), sort: r => r.output_tokens, cls: "num hide-sm" },
     { h: "Cache reads", cell: r => tk(r.cache_read_tokens), sort: r => r.cache_read_tokens, cls: "num hide-sm" },
   ];
-  const counts = { prs: d.by_pr.length, tests: d.by_test.length, sessions: d.sessions.length };
+  const counts = { items: ((d.items || {}).items || []).length, prs: d.by_pr.length, tests: d.by_test.length, sessions: d.sessions.length };
   const tabs = `<nav class="tabs" aria-label="Token usage">${USAGE_TABS.map(([k, label]) => `<a href="#/usage${k ? "/" + k : ""}"${k === tab ? ` aria-current="page"` : ""}>${label}${k ? ` <span class="n">${counts[k]}</span>` : ""}</a>`).join("")}</nav>`;
   const tiles = `<div class="grid">
       ${stat({ cls: "s3", k: "Cost", v: tk(t.weighted), s: "in input tokens", spark: d.weighted_per_day, tip: COST_TIP })}
@@ -1607,6 +1655,16 @@ async function usageView(tok, tab = "") {
         { h: "Times red", cell: x => `${x.times_red}${x.still_red ? `<span class="dim">, ${x.still_red} unfixed</span>` : ""}`, sort: x => x.times_red, cls: "num", tip: "Failed in a session; unfixed means no later run in that session passed it" },
         ...tokCols,
       ], d.by_test, { sort: 2, limit: 15, panel: x => `utest:${x.test_id}`, empty: "No test failed in a session that recorded usage." }) })}</div>`;
+  } else if (tab === "items") {
+    const it = d.items || { items: [], groups: [] };
+    body = `<div class="grid">
+      ${panel({ title: "Together", flush: true, tip: "Items that belong together: a folder and extension, one program's commands, one MCP server.",
+        body: table("t-groups", itemCols(t.weighted, "grp"), it.groups, { sort: 3, limit: 5, panel: r => `group:${r.kind}:${r.grp}`, empty: "No groups yet." }) })}
+    </div>
+    <div class="grid">
+      ${panel({ title: "What rode along", flush: true, tip: "Each thing that entered a context, and how many requests read it again after: a screenshot read early stays for the rest of the session. CLAUDE.md rides with every request of every session and subagent.",
+        body: table("t-items", itemCols(t.weighted, "label"), it.items, { sort: 3, limit: 10, panel: r => `item:${r.kind}:${r.label}`, empty: "Nothing yet: items come from the usage hook in this version of greenlight." }) })}
+    </div>`;
   } else if (tab === "sessions") {
     body = `<div class="grid">${panel({ title: "Sessions", flush: true,
       body: table("t-usess", [
@@ -1752,7 +1810,7 @@ const ROUTES = [
   [/^#\/pipelines$/, "pipelines", [["Delivery"]], "Pipelines", tok => pipelinesView(tok), true],
   [/^#\/pipeline\/(.+)$/, "pipelines", [["Delivery"], ["Pipelines", "#/pipelines"]], "Pipeline run", (tok, m) => pipelineView(tok, decodeURIComponent(m[1])), false],
   [/^#\/delivery$/, "delivery", [["Delivery"]], "DORA and GitHub", tok => deliveryView(tok), true],
-  [/^#\/usage(?:\/(prs|tests|sessions))?$/, "usage", [["Agents"]], "Token usage", (tok, m) => usageView(tok, m[1] || ""), true],
+  [/^#\/usage(?:\/(items|prs|tests|sessions))?$/, "usage", [["Agents"]], "Token usage", (tok, m) => usageView(tok, m[1] || ""), true],
 ];
 let lastHash = null;
 async function render() {

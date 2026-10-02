@@ -13,19 +13,28 @@ times, 900,000 cache-read tokens. Reading a transcript in order, this charges ea
   had edited it.
 
 It also finds cache rebuilds: requests that wrote most of the context to the cache again, with the likely cause
-(idle longer than the cache lasts, a compaction, a model switch). Only these counts leave the machine.
+(idle longer than the cache lasts, a compaction, a model switch).
+
+And it follows each thing that entered the context on its own (item_rows): a file, a screenshot, a command's
+output, a skill, CLAUDE.md. For each, how many requests it rode along with and what that cost: a screenshot read
+early in a session can be re-read by the next 85 requests. CLAUDE.md is in every request of every session and
+subagent, so it's measured from disk and charged to all of them. Items are named by a label only: a path from
+the repo root, a skill's name, or a command's program and subcommand (never its arguments or output).
 """
 from __future__ import annotations
 
 import base64
 import json
+import os
 import re
+import shlex
 import statistics
 import struct
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import urlparse
 
 from .db import norm_time
 
@@ -46,6 +55,18 @@ REBUILD_SHARE = 0.5     # a request whose cache lacks half of what the request b
 REBUILD_MIN = 10_000    # ...when that was at least this many tokens, rebuilt the cache
 TTL_SECONDS = {"1h": 3600, "5m": 300}
 _SKIP_ATTACHMENTS = {"prompt_snapshot", "deferred_tools_record", "atis-latch"}  # kept in the file, not sent to the model
+# Programs whose subcommand says what ran (npm run test, git diff); for any other program only its name is kept,
+# so an argument (a token, a URL, a message) never ends up in a label
+MULTI_WORD = {"npm", "pnpm", "yarn", "bun", "deno", "npx", "node", "python", "python3", "uv", "uvx", "pip", "git", "gh",
+              "cargo", "go", "make", "docker", "kubectl", "greenlight", "dotnet", "mvn", "gradle", "gradlew", "swift",
+              "pytest", "ruby", "bundle", "rake", "php", "composer", "tsc", "vite", "jest", "vitest", "playwright"}
+# Notes Claude Code adds to the conversation on its own, by attachment type
+REMINDERS = {"task_reminder": "task list reminders", "total_tokens_reminder": "token count notes",
+             "queued_command": "messages sent mid-turn", "silent_turn_reminder": "turn reminders",
+             "edited_text_file": "notes on edited files", "todo_reminder": "todo list reminders",
+             "deferred_tools_delta": "tool list changes", "agent_listing_delta": "agent list changes",
+             "date_change": "date changes", "plan_mode": "plan mode notes", "hook_additional_context": "hook output"}
+INSTRUCTION_FILES = ("CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md")  # from the repo root; and ~/.claude/CLAUDE.md
 
 
 def category(tool: str, args: dict[str, Any], test: re.Pattern[str], build: re.Pattern[str]) -> str:
@@ -72,6 +93,87 @@ def category(tool: str, args: dict[str, Any], test: re.Pattern[str], build: re.P
     if tool.startswith("mcp__"):
         return "mcp:" + tool.split("__")[1]
     return "other"
+
+
+def command_label(cmd: str) -> str:
+    """A shell command named by what ran, without its arguments: `cd x && npm run test:changed -- --dry` is
+    "npm run test:changed", `curl -H 'Authorization: ...' https://...` is "curl"."""
+    first = re.split(r"\s*(?:\|\||&&|\||;|\n)\s*", _CD.sub("", cmd).strip(), maxsplit=1)[0]
+    try:
+        words = shlex.split(first, posix=True)
+    except ValueError:
+        words = first.split()
+    while words and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]) or words[0] in ("env", "sudo", "time", "exec")):
+        words.pop(0)
+        while words and words[0].startswith("-"):  # env -u NAME, timeout 900
+            words = words[2:] if words[0] in ("-u", "--unset") else words[1:]
+    if words and words[0] == "timeout":
+        words = words[2:]
+    if not words:
+        return "shell"
+    out = [os.path.basename(words[0])]
+    if out[0] in MULTI_WORD:
+        for w in words[1:3]:
+            if w.startswith("-") or re.search(r"[=<>&$`'\"]", w) or "://" in w or (("/" in w or "." in w)
+                                                               and not re.search(r"\.(c?js|mjs|ts|py|sh|rb)$", w)):
+                break
+            out.append(w)
+    return " ".join(out)[:80]
+
+
+def _rel(path: str, root: str | None) -> str:
+    """A path from the repo root when it's inside it, ~ for the home folder, else its last two parts."""
+    p = str(path or "").replace("\\", "/")
+    if root:
+        r = str(root).replace("\\", "/").rstrip("/") + "/"
+        if p.startswith(r):
+            return p[len(r):]
+    home = os.path.expanduser("~").replace("\\", "/").rstrip("/") + "/"
+    if p.startswith(home):
+        return "~/" + p[len(home):]
+    parts = [x for x in p.split("/") if x]
+    return ".../" + "/".join(parts[-2:]) if len(parts) > 2 else p
+
+
+def _group(rel: str) -> str:
+    """Files that belong together: same folder, same extension (tools/playtest/out/*.png)."""
+    head, _, name = rel.rpartition("/")
+    ext = name.rsplit(".", 1)[1] if "." in name else ""
+    return f"{head + '/' if head else ''}*{'.' + ext if ext else ''}"
+
+
+def identity(tool: str, args: dict[str, Any], images: int, root: str | None) -> tuple[str, str, str] | None:
+    """(label, kind, group) for a tool result, or None for one too small to follow (an edit's confirmation)."""
+    if tool == "Read" and args.get("file_path"):
+        rel = _rel(args["file_path"], root)
+        return rel, "image" if images else "file", _group(rel)
+    if tool == "Bash":
+        label = command_label(str(args.get("command") or ""))
+        return label, "command", label.split(" ")[0]
+    if tool in EDITS or tool in ("Skill", "TodoWrite", "TaskCreate", "TaskUpdate"):
+        return None
+    if tool == "WebFetch":
+        host = urlparse(str(args.get("url") or "")).hostname or "web"
+        return f"WebFetch {host}", "web", "WebFetch"
+    if tool.startswith("mcp__"):
+        parts = tool.split("__")
+        return f"{parts[1]}: {'__'.join(parts[2:])}", "image" if images else "mcp", f"MCP {parts[1]}"
+    if tool in ("Agent", "Task"):
+        return f"subagent: {args.get('subagent_type') or 'general-purpose'}", "subagent", "subagents"
+    return tool, "image" if images else "tool", tool
+
+
+def instruction_files(root: str | None) -> list[tuple[str, int]]:
+    """CLAUDE.md files Claude Code loads into every session here: (label, chars)."""
+    out = []
+    for rel in INSTRUCTION_FILES if root else ():
+        f = Path(root) / rel
+        if f.is_file():
+            out.append((rel, len(f.read_text(encoding="utf-8", errors="replace"))))
+    user = Path(os.path.expanduser("~/.claude/CLAUDE.md"))
+    if user.is_file():
+        out.append(("~/.claude/CLAUDE.md", len(user.read_text(encoding="utf-8", errors="replace"))))
+    return out
 
 
 def image_tokens(data: str) -> int:
@@ -121,7 +223,7 @@ def _ts(value: Any) -> datetime | None:
     return datetime.fromisoformat(t) if t else None
 
 
-def read_file(path: Path, agent: str = "", test: str | None = None) -> dict[str, Any]:
+def read_file(path: Path, agent: str = "", test: str | None = None, root: str | None = None) -> dict[str, Any]:
     """One transcript file (a session or one subagent): its requests' usage, what its tools added, its rebuilds."""
     test_re = re.compile(test or TEST_COMMANDS)
     build_re = re.compile(BUILD_COMMANDS)
@@ -183,7 +285,7 @@ def read_file(path: Path, agent: str = "", test: str | None = None) -> dict[str,
                     chars, images = _text_size(block.get("content"))
                     cat = "image" if images else category(name, args, test_re, build_re)
                     item = {"category": cat, "chars": chars, "images": images, "at": e.get("timestamp"),
-                            "branch": e.get("gitBranch") or "", "repeat": False}
+                            "branch": e.get("gitBranch") or "", "repeat": False, "who": identity(name, args, images, root)}
                     target = str(args.get("file_path") or args.get("notebook_path") or "")
                     if name == "Read" and target:
                         span = (args.get("offset"), args.get("limit"), args.get("pages"))
@@ -195,12 +297,34 @@ def read_file(path: Path, agent: str = "", test: str | None = None) -> dict[str,
             elif kind == "attachment":
                 a = e.get("attachment") if isinstance(e.get("attachment"), dict) else {}
                 if a.get("type") not in _SKIP_ATTACHMENTS and not str(a.get("type") or "").endswith("_record"):
-                    pending.append({"category": None, "chars": len(json.dumps(a)), "images": 0})
+                    pending.extend(_attachment(a, e, root))
     ratio = _chars_per_token(requests)
     for item in items:
         item["tokens"] = round(item["chars"] / ratio) + item["images"]
     return {"requests": requests, "items": items, "rebuilds": _rebuilds(requests), "switches": task_switches(requests),
             "chars_per_token": ratio}
+
+
+def _attachment(a: dict[str, Any], e: dict[str, Any], root: str | None) -> list[dict[str, Any]]:
+    """What an attachment put into the context, as items. CLAUDE.md re-read after a compaction is left to
+    item_rows, which charges it to every request from the file on disk."""
+    base = {"category": None, "images": 0, "at": e.get("timestamp"), "branch": e.get("gitBranch") or ""}
+    kind = a.get("type")
+    if kind == "invoked_skills":
+        return [base | {"chars": len(str(sk.get("content") or "")), "who": (f"skill: {sk.get('name')}", "skill", "skills")}
+                for sk in a.get("skills") or [] if isinstance(sk, dict)]
+    if kind == "skill_listing":
+        return [base | {"chars": len(str(a.get("content") or "")), "who": ("skill list", "skill", "skills")}]
+    if kind == "file" and a.get("filename"):
+        rel = a.get("displayPath") or _rel(a["filename"], root)
+        return [base | {"chars": len(json.dumps(a.get("content") or "")), "who": (rel, "file", _group(rel))}]
+    if kind == "mcp_instructions_delta":
+        return [base | {"chars": len(json.dumps(a.get("addedBlocks") or [])), "who": ("MCP server instructions",
+                                                                                     "instructions", "instructions")}]
+    if kind == "instructions":
+        return [base | {"chars": len(json.dumps(a))}]
+    label = REMINDERS.get(kind) or str(kind or "notice").replace("_", " ")
+    return [base | {"chars": len(json.dumps(a)), "who": (label, "reminder", "reminders")}]
 
 
 def _context(r: dict[str, Any]) -> int:
@@ -280,7 +404,8 @@ def carried(requests: list[dict[str, Any]], items: list[dict[str, Any]]) -> None
         same = requests[i + 1]["window"] == requests[i]["window"]
         after[i] = (after[i + 1] + _reads_cache(requests, i + 1)) if same else 0
     for item in items:
-        item["carried_tokens"] = item["tokens"] * after[item["request"]] if "request" in item else 0
+        item["rides"] = after[item["request"]] if "request" in item else 0
+        item["carried_tokens"] = item["tokens"] * item["rides"]
 
 
 def rows(files: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -322,3 +447,51 @@ def rows(files: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
                 add(r["at"], r["branch"], "conversation",
                     carried_tokens=max(0, r["cache_read_tokens"] - base - tools_cached))
     return sorted(out.values(), key=lambda r: (r["minute"], r["branch"], r["category"]))
+
+
+ITEM_FIELDS = ("adds", "tokens", "rides", "max_rides", "carried_tokens")
+
+
+def item_rows(files: list[dict[str, Any]], instructions: Iterable[tuple[str, int]] = (), limit: int = 300) -> list[dict]:
+    """Per (label, kind): how many times it entered the context (adds), its tokens over all of them, the requests
+    that read it from the cache after (rides, and the most for one add), and the cache reads that cost. The
+    largest `limit` by cost, CLAUDE.md always."""
+    out: dict[tuple, dict[str, Any]] = {}
+
+    def add(label: str, kind: str, group: str, at: str | None, branch: str, adds: int, tokens: int, rides: int,
+            longest: int, carried_tokens: int) -> None:
+        r = out.setdefault((label, kind), {"label": label, "kind": kind, "group": group, "first_at": at, "branch": branch,
+                                           **{f: 0 for f in ITEM_FIELDS}})
+        r["adds"] += adds
+        r["tokens"] += tokens
+        r["rides"] += rides
+        r["max_rides"] = max(r["max_rides"], longest)
+        r["carried_tokens"] += carried_tokens
+
+    for f in files:
+        carried(f["requests"], f["items"])
+        for item in f["items"]:
+            if item.get("who") and "request" in item:
+                label, kind, group = item["who"]
+                add(label, kind, group, norm_time(item.get("at")), item["branch"], 1, item["tokens"], item["rides"],
+                    item["rides"], item["carried_tokens"])
+    rows = sorted(out.values(), key=lambda r: -r["carried_tokens"])[:limit]
+    started = [f["requests"][0] for f in files if f["requests"]]
+    if started:
+        reads = writes = longest = 0
+        for f in files:
+            per_window: dict[int, int] = defaultdict(int)
+            for i, r in enumerate(f["requests"]):
+                if _reads_cache(f["requests"], i):
+                    reads += 1
+                    per_window[r["window"]] += 1
+                else:
+                    writes += 1
+            longest = max([longest, *per_window.values()])
+        ratio = files[0].get("chars_per_token") or CHARS_PER_TOKEN
+        for label, chars in instructions:
+            t = round(chars / ratio)
+            rows.append({"label": label, "kind": "instructions", "group": "instructions", "first_at": started[0]["at"],
+                         "branch": started[0]["branch"], "adds": writes, "tokens": t * writes, "rides": reads,
+                         "max_rides": longest, "carried_tokens": t * reads})
+    return rows

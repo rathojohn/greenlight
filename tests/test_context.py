@@ -166,3 +166,51 @@ def test_side_panel_details_for_a_session_a_pr_a_category_and_waste(tmp_path):
         for kind, key in (("session", "nope"), ("pr", "99"), ("waste", "nope"), ("nope", "x")):
             with pytest.raises(LookupError):
                 usage.detail(conn, 3, kind, key)
+
+
+def test_each_item_and_how_many_requests_it_rode_along_with(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "CLAUDE.md").write_text("x" * 2400)  # 1,000 tokens
+    f = context.read_file(transcript(tmp_path), root="/")
+    rows = {(r["label"], r["kind"]): r for r in context.item_rows([f], context.instruction_files(str(root)))}
+    a = rows[("a.py", "file")]
+    assert (a["adds"], a["tokens"], a["rides"], a["max_rides"]) == (3, 3000, 3, 2)  # read by r2 (2 more), r3 (1), r4 (0)
+    assert rows[("npm test", "command")]["rides"] == 2 and rows[("cat", "command")]["kind"] == "command"
+    assert rows[("shot.png", "image")]["tokens"] == 100
+    assert rows[("github: get_pr", "mcp")]["adds"] == 1 and rows[("git status", "command")]["carried_tokens"] == 1000
+    assert not any(k == "edit" or label.startswith("Edit") for label, k in rows)  # an edit's confirmation isn't followed
+    claude = rows[("CLAUDE.md", "instructions")]
+    # every request that read the cache carried it (r2-r4, r7-r9); the window starts and the rebuild wrote it
+    assert (claude["adds"], claude["rides"], claude["max_rides"], claude["carried_tokens"]) == (3, 6, 3, 6000)
+
+
+def test_labels_never_carry_a_commands_arguments():
+    label = context.command_label
+    assert label("cd app && npm run test:changed -- --dry") == "npm run test:changed"
+    assert label("curl -s -H 'Authorization: Bearer abc' https://x.example/y") == "curl"
+    assert label("GH_TOKEN=abc gh pr view 3") == "gh pr view"
+    assert label("env -u A -u B .venv/bin/pytest -q tests/x.py") == "pytest"
+    assert label("echo hunter2") == "echo" and label("export TOKEN=abc") == "export"
+    assert context._rel("/home/u/r/src/a.ts", "/home/u/r") == "src/a.ts" and context._group("out/shots/a-1.png") == "out/shots/*.png"
+
+
+def test_items_are_stored_summed_by_label_and_group_and_can_be_turned_off(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "CLAUDE.md").write_text("x" * 2400)
+    hook = {"transcript_path": str(transcript(tmp_path)), "session_id": "s", "cwd": str(root)}
+    payload = usage.payload_from_hook(hook, {})
+    assert any(i["kind"] == "instructions" for i in payload["items"])
+    with closing(connect(str(tmp_path / "u.db"))) as conn:
+        usage.store(conn, payload)
+        found = usage.items_summary(conn, "0")
+        claude = next(i for i in found["items"] if i["label"] == "CLAUDE.md")
+        assert claude["sessions"] == 1 and claude["avg_rides"] == 2 and claude["weighted"] > 0
+        d = usage.detail(conn, 3, "item", "instructions:CLAUDE.md")
+        assert d["item"]["label"] == "CLAUDE.md" and d["rows"][0]["session_id"] == "s"
+        assert usage.detail(conn, 3, "session", "s")["items"]
+        with pytest.raises(LookupError):
+            usage.detail(conn, 3, "item", "file:nothing.py")
+    (root / "greenlight.toml").write_text("[usage]\nitem_labels = false\n")
+    assert "items" not in usage.payload_from_hook(hook, {})  # categories and counts only
