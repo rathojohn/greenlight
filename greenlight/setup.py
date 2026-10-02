@@ -28,8 +28,9 @@ RULES_MARKER = "## Test failures (greenlight)"
 AGENT_RULES = f"""{RULES_MARKER}
 Record every test run with greenlight, passing or not (passes are the history that tells a flaky test
 from a broken one), and on a failure follow its decision before rerunning anything. In a shell:
-`greenlight run -- <test command>`. With the MCP server: call greenlight_gate_junit with the run's
-JUnit report (or greenlight_playtest_gate for a playtest ledger).
+`greenlight run -- <test command>` (with GREENLIGHT_URL set, it sends the run to the shared server).
+If the MCP server offers greenlight_gate_junit, calling it with the run's JUnit report does the same
+(greenlight_playtest_gate for a playtest ledger).
 - PASS: nothing that counts failed. Carry on.
 - RERUN_TARGETED: only tests with a flake history failed. Rerun just those, once. No full regression.
 - REAL_FAILURE: a test with no flake history failed. Investigate it; a full regression only after a fix.
@@ -133,12 +134,29 @@ def _write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def project_files(target: Path, dry_run: bool = False) -> list[str]:
-    """Write (or merge into) the repo's own MCP config for Claude Code and Codex. Safe to run again."""
+def _drop_toml_table(text: str, header: str) -> str:
+    """text without the [header] table, up to the next table."""
+    out, skipping = [], False
+    for line in text.splitlines(keepends=True):
+        stripped = line.strip()
+        if stripped.startswith("["):
+            skipping = stripped == header
+        if not skipping:
+            out.append(line)
+    return "".join(out)
+
+
+def project_files(target: Path, dry_run: bool = False, url: str | None = None) -> list[str]:
+    """Write (or merge into) the repo's own MCP config for Claude Code and Codex. Safe to run again.
+    url: a greenlight server; sessions connect to it with $GREENLIGHT_TOKEN instead of starting their own."""
     done = []
     mcp_json = target / ".mcp.json"
     data = _read_json(mcp_json)
-    entry = {"type": "stdio", "command": UVX_COMMAND[0], "args": UVX_COMMAND[1:]}
+    if url:
+        entry = {"type": "http", "url": f"{url.rstrip('/')}/mcp",
+                 "headers": {"Authorization": "Bearer ${GREENLIGHT_TOKEN}"}}
+    else:
+        entry = {"type": "stdio", "command": UVX_COMMAND[0], "args": UVX_COMMAND[1:]}
     if data.get("mcpServers", {}).get(SERVER_NAME) == entry:
         done.append(".mcp.json: already set up")
     elif dry_run:
@@ -162,17 +180,22 @@ def project_files(target: Path, dry_run: bool = False) -> list[str]:
 
     codex = target / ".codex" / "config.toml"
     text = codex.read_text(encoding="utf-8") if codex.is_file() else ""
-    if f"[mcp_servers.{SERVER_NAME}]" in text:
+    header = f"[mcp_servers.{SERVER_NAME}]"
+    if url:
+        block = f'{header}\nurl = {json.dumps(url.rstrip("/") + "/mcp")}\nbearer_token_env_var = "GREENLIGHT_TOKEN"\n'
+    else:
+        args = ", ".join(json.dumps(a) for a in UVX_COMMAND[1:])
+        block = (f"{header}\ncommand = {json.dumps(UVX_COMMAND[0])}\nargs = [{args}]\n"
+                 "startup_timeout_sec = 120   # the first start downloads it\n")
+    if block in text:
         done.append(".codex/config.toml: already set up")
     elif dry_run:
         done.append(".codex/config.toml: would add the greenlight server")
     else:
-        args = ", ".join(json.dumps(a) for a in UVX_COMMAND[1:])
-        block = (f"[mcp_servers.{SERVER_NAME}]\ncommand = {json.dumps(UVX_COMMAND[0])}\nargs = [{args}]\n"
-                 "startup_timeout_sec = 120   # the first start downloads it\n")
+        rest = _drop_toml_table(text, header).rstrip("\n")
         codex.parent.mkdir(parents=True, exist_ok=True)
-        codex.write_text(text + ("\n" if text and not text.endswith("\n\n") else "") + block, encoding="utf-8")
-        done.append(".codex/config.toml: added the greenlight server (Codex reads it in trusted projects)")
+        codex.write_text((rest + "\n\n" if rest else "") + block, encoding="utf-8")
+        done.append(".codex/config.toml: set the greenlight server (Codex reads it in trusted projects)")
     return done
 
 

@@ -185,7 +185,8 @@ def test_http_server_needs_the_token_in_the_path_or_a_header(hosted, tmp_path):
     finally:
         proc.terminate()
         proc.wait(10)
-    assert b"t0ken-abc" not in proc.stderr.read().replace(b"/t0ken-abc/mcp", b"")  # only in the URL it prints
+    leaked = [line for line in proc.stderr.read().decode().splitlines() if "t0ken-abc" in line]
+    assert leaked and all(line.lstrip().startswith(("dashboard", "MCP")) for line in leaked)  # only the URLs it prints
 
 
 def test_checkout_mode_fills_a_fresh_db_on_first_use(game, tmp_path):  # noqa: F811

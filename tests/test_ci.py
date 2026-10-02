@@ -1,12 +1,9 @@
-import gzip
 import json
-import subprocess
 
 import pytest
 
 from greenlight import ci, cli, github
 from greenlight.db import connect
-from greenlight.gitrepo import Repo
 from tests.conftest import hide_clis, junit_xml
 from tests.fakegithub import FakeGitHub
 
@@ -42,42 +39,21 @@ def test_actions_env_reads_the_pull_request(actions):
     assert env["url"] == "https://github.com/o/r/actions/runs/900/attempts/1"
 
 
-def test_records_round_trip_through_a_data_dir(actions, tmp_path):
-    data = tmp_path / "data"
+def test_a_job_run_round_trips_as_a_record(actions, tmp_path):
+    """What the Action sends to a greenlight server: the job's run as a record, loaded once however often it's sent."""
     with connect(str(tmp_path / "a.db")) as conn:
         res = ci.record_junit(conn, [write_junit(tmp_path / "j.xml", [(FLAKY, "fail", 1.0, "Timeout 5000ms"),
                                                                        ("t.a::ok", "pass", 0.2, None)])],
-                              name="py3.12", out_dir=str(data))
+                              name="py3.12")
+        rec = ci.export_run(conn, res["run_id"])
     assert res["external_id"] == "gha:900:1:test:py3.12"
-    path = data / res["record"]
-    assert path.name == "gha_900_1_test_py3.12.json.gz" and res["record"].startswith("runs/")
-    rec = json.loads(gzip.decompress(path.read_bytes()))
     assert rec["commit_sha"] == "abc123@py3.12" and rec["git_commit"] == "abc123"
     assert len(rec["results"]) == 2 and rec["session"] == "CI / test / py3.12"
+    rec = json.loads(json.dumps(rec))  # over the wire
     with connect(str(tmp_path / "b.db")) as fresh:
-        assert ci.restore_dir(fresh, str(data)) == {"records": 1, "added": 1}
-        assert ci.restore_dir(fresh, str(data)) == {"records": 1, "added": 0}
+        assert ci.load_record(fresh, rec) and not ci.load_record(fresh, rec)
         row = fresh.execute("SELECT message, failure_sig FROM results WHERE test_id = ?", (FLAKY,)).fetchone()
         assert row["message"] == "Timeout 5000ms" and row["failure_sig"]
-
-
-def test_restore_from_a_branch_in_the_clone(actions, tmp_path):
-    origin = tmp_path / "origin"
-    clone = tmp_path / "clone"
-    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
-    subprocess.run(["git", "clone", "-q", str(origin), str(clone)], check=True, capture_output=True)
-    data = tmp_path / "data"
-    subprocess.run(["git", "init", "-q", "-b", "greenlight-data", str(data)], check=True)
-    with connect(str(tmp_path / "a.db")) as conn:
-        ci.record_junit(conn, [write_junit(tmp_path / "j.xml", [(FLAKY, "pass", 1.0, None)])], out_dir=str(data))
-    for args in (["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "r"],
-                 ["push", "-q", str(origin), "greenlight-data"]):
-        subprocess.run(["git", "-C", str(data), *args], check=True, capture_output=True)
-    with connect(str(tmp_path / "c.db")) as conn:
-        out = ci.restore_branch(conn, Repo(str(clone)), "greenlight-data")
-        assert out["fetched"] and (out["records"], out["added"]) == (1, 1)
-        assert ci.restore_branch(conn, Repo(str(clone)), "greenlight-data")["added"] == 0
-        assert ci.restore_branch(conn, Repo(str(clone)), "nope")["note"] == "no nope branch yet"
 
 
 def test_report_markdown_summary_outputs_and_exit_codes(actions, tmp_path, capsys):

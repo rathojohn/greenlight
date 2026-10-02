@@ -1,0 +1,171 @@
+"""The hosted server (`greenlight serve`) and the clients that send it runs. A real server process on a free
+port, its own database, and the CLI pointed at it with GREENLIGHT_URL and GREENLIGHT_TOKEN."""
+import gzip
+import json
+import socket
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from contextlib import closing
+
+import pytest
+
+from greenlight import ci, cli
+from greenlight.db import connect
+from tests.conftest import child_env, junit_xml
+from tests.test_ci import FLAKY, actions, write_junit  # noqa: F401 - fixture
+from tests.test_playtest import game, record, write_record  # noqa: F401 - fixture
+from tests.test_setup import checkout  # noqa: F401 - fixture
+
+TOKEN = "hosted-t0ken"
+
+
+@pytest.fixture
+def server(tmp_path):
+    with closing(socket.socket()) as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    db = tmp_path / "server.db"
+    home = tmp_path / "server-home"
+    home.mkdir()
+    proc = subprocess.Popen([sys.executable, "-m", "greenlight", "serve", "--port", str(port)],
+                            env=child_env(GREENLIGHT_DB=str(db), GREENLIGHT_TOKEN=TOKEN), cwd=str(home),
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    base = f"http://127.0.0.1:{port}"
+    for _ in range(100):
+        try:
+            with urllib.request.urlopen(base + "/healthz", timeout=1):
+                break
+        except OSError:
+            time.sleep(0.1)
+    yield base, db
+    proc.terminate()
+    proc.wait(10)
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):  # noqa: ANN002, ANN003
+        return None
+
+
+def call(url: str, method: str = "GET", headers: dict | None = None, body: bytes | None = None):
+    req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
+    try:
+        with urllib.request.build_opener(NoRedirect).open(req, timeout=20) as r:
+            return r.status, r.headers, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers, e.read()
+
+
+def use_server(monkeypatch, base: str) -> None:
+    monkeypatch.setenv("GREENLIGHT_URL", base)
+    monkeypatch.setenv("GREENLIGHT_TOKEN", TOKEN)
+
+
+def test_one_token_three_ways_in(server):
+    base, _ = server
+    assert call(base + "/healthz")[0] == 200
+    status, _, page = call(base + "/", headers={"Accept": "text/html"})
+    assert status == 401 and b"Sign in" in page
+    assert call(base + "/?token=wrong")[0] == 401
+    status, headers, _ = call(base + f"/?token={TOKEN}")
+    cookie = headers["Set-Cookie"]
+    assert status == 303 and headers["Location"] == "/" and "HttpOnly" in cookie and "SameSite=Lax" in cookie
+    jar = {"Cookie": cookie.split(";")[0]}
+    status, _, page = call(base + "/", headers=jar)
+    assert status == 200 and b"<html" in page.lower()
+    assert call(base + "/api/runs", headers=jar)[0] == 200
+    assert call(base + "/api/runs", headers={"Authorization": f"Bearer {TOKEN}"})[0] == 200
+    assert call(base + f"/{TOKEN}/api/runs")[0] == 200
+    assert call(base + "/api/runs")[0] == 401
+    # a cookie can be sent by any site's form, so a cookie POST needs the header no form can set
+    sweep = json.dumps({"apply": False}).encode()
+    assert call(base + "/api/sweep", "POST", jar, sweep)[0] == 403
+    assert call(base + "/api/sweep", "POST", {**jar, "X-Greenlight": "1"}, sweep)[0] == 200
+    assert call(base + "/api/sweep", "POST", {"Authorization": f"Bearer {TOKEN}"}, sweep)[0] == 200
+
+
+def test_records_are_loaded_once_and_judged(server, tmp_path, actions):  # noqa: F811
+    base, db = server
+    with connect(str(tmp_path / "job.db")) as conn:
+        res = ci.record_junit(conn, [write_junit(tmp_path / "j.xml", [(FLAKY, "pass", 0.5, None)])])
+        rec = ci.export_run(conn, res["run_id"])
+    auth = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
+    body = json.dumps({"records": [rec], "gate": rec["external_id"]}).encode()
+    status, _, out = call(base + "/api/records", "POST", {**auth, "Content-Encoding": "gzip"}, gzip.compress(body))
+    out = json.loads(out)
+    assert status == 200 and out["loaded"] == 1 and out["triage"]["decision"] == "PASS"
+    out = json.loads(call(base + "/api/records", "POST", auth, body)[2])
+    assert out["loaded"] == 0 and out["triage"]["decision"] == "PASS"  # the same record twice adds nothing
+    assert call(base + "/api/records", "POST", auth, b'{"records": []}')[0] == 400
+    assert call(base + "/api/records", "POST", auth, json.dumps({"records": [rec], "gate": "nope"}).encode())[0] == 400
+    with closing(connect(str(db), readonly=True)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
+
+
+def test_run_is_judged_by_the_server(server, checkout, monkeypatch, tmp_path, capsys):  # noqa: F811
+    base, db = server
+    repo, sha = checkout
+    monkeypatch.chdir(repo)
+    use_server(monkeypatch, base)
+    local = tmp_path / "local.db"
+    pytest_cmd = ["--", sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+    assert cli.main(["--db", str(local), "run", *pytest_cmd]) == 0
+    assert f"on {base}" in capsys.readouterr().out
+    monkeypatch.setenv("FLIP", "1")  # same code, other result: the server has both runs, so it's a flip
+    assert cli.main(["--db", str(local), "run", *pytest_cmd]) == 2
+    assert "RERUN_TARGETED" in capsys.readouterr().out
+    assert not local.exists()  # nothing kept on this machine
+    with closing(connect(str(db), readonly=True)) as conn:
+        assert [tuple(r) for r in conn.execute("SELECT commit_sha, attempt FROM runs ORDER BY run_id")] == \
+            [(sha, 1), (sha, 2)]
+
+
+def test_playtest_gate_is_judged_by_the_server(server, game, monkeypatch, tmp_path, capsys):  # noqa: F811
+    base, db = server
+    repo, head = game
+    use_server(monkeypatch, base)
+    lantern = "the Lantern points at the foe it locked on"
+    write_record(repo, record("2026-10-02T05:00:00.000Z", head, {
+        "smoke": {"pass": False, "checks": 38, "failed": [lantern]}}, changed={"b": "2"}))
+    write_record(repo, record("2026-10-02T05:10:00.000Z", head, {"smoke": {"pass": True, "checks": 38}},
+                              changed={"b": "2"}))
+    write_record(repo, record("2026-10-02T06:00:00.000Z", head, {
+        "smoke": {"pass": False, "checks": 38, "failed": [lantern]}}, changed={"c": "3"}))
+    assert cli.main(["--db", str(tmp_path / "local.db"), "playtest", "gate", "--repo", str(repo)]) == 2
+    assert "rerun only: node tools/playtest/run.cjs smoke --rerun" in capsys.readouterr().out
+    with closing(connect(str(db), readonly=True)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM runs WHERE source = 'playtest'").fetchone()[0] >= 3
+
+
+def test_ci_report_gets_the_decision_from_the_server(server, actions, monkeypatch, tmp_path, capsys):  # noqa: F811
+    base, _ = server
+    use_server(monkeypatch, base)
+    for attempt, outcome, expected in (("1", "pass", 0), ("2", "fail", 0)):
+        monkeypatch.setenv("GITHUB_RUN_ATTEMPT", attempt)
+        job_db = str(tmp_path / f"job{attempt}.db")  # every job starts with an empty disk
+        report = write_junit(tmp_path / f"r{attempt}.xml", [(FLAKY, outcome, 1.0, "boom" if outcome == "fail" else None),
+                                                           ("t.a::ok", "pass", 0.1, None)])
+        assert cli.main(["--db", job_db, "ci", "record", "--junit", report]) == 0
+        assert cli.main(["--db", job_db, "ci", "report"]) == expected
+    summary = (actions / "summary.md").read_text()
+    assert "Rerun the flaky tests only" in summary  # attempt 2 failed what attempt 1 passed, on the same commit
+    assert "decision=RERUN_TARGETED" in (actions / "out.txt").read_text()
+
+
+def test_otlp_spans_land_on_the_server(server):
+    base, db = server
+    span = {"traceId": "a" * 32, "spanId": "b" * 16, "name": "test", "startTimeUnixNano": "1790000000000000000",
+            "endTimeUnixNano": "1790000001000000000",
+            "attributes": [{"key": "test.case.name", "value": {"stringValue": "t.x::y"}},
+                           {"key": "test.case.result.status", "value": {"stringValue": "fail"}}]}
+    payload = json.dumps({"resourceSpans": [{"resource": {"attributes": [
+        {"key": "vcs.ref.head.revision", "value": {"stringValue": "f" * 40}}]},
+        "scopeSpans": [{"spans": [span]}]}]}).encode()
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    assert call(base + "/v1/traces", "POST", {**auth, "Content-Type": "text/plain"}, payload)[0] == 415
+    assert call(base + "/v1/traces", "POST", {**auth, "Content-Type": "application/json"}, payload)[0] == 200
+    with closing(connect(str(db), readonly=True)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM results WHERE test_id = 't.x::y'").fetchone()[0] == 1

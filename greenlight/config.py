@@ -27,7 +27,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
                  "deploy_files": None, "deploy_files_ref": None, "incident_labels": ["incident", "hotfix", "bug"]},
     "issues": {"flaky_label": "flaky-test", "perf_label": "perf-regression", "quarantine_label": "quarantined",
                "min_flips": 2, "window_days": 30, "healed_runs": 10, "healed_days": 14},
-    "ci": {"data_branch": "greenlight-data"},
+    "ci": {},  # history no longer lives on a branch; kept so an old [ci] section isn't an error
     "otel": {"endpoint": None, "service_name": None, "window_days": 30, "since_days": 90},
     "sync": {"days": 90},
     "run": {"junit": None},

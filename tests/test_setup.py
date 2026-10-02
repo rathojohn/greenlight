@@ -103,7 +103,7 @@ def test_setup_writes_config_and_rules_once(checkout, monkeypatch, capsys):
     assert "config: wrote" in out and setup.RULES_MARKER in out
     assert "claude mcp add --transport stdio --scope user greenlight -- " + sys.executable in out
     cfg = config.load(str(repo / "greenlight.toml"))
-    assert cfg.get("run", "junit") is None and cfg.get("ci", "data_branch") == "greenlight-data"
+    assert cfg.get("run", "junit") is None and cfg.get("issues", "flaky_label") == "flaky-test"
 
     (repo / "AGENTS.md").write_text("# Agents\n")
     assert cli.main(["setup", str(repo), "--no-claude", "--agent-rules"]) == 0
@@ -171,7 +171,7 @@ def test_project_files_merge_into_what_the_repo_has(tmp_path):
     assert setup.project_files(repo, dry_run=True)[0] == ".mcp.json: would add the greenlight server"
     assert not (repo / ".codex").exists()
     first = setup.project_files(repo)
-    assert all("added" in line or "approved" in line for line in first), first
+    assert all(("added" in line or "approved" in line or ": set" in line) for line in first), first
     servers = json.loads((repo / ".mcp.json").read_text())["mcpServers"]
     assert servers["other"] == {"command": "x"}
     assert servers["greenlight"] == {"type": "stdio", "command": "uvx", "args": setup.UVX_COMMAND[1:]}
@@ -206,3 +206,21 @@ def test_setup_project_mode_writes_repo_files_not_user_config(checkout, monkeypa
     assert "greenlight-proj" in json.loads(desktop.read_text())["mcpServers"]
     assert cli.main(["setup", str(repo), "--no-claude", "--claude-desktop"]) == 3  # no --repo, no GitHub remote
     assert "needs the GitHub repo" in capsys.readouterr().err
+
+
+def test_project_files_can_point_at_a_server(tmp_path):
+    import tomllib
+    repo = tmp_path / "proj"
+    (repo / ".codex").mkdir(parents=True)
+    (repo / ".codex" / "config.toml").write_text('model = "x"\n\n[mcp_servers.other]\ncommand = "o"\n')
+    setup.project_files(repo)  # first the local, uvx-started server
+    setup.project_files(repo, url="https://ci.example.com/")
+    server = json.loads((repo / ".mcp.json").read_text())["mcpServers"]["greenlight"]
+    assert server == {"type": "http", "url": "https://ci.example.com/mcp",
+                      "headers": {"Authorization": "Bearer ${GREENLIGHT_TOKEN}"}}
+    codex = tomllib.loads((repo / ".codex" / "config.toml").read_text())
+    assert codex["model"] == "x" and codex["mcp_servers"]["other"] == {"command": "o"}
+    assert codex["mcp_servers"]["greenlight"] == {"url": "https://ci.example.com/mcp",
+                                                  "bearer_token_env_var": "GREENLIGHT_TOKEN"}
+    assert all("already" in line or "approved" in line
+               for line in setup.project_files(repo, url="https://ci.example.com"))

@@ -2,7 +2,8 @@
 
   greenlight mcp                      stdio, for the project the agent works in (Claude Code, Codex)
   greenlight mcp --repo owner/name    stdio, reading the repo from GitHub: no clone (Claude Desktop)
-  greenlight serve --repo owner/name  streamable HTTP, for claude.ai and ChatGPT connectors
+  greenlight serve --repo owner/name  the hosted server (hosted.py): this over streamable HTTP, plus the
+                                      dashboard and the ingest API, for every client at once
 
 `greenlight setup` registers it with each client.
 """
@@ -93,7 +94,7 @@ def configure(repo: str | None = None, project: str | Path | None = None) -> Non
         STATE.refresher = remote.Refresher(_sync, ready=Path(default_db_path()).exists())
 
 
-SYNCED = {"playtest", "records", "pulls", "issues", "actions", "deployments"}  # never otel from here
+SYNCED = {"playtest", "pulls", "issues", "actions", "deployments"}  # never otel from here
 
 
 def _sync() -> None:
@@ -125,16 +126,25 @@ WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHin
 WindowDays = Annotated[int, Field(ge=1, le=365, description="Lookback window in days.")]
 
 
+def not_ready() -> str | None:
+    """Start a refresh if one is due, and wait out the very first one. A message when there's no data yet."""
+    r = STATE.refresher
+    if not r:
+        return None
+    r.kick()
+    if not r.wait_ready(FIRST_SYNC_WAIT):
+        return (f"greenlight is reading {STATE.repo or STATE.cfg.repo or 'this repo'} for the first time "
+                "(run records, then pull requests, issues and Actions runs). Try again in a minute.")
+    if r.error and not Path(default_db_path()).exists():
+        return f"couldn't sync {STATE.repo or STATE.project}: {r.error}"
+    return None
+
+
 def _run(fn: Callable[[sqlite3.Connection], Any], readonly: bool = True) -> str:
     """Open a connection per call, return compact JSON, and turn errors into actionable text."""
-    r = STATE.refresher
-    if r:
-        r.kick()
-        if not r.wait_ready(FIRST_SYNC_WAIT):
-            return (f"Error: greenlight is reading {STATE.repo or STATE.cfg.repo or 'this repo'} for the first time "
-                    "(run records, then pull requests, issues and Actions runs). Try again in a minute.")
-        if r.error and not Path(default_db_path()).exists():
-            return f"Error: couldn't sync {STATE.repo or STATE.project}: {r.error}"
+    waiting = not_ready()
+    if waiting:
+        return f"Error: {waiting}"
     try:
         with closing(connect(readonly=readonly)) as conn:
             return json.dumps(fn(conn), default=str, separators=(",", ":"))
@@ -338,11 +348,11 @@ def playtest_gate(
 @mcp.tool(name="greenlight_sync", annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False,
                                                                idempotentHint=True, openWorldHint=True))
 def sync_sources(
-    only: Annotated[list[Literal["playtest", "records", "pulls", "issues", "actions", "deployments"]] | None,
+    only: Annotated[list[Literal["playtest", "pulls", "issues", "actions", "deployments"]] | None,
                     Field(description="Sources to sync. Default: everything greenlight.toml configures.")] = None,
 ) -> str:
-    """Pull git and GitHub data into the local DB: playtest records, CI run records from the data branch,
-    pull requests, issues, GitHub Actions runs and deployments. Reads GitHub only; writes only the local DB."""
+    """Pull git and GitHub data into greenlight's DB: playtest records, pull requests, issues, GitHub Actions
+    runs and deployments. Reads GitHub only; writes only greenlight's own DB."""
     from . import sync
     if STATE.refresher and not only:
         try:
@@ -414,88 +424,6 @@ def manage_issues(
             return {"applied": False, "actions": json.loads(issues.as_json(actions))}
         return {"applied": True, "results": issues.apply(c, gh, actions)}
     return _run(go, readonly=False)
-
-
-class _Guard:
-    """Token check in front of the HTTP app. claude.ai and ChatGPT connectors can't send an API key
-    header, so the token can ride in the URL path: https://host/<token>/mcp. Clients that can send
-    headers (Claude Code, Codex) use `Authorization: Bearer <token>` on /mcp instead."""
-
-    def __init__(self, app: Any, token: str | None):
-        self.app = app
-        self.token = token
-
-    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
-        if scope["type"] != "http":  # lifespan: the MCP session manager starts and stops here
-            return await self.app(scope, receive, send)
-        path = scope.get("path") or "/"
-        if path == "/healthz":
-            return await _reply(send, 200, "ok\n")
-        if self.token:
-            first, _, rest = path.lstrip("/").partition("/")
-            if hmac.compare_digest(first.encode(), self.token.encode()):
-                scope = {**scope, "path": "/" + rest, "raw_path": ("/" + rest).encode()}
-            elif not _bearer_ok(scope, self.token):
-                return await _reply(send, 401, "greenlight: missing or wrong token\n", [(b"www-authenticate", b"Bearer")])
-        if scope["path"] in ("/", ""):
-            return await _reply(send, 200, "greenlight MCP server: point an MCP client at /mcp on this address.\n")
-        return await self.app(scope, receive, send)
-
-
-def _bearer_ok(scope: dict, token: str) -> bool:
-    for name, value in scope.get("headers") or []:
-        if name.lower() == b"authorization":
-            kind, _, given = value.decode("latin-1").partition(" ")
-            return kind.lower() == "bearer" and hmac.compare_digest(given.strip().encode(), token.encode())
-    return False
-
-
-async def _reply(send: Any, status: int, text: str, headers: list | None = None) -> None:
-    body = text.encode()
-    await send({"type": "http.response.start", "status": status,
-                "headers": [(b"content-type", b"text/plain; charset=utf-8"), (b"content-length", str(len(body)).encode()),
-                            *(headers or [])]})
-    await send({"type": "http.response.body", "body": body})
-
-
-LOOPBACK = ("127.0.0.1", "localhost", "::1")
-
-
-def http_app(token: str | None, host: str = "127.0.0.1") -> Any:
-    """The streamable HTTP app: stateless JSON responses, so it runs behind any proxy or host, scaled to
-    any number of copies. On loopback it also refuses other Host headers (DNS rebinding)."""
-    from mcp.server.transport_security import TransportSecuritySettings
-    if host in LOOPBACK:
-        security = TransportSecuritySettings(enable_dns_rebinding_protection=True,
-                                             allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"],
-                                             allowed_origins=["http://127.0.0.1:*", "http://localhost:*"])
-    else:
-        security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
-    try:
-        app = mcp.streamable_http_app(streamable_http_path="/mcp", json_response=True, stateless_http=True,
-                                      transport_security=security, host=host)
-    except TypeError as e:  # mcp 1.x takes these as settings
-        raise RuntimeError("greenlight serve needs mcp 2.2 or newer: run `uv tool upgrade greenlight`") from e
-    return _Guard(app, token)
-
-
-def serve_http(host: str = "127.0.0.1", port: int = 8000, token: str | None = None, no_auth: bool = False) -> None:
-    import uvicorn
-    token = token or os.environ.get("GREENLIGHT_MCP_TOKEN") or None
-    if no_auth:
-        token = None
-    elif not token and host not in LOOPBACK:
-        token = secrets.token_urlsafe(24)
-        print("No GREENLIGHT_MCP_TOKEN set, so this run uses a random token. Set one to keep the URL across "
-              "restarts.", file=sys.stderr)
-    _prune_tools()
-    if STATE.refresher:
-        STATE.refresher.kick()  # start reading the repo now, not on the first question
-    shown = "localhost" if host in ("0.0.0.0", "::") else host
-    where = f"http://{shown}:{port}/{token}/mcp" if token else f"http://{shown}:{port}/mcp"
-    print(f"greenlight MCP server for {STATE.repo or STATE.cfg.repo or STATE.project}\n  {where}\n"
-          "Behind your host's HTTPS address, that's the URL to give Claude or ChatGPT as a connector.", file=sys.stderr)
-    uvicorn.run(http_app(token, host), host=host, port=port, log_level="warning", access_log=False)
 
 
 def main(argv: list[str] | None = None) -> None:
