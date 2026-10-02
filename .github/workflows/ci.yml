@@ -7,16 +7,20 @@ on:
 
 permissions:
   contents: write        # greenlight saves each run's record to the greenlight-data branch
-  pull-requests: write   # and keeps one comment per job on the pull request
+  pull-requests: write   # and keeps one comment on the pull request
   issues: read           # quarantine labels on flaky-test issues
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.11", "3.12"]
+        include:
+          - { os: ubuntu-latest, python: "3.11", name: py3.11 }
+          - { os: ubuntu-latest, python: "3.12", name: py3.12, comment: true }
+          - { os: windows-latest, python: "3.12", name: windows-py3.12 }
+          - { os: macos-latest, python: "3.12", name: macos-py3.12 }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,4 +33,50 @@ jobs:
       - uses: ./
         with:
           junit: reports/junit.xml
-          name: py${{ matrix.python }}
+          name: ${{ matrix.name }}
+          pr-comment: ${{ matrix.comment && 'true' || 'false' }}
+
+  container:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write    # publish ghcr.io/<owner>/greenlight from main
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: greenlight:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "mcp>=2.2"
+      - name: Smoke test the image (CLI, then the HTTP MCP server reading this repo from GitHub)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          docker run --rm greenlight:test --version
+          docker run -d --name gl -p 8000:8000 -e GREENLIGHT_REPO="$GITHUB_REPOSITORY" \
+            -e GREENLIGHT_MCP_TOKEN=ci-token -e GITHUB_TOKEN="$GH_TOKEN" greenlight:test
+          python .github/scripts/smoke_mcp.py http://127.0.0.1:8000 ci-token "$GITHUB_REPOSITORY" || { docker logs gl; exit 1; }
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/setup-qemu-action@v3
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Publish for amd64 and arm64 (Apple Silicon, Graviton)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository }}:latest,ghcr.io/${{ github.repository }}:${{ github.sha }}
+          cache-from: type=gha

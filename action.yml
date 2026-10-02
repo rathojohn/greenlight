@@ -44,11 +44,17 @@ runs:
     - name: Install greenlight
       shell: bash
       run: |
-        python3 -m venv "$RUNNER_TEMP/greenlight-venv"
+        # Windows runners: forward slashes work for bash and Python alike, and "python3" there can be
+        # the Microsoft Store stub, so use "python"
+        T="${RUNNER_TEMP//\\//}"
+        PY=python3; [ "$RUNNER_OS" = "Windows" ] && PY=python
+        "$PY" -m venv "$T/greenlight-venv"
+        BIN="$T/greenlight-venv/bin"; [ -d "$BIN" ] || BIN="$T/greenlight-venv/Scripts"
         # the CLI only needs the standard library; the MCP server's dependencies stay out of CI
-        "$RUNNER_TEMP/greenlight-venv/bin/pip" install -q --no-deps "$GITHUB_ACTION_PATH"
-        echo "$RUNNER_TEMP/greenlight-venv/bin" >> "$GITHUB_PATH"
-        echo "GREENLIGHT_DB=$RUNNER_TEMP/greenlight.db" >> "$GITHUB_ENV"
+        "$BIN/python" -m pip install -q --no-deps "${GITHUB_ACTION_PATH//\\//}"
+        if command -v cygpath >/dev/null; then cygpath -w "$BIN"; else echo "$BIN"; fi >> "$GITHUB_PATH"
+        echo "GREENLIGHT_DB=$T/greenlight.db" >> "$GITHUB_ENV"
+        echo "GREENLIGHT_DATA_DIR=$T/greenlight-data" >> "$GITHUB_ENV"
 
     - name: Load history from ${{ inputs.data-branch }}
       shell: bash
@@ -56,7 +62,7 @@ runs:
         TOKEN: ${{ inputs.token }}
         BRANCH: ${{ inputs.data-branch }}
       run: |
-        D="$RUNNER_TEMP/greenlight-data"
+        D="$GREENLIGHT_DATA_DIR"
         AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')"
         URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
         if git -c http.extraheader="$AUTH" ls-remote --exit-code --heads "$URL" "$BRANCH" >/dev/null 2>&1; then
@@ -85,7 +91,7 @@ runs:
         NAME: ${{ inputs.name }}
       run: |
         set -f  # greenlight expands the globs itself
-        greenlight ci record --junit $JUNIT ${NAME:+--name "$NAME"} --dir "$RUNNER_TEMP/greenlight-data"
+        greenlight ci record --junit $JUNIT ${NAME:+--name "$NAME"} --dir "$GREENLIGHT_DATA_DIR"
 
     - name: Gate and report
       id: report
@@ -112,7 +118,7 @@ runs:
         TOKEN: ${{ inputs.token }}
         BRANCH: ${{ inputs.data-branch }}
       run: |
-        cd "$RUNNER_TEMP/greenlight-data"
+        cd "$GREENLIGHT_DATA_DIR"
         git add -A
         git commit -q -m "Record $GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER ($GITHUB_JOB)" || exit 0
         AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')"

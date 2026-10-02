@@ -1,14 +1,19 @@
-"""`greenlight setup`: everything a repo needs to use greenlight from Claude Code or Codex.
+"""`greenlight setup`: everything a repo needs to use greenlight from Claude or ChatGPT.
 
   greenlight.toml   written by `init` if the repo has none
   Claude Code       the MCP server registered at user scope, so every project gets it; the server
                     reads the greenlight.toml of whichever repo the session runs in
-  Codex             the same server in ~/.codex/config.toml (with --codex)
+  --project         .mcp.json, .claude/settings.json and .codex/config.toml in the repo: every Claude
+                    Code session on it (web included) and every Codex session starts greenlight through
+                    uvx, with nothing installed by hand. Commit them and the whole team has it.
+  --claude-desktop  Claude Desktop reads this repo straight from GitHub (no clone)
+  --codex           the user-scope server in ~/.codex/config.toml (Codex CLI, IDE and ChatGPT desktop)
   CLAUDE.md         the rule that makes agents ask the gate before rerunning (printed, or written
                     with --agent-rules)
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -103,6 +108,97 @@ def claude_mcp(dry_run: bool = False) -> str:
             " ".join(_quote(c) for c in cmd)
     return ("updated" if existing.returncode == 0 else "added") + \
         " the greenlight MCP server in Claude Code (user scope: every project). Restart open sessions to load it."
+
+
+# What a project's own config starts. uvx fetches greenlight (and Python if needed) on first use and
+# caches it, so it works in a fresh cloud session where a SessionStart hook would run too late: Claude
+# Code starts project MCP servers before the hook finishes.
+UVX_COMMAND = ["uvx", "--from", "git+https://github.com/rathojohn/greenlight", "greenlight-mcp"]
+
+
+def _read_json(path: Path) -> dict:
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig") or "{}")  # -sig: Windows editors add a BOM
+    except ValueError as e:
+        raise ValueError(f"{path} isn't valid JSON ({e}); fix it and rerun") from e
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} should hold a JSON object")
+    return data
+
+
+def _write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def project_files(target: Path, dry_run: bool = False) -> list[str]:
+    """Write (or merge into) the repo's own MCP config for Claude Code and Codex. Safe to run again."""
+    done = []
+    mcp_json = target / ".mcp.json"
+    data = _read_json(mcp_json)
+    entry = {"type": "stdio", "command": UVX_COMMAND[0], "args": UVX_COMMAND[1:]}
+    if data.get("mcpServers", {}).get(SERVER_NAME) == entry:
+        done.append(".mcp.json: already set up")
+    elif dry_run:
+        done.append(".mcp.json: would add the greenlight server")
+    else:
+        data.setdefault("mcpServers", {})[SERVER_NAME] = entry
+        _write_json(mcp_json, data)
+        done.append(".mcp.json: added the greenlight server")
+
+    settings = target / ".claude" / "settings.json"
+    data = _read_json(settings)
+    enabled = data.get("enabledMcpjsonServers") or []
+    if SERVER_NAME in enabled:
+        done.append(".claude/settings.json: greenlight already approved")
+    elif dry_run:
+        done.append(".claude/settings.json: would approve greenlight, so no session has to")
+    else:
+        data["enabledMcpjsonServers"] = [*enabled, SERVER_NAME]
+        _write_json(settings, data)
+        done.append(".claude/settings.json: approved greenlight, so no session has to")
+
+    codex = target / ".codex" / "config.toml"
+    text = codex.read_text(encoding="utf-8") if codex.is_file() else ""
+    if f"[mcp_servers.{SERVER_NAME}]" in text:
+        done.append(".codex/config.toml: already set up")
+    elif dry_run:
+        done.append(".codex/config.toml: would add the greenlight server")
+    else:
+        args = ", ".join(json.dumps(a) for a in UVX_COMMAND[1:])
+        block = (f"[mcp_servers.{SERVER_NAME}]\ncommand = {json.dumps(UVX_COMMAND[0])}\nargs = [{args}]\n"
+                 "startup_timeout_sec = 120   # the first start downloads it\n")
+        codex.parent.mkdir(parents=True, exist_ok=True)
+        codex.write_text(text + ("\n" if text and not text.endswith("\n\n") else "") + block, encoding="utf-8")
+        done.append(".codex/config.toml: added the greenlight server (Codex reads it in trusted projects)")
+    return done
+
+
+def claude_desktop_path() -> Path:
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+    if os.name == "nt":
+        return Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "Claude" / "claude_desktop_config.json"
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "Claude" / "claude_desktop_config.json"
+
+
+def claude_desktop(repo: str, path: Path | None = None, dry_run: bool = False) -> str:
+    """Claude Desktop starts the server with no project, so it reads the repo from GitHub. One entry
+    per repo (greenlight-<name>), run by this install's interpreter: desktop apps don't get your
+    shell's PATH, so `uvx` or `greenlight` might not be found there."""
+    path = path or claude_desktop_path()
+    name = f"{SERVER_NAME}-{repo.split('/')[-1]}"
+    entry = {"command": sys.executable, "args": ["-m", "greenlight", "mcp", "--repo", repo]}
+    data = _read_json(path)
+    if data.get("mcpServers", {}).get(name) == entry:
+        return f"{name} is already in {path}"
+    if dry_run:
+        return f"would add {name} to {path}"
+    data.setdefault("mcpServers", {})[name] = entry
+    _write_json(path, data)
+    return f"added {name} to {path}. Quit and reopen Claude Desktop to load it."
 
 
 def codex_snippet() -> str:

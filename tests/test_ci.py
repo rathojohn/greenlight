@@ -7,7 +7,7 @@ import pytest
 from greenlight import ci, cli, github
 from greenlight.db import connect
 from greenlight.gitrepo import Repo
-from tests.conftest import junit_xml
+from tests.conftest import hide_clis, junit_xml
 from tests.fakegithub import FakeGitHub
 
 FLAKY = "t.e2e::login"
@@ -27,7 +27,7 @@ def actions(monkeypatch, tmp_path):
     for var in github.TOKEN_VARS:
         monkeypatch.delenv(var, raising=False)
     monkeypatch.delenv("GREENLIGHT_CONFIG", raising=False)
-    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    hide_clis(monkeypatch)
     return tmp_path
 
 

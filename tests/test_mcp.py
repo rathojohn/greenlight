@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import child_env
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -15,7 +17,7 @@ def demo(tmp_path_factory):
     d = tmp_path_factory.mktemp("mcp")
     db = d / "demo.db"
     subprocess.run([sys.executable, "-m", "greenlight.demo", "--db", str(db), "--days", "21"],
-                   check=True, capture_output=True, cwd=ROOT, env={"PYTHONPATH": str(ROOT), "PATH": "/usr/bin:/bin"})
+                   check=True, capture_output=True, cwd=ROOT, env=child_env())
     return d, db
 
 
@@ -24,7 +26,7 @@ def test_tools_over_stdio(demo):
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
     d, db = demo
-    env = {"GREENLIGHT_DB": str(db), "PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(ROOT)}
+    env = child_env(GREENLIGHT_DB=str(db))
 
     async def go():
         params = StdioServerParameters(command=sys.executable, args=["-m", "greenlight.server"], env=env, cwd=str(d))

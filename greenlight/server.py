@@ -1,20 +1,30 @@
-"""greenlight MCP server (stdio). Register with:
-    claude mcp add greenlight -- python -m greenlight.server
+"""greenlight MCP server.
+
+  greenlight mcp                      stdio, for the project the agent works in (Claude Code, Codex)
+  greenlight mcp --repo owner/name    stdio, reading the repo from GitHub: no clone (Claude Desktop)
+  greenlight serve --repo owner/name  streamable HTTP, for claude.ai and ChatGPT connectors
+
+`greenlight setup` registers it with each client.
 """
 from __future__ import annotations
 
+import argparse
 import glob
+import hmac
 import json
 import os
+import secrets
 import sqlite3
+import sys
 from contextlib import closing
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Callable, Literal
 
 from pydantic import Field
 
-from . import analysis, config, forecast
-from .db import connect, set_config_db
+from . import analysis, config, forecast, remote
+from .db import connect, default_db_path, set_config_db
 
 try:  # mcp >= 2.0
     from mcp.server.mcpserver import MCPServer as _Server
@@ -25,21 +35,89 @@ from mcp.types import ToolAnnotations
 mcp = _Server(
     "greenlight_mcp",
     instructions=(
-        "Flaky-test history, CI pipelines and delivery metrics for this project. After any test run, call "
-        "greenlight_triage_run (or greenlight_playtest_gate for a playtest ledger) before deciding to rerun "
-        "anything. Only run a full regression when the decision is REAL_FAILURE. For RERUN_TARGETED, rerun only "
-        "the listed rerun_tests. Never quarantine a test or apply issue changes without telling the user why."
+        "CI and test health for one GitHub repo: flaky tests, test run decisions, GitHub Actions pipelines, "
+        "deployments and DORA metrics. Start with greenlight_overview. After a test run, record and judge it "
+        "with greenlight_gate_junit (or greenlight_playtest_gate) before rerunning anything: PASS means carry on, "
+        "RERUN_TARGETED means rerun only rerun_tests, REAL_FAILURE means investigate. Never quarantine a test or "
+        "apply issue changes without telling the user why."
     ),
 )
 
-# The project the agent is working in. Claude Code starts a user-scoped server in ~/.claude and says
-# where the project is in CLAUDE_PROJECT_DIR; a project-scoped one (or Codex) starts in the project.
-PROJECT = Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
-try:  # greenlight.toml in the project (or a parent) sets the DB and the repo
-    CFG = config.load(start=PROJECT)
-except (ValueError, FileNotFoundError):
-    CFG = config.Config(start=PROJECT)
-set_config_db(CFG.db)
+CHECKOUT_TOOLS = ("greenlight_gate_junit", "greenlight_playtest_gate")  # need the user's own checkout
+FIRST_SYNC_WAIT = float(os.environ.get("GREENLIGHT_FIRST_SYNC_WAIT", "25"))
+
+
+@dataclass
+class _State:
+    """Checkout mode: the project the agent works in (Claude Code says where in CLAUDE_PROJECT_DIR, since
+    a user-scoped server starts in ~/.claude; Codex starts it in the project). Repo mode: a GitHub repo
+    read through greenlight's own cache clone, kept fresh in the background."""
+    project: Path = field(default_factory=Path.cwd)
+    cfg: config.Config = field(default_factory=config.Config)
+    repo: str | None = None
+    refresher: remote.Refresher | None = None
+    last_sync: dict[str, Any] | None = None
+
+
+STATE = _State()
+
+
+def configure(repo: str | None = None, project: str | Path | None = None) -> None:
+    """Pick the mode. A repo whose checkout is the project is read from the checkout (local test runs
+    included); any other repo is read from GitHub."""
+    here = Path(project or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    repo = repo or os.environ.get("GREENLIGHT_REPO") or None
+    STATE.project, STATE.repo, STATE.refresher, STATE.last_sync = here, None, None, None
+    if repo:
+        repo = remote.check(repo)
+        if (config.remote_repo(str(here)) or "").lower() != repo.lower():  # GitHub names ignore case
+            STATE.repo = repo
+            STATE.cfg = config.Config(sections={"github": {"repo": repo}}, db=remote.db_path(repo))
+            set_config_db(STATE.cfg.db)
+            STATE.refresher = remote.Refresher(_sync, ready=Path(default_db_path()).exists())
+            return
+    try:  # greenlight.toml in the project (or a parent) sets the DB and the repo
+        STATE.cfg = config.load(start=here)
+    except (ValueError, FileNotFoundError):
+        STATE.cfg = config.Config(start=here)
+    if repo:
+        STATE.cfg.sections.setdefault("github", {})["repo"] = repo
+    set_config_db(STATE.cfg.db)
+    from . import sync
+    from .gitrepo import Repo
+    git = STATE.cfg.git_path
+    if STATE.cfg.path is None and git and Repo(git).ok():  # no greenlight.toml, like a repo that ignores it
+        checkout = Repo(git)
+        remote.guess_delivery(STATE.cfg, checkout, checkout.default_branch())
+    if sync.plan(STATE.cfg, SYNCED):  # a fresh cloud session starts with no DB: fill it on first use
+        STATE.refresher = remote.Refresher(_sync, ready=Path(default_db_path()).exists())
+
+
+SYNCED = {"playtest", "records", "pulls", "issues", "actions", "deployments"}  # never otel from here
+
+
+def _sync() -> None:
+    from . import sync
+    cfg = remote.config_for(STATE.repo) if STATE.repo else STATE.cfg
+    with closing(connect()) as conn:
+        conn.execute("PRAGMA journal_mode = WAL")  # tool calls read while this writes
+        STATE.last_sync = sync.run(conn, cfg, SYNCED)
+    STATE.cfg = cfg
+
+
+def _prune_tools() -> None:
+    if STATE.repo:
+        for name in CHECKOUT_TOOLS:
+            try:
+                mcp.remove_tool(name)
+            except Exception:  # noqa: BLE001 - already removed (ToolError's home moves between mcp versions)
+                pass
+
+
+try:
+    configure()
+except ValueError:  # a bad $GREENLIGHT_REPO: main() and the CLI report it
+    pass
 
 READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
@@ -49,6 +127,14 @@ WindowDays = Annotated[int, Field(ge=1, le=365, description="Lookback window in 
 
 def _run(fn: Callable[[sqlite3.Connection], Any], readonly: bool = True) -> str:
     """Open a connection per call, return compact JSON, and turn errors into actionable text."""
+    r = STATE.refresher
+    if r:
+        r.kick()
+        if not r.wait_ready(FIRST_SYNC_WAIT):
+            return (f"Error: greenlight is reading {STATE.repo or STATE.cfg.repo or 'this repo'} for the first time "
+                    "(run records, then pull requests, issues and Actions runs). Try again in a minute.")
+        if r.error and not Path(default_db_path()).exists():
+            return f"Error: couldn't sync {STATE.repo or STATE.project}: {r.error}"
     try:
         with closing(connect(readonly=readonly)) as conn:
             return json.dumps(fn(conn), default=str, separators=(",", ":"))
@@ -56,6 +142,51 @@ def _run(fn: Callable[[sqlite3.Connection], Any], readonly: bool = True) -> str:
         return f"Error: {e}"
     except sqlite3.Error as e:
         return f"Error: SQLite: {e}. Check the SQL or table names (see greenlight_query)."
+
+
+@mcp.tool(name="greenlight_overview", annotations=READ)
+def overview(window_days: WindowDays = 30) -> str:
+    """Start here for "how is CI doing?": the latest test run's decision, the flakiest tests, quarantine,
+    GitHub Actions health and DORA numbers in one call, plus which repo the data is from and when it was
+    last synced. Each part says "unavailable" with the reason when there's no data for it yet."""
+    from . import delivery
+
+    def go(c: sqlite3.Connection) -> dict:
+        out: dict[str, Any] = {"repo": STATE.cfg.repo, "source": f"GitHub ({STATE.repo})" if STATE.repo
+                               else f"checkout at {STATE.project}", "synced": _synced(c)}
+
+        def part(name: str, fn: Callable[[], Any]) -> None:
+            try:
+                out[name] = fn()
+            except (LookupError, ValueError, KeyError, IndexError, sqlite3.Error) as e:
+                out[name] = f"unavailable: {e}"
+
+        def latest() -> dict:
+            t = analysis.triage_run(c, None, None, window_days)
+            return {k: t[k] for k in ("decision", "summary", "rerun_tests", "blocking")} | {"run": t.get("run")}
+
+        def pipes() -> dict:
+            p = delivery.pipelines_summary(c, window_days)
+            return {"totals": p["totals"], "workflows": p["workflows"][:6], "flaky_jobs": p["flaky_jobs"][:5]}
+
+        part("latest_run", latest)
+        part("flaky_tests", lambda: [{k: r[k] for k in ("test_id", "flip_shas", "eligible_shas", "flake_score",
+                                                          "classification", "quarantined")}
+                                     for r in analysis.list_flaky(c, window_days, 1, True, 5)])
+        part("quarantined_tests", lambda: c.execute("SELECT COUNT(*) FROM quarantine").fetchone()[0])
+        part("pipelines", pipes)
+        part("dora", lambda: delivery.dora(c, window_days, STATE.cfg.get("delivery", "incident_labels"))["metrics"])
+        return out
+    return _run(go)
+
+
+def _synced(c: sqlite3.Connection) -> dict[str, Any]:
+    out: dict[str, Any] = {r[0]: r[1] for r in c.execute("SELECT source, synced_at FROM sync_state ORDER BY source")}
+    if STATE.last_sync and STATE.last_sync.get("errors"):
+        out["errors"] = STATE.last_sync["errors"]
+    if STATE.refresher and STATE.refresher.error:
+        out["last_refresh_failed"] = STATE.refresher.error
+    return out
 
 
 @mcp.tool(name="greenlight_triage_run", annotations=READ)
@@ -88,11 +219,11 @@ def gate_junit(
     def go(c: sqlite3.Connection) -> dict:
         files: list[str] = []
         for p in paths:
-            pattern = p if os.path.isabs(p) else str(PROJECT / p)
+            pattern = p if os.path.isabs(p) else str(STATE.project / p)
             files.extend(sorted(glob.glob(pattern, recursive=True)))
         if not files:
-            raise ValueError(f"No JUnit files match {paths} in {PROJECT}. Did the runner write JUnit XML?")
-        run_id, _, n = ingest_checkout(c, files, str(PROJECT), commit_sha, branch, source="agent")
+            raise ValueError(f"No JUnit files match {paths} in {STATE.project}. Did the runner write JUnit XML?")
+        run_id, _, n = ingest_checkout(c, files, str(STATE.project), commit_sha, branch, source="agent")
         t = analysis.triage_run(c, run_id=run_id, window_days=window_days)
         t["recorded"] = {"run_id": run_id, "results": n, "files": len(files)}
         return t
@@ -193,7 +324,7 @@ def playtest_gate(
     from . import playtest
 
     def go(c: sqlite3.Connection) -> dict:
-        repo = repo_path or CFG.git_path or str(PROJECT)
+        repo = repo_path or STATE.cfg.git_path or str(STATE.project)
         playtest.sync(c, repo)
         run_id = playtest.latest_local_run(c, repo)
         if run_id is None:
@@ -213,7 +344,13 @@ def sync_sources(
     """Pull git and GitHub data into the local DB: playtest records, CI run records from the data branch,
     pull requests, issues, GitHub Actions runs and deployments. Reads GitHub only; writes only the local DB."""
     from . import sync
-    return _run(lambda c: sync.run(c, CFG, set(only) if only else None), readonly=False)
+    if STATE.refresher and not only:
+        try:
+            STATE.refresher.now()
+        except RuntimeError as e:
+            return f"Error: {e}"
+        return json.dumps(STATE.last_sync, default=str, separators=(",", ":"))
+    return _run(lambda c: sync.run(c, STATE.cfg, set(only) if only else None), readonly=False)
 
 
 @mcp.tool(name="greenlight_pipelines", annotations=READ)
@@ -239,7 +376,7 @@ def delivery_metrics(
     from . import delivery
 
     def go(c: sqlite3.Connection) -> dict:
-        out = delivery.delivery_view(c, window_days, CFG.get("delivery", "incident_labels"), environment)
+        out = delivery.delivery_view(c, window_days, STATE.cfg.get("delivery", "incident_labels"), environment)
         out["dora"]["deployments"] = out["dora"]["deployments"][:15]
         for k in ("days", "deploys_per_day", "lead_time_per_day"):
             out["dora"].pop(k, None)
@@ -262,14 +399,15 @@ def manage_issues(
     from . import ghsync, github, issues
 
     def go(c: sqlite3.Connection) -> Any:
-        gh = github.client(CFG.repo, CFG.api_url, require_token=apply) if (CFG.repo or apply) else None
+        cfg = STATE.cfg
+        gh = github.client(cfg.repo, cfg.api_url, require_token=apply) if (cfg.repo or apply) else None
         if gh:
             try:
-                ghsync.sync_issues(c, gh, CFG.get("issues", "quarantine_label"))
+                ghsync.sync_issues(c, gh, cfg.get("issues", "quarantine_label"))
             except github.GitHubError:
                 if apply:
                     raise
-        opts = {k: CFG.get("issues", k) for k in ("flaky_label", "perf_label", "quarantine_label", "min_flips",
+        opts = {k: cfg.get("issues", k) for k in ("flaky_label", "perf_label", "quarantine_label", "min_flips",
                                                    "window_days", "healed_runs", "healed_days")}
         actions = issues.plan(c, opts)
         if not apply:
@@ -278,7 +416,105 @@ def manage_issues(
     return _run(go, readonly=False)
 
 
-def main() -> None:
+class _Guard:
+    """Token check in front of the HTTP app. claude.ai and ChatGPT connectors can't send an API key
+    header, so the token can ride in the URL path: https://host/<token>/mcp. Clients that can send
+    headers (Claude Code, Codex) use `Authorization: Bearer <token>` on /mcp instead."""
+
+    def __init__(self, app: Any, token: str | None):
+        self.app = app
+        self.token = token
+
+    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":  # lifespan: the MCP session manager starts and stops here
+            return await self.app(scope, receive, send)
+        path = scope.get("path") or "/"
+        if path == "/healthz":
+            return await _reply(send, 200, "ok\n")
+        if self.token:
+            first, _, rest = path.lstrip("/").partition("/")
+            if hmac.compare_digest(first.encode(), self.token.encode()):
+                scope = {**scope, "path": "/" + rest, "raw_path": ("/" + rest).encode()}
+            elif not _bearer_ok(scope, self.token):
+                return await _reply(send, 401, "greenlight: missing or wrong token\n", [(b"www-authenticate", b"Bearer")])
+        if scope["path"] in ("/", ""):
+            return await _reply(send, 200, "greenlight MCP server: point an MCP client at /mcp on this address.\n")
+        return await self.app(scope, receive, send)
+
+
+def _bearer_ok(scope: dict, token: str) -> bool:
+    for name, value in scope.get("headers") or []:
+        if name.lower() == b"authorization":
+            kind, _, given = value.decode("latin-1").partition(" ")
+            return kind.lower() == "bearer" and hmac.compare_digest(given.strip().encode(), token.encode())
+    return False
+
+
+async def _reply(send: Any, status: int, text: str, headers: list | None = None) -> None:
+    body = text.encode()
+    await send({"type": "http.response.start", "status": status,
+                "headers": [(b"content-type", b"text/plain; charset=utf-8"), (b"content-length", str(len(body)).encode()),
+                            *(headers or [])]})
+    await send({"type": "http.response.body", "body": body})
+
+
+LOOPBACK = ("127.0.0.1", "localhost", "::1")
+
+
+def http_app(token: str | None, host: str = "127.0.0.1") -> Any:
+    """The streamable HTTP app: stateless JSON responses, so it runs behind any proxy or host, scaled to
+    any number of copies. On loopback it also refuses other Host headers (DNS rebinding)."""
+    from mcp.server.transport_security import TransportSecuritySettings
+    if host in LOOPBACK:
+        security = TransportSecuritySettings(enable_dns_rebinding_protection=True,
+                                             allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"],
+                                             allowed_origins=["http://127.0.0.1:*", "http://localhost:*"])
+    else:
+        security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    try:
+        app = mcp.streamable_http_app(streamable_http_path="/mcp", json_response=True, stateless_http=True,
+                                      transport_security=security, host=host)
+    except TypeError as e:  # mcp 1.x takes these as settings
+        raise RuntimeError("greenlight serve needs mcp 2.2 or newer: run `uv tool upgrade greenlight`") from e
+    return _Guard(app, token)
+
+
+def serve_http(host: str = "127.0.0.1", port: int = 8000, token: str | None = None, no_auth: bool = False) -> None:
+    import uvicorn
+    token = token or os.environ.get("GREENLIGHT_MCP_TOKEN") or None
+    if no_auth:
+        token = None
+    elif not token and host not in LOOPBACK:
+        token = secrets.token_urlsafe(24)
+        print("No GREENLIGHT_MCP_TOKEN set, so this run uses a random token. Set one to keep the URL across "
+              "restarts.", file=sys.stderr)
+    _prune_tools()
+    if STATE.refresher:
+        STATE.refresher.kick()  # start reading the repo now, not on the first question
+    shown = "localhost" if host in ("0.0.0.0", "::") else host
+    where = f"http://{shown}:{port}/{token}/mcp" if token else f"http://{shown}:{port}/mcp"
+    print(f"greenlight MCP server for {STATE.repo or STATE.cfg.repo or STATE.project}\n  {where}\n"
+          "Behind your host's HTTPS address, that's the URL to give Claude or ChatGPT as a connector.", file=sys.stderr)
+    uvicorn.run(http_app(token, host), host=host, port=port, log_level="warning", access_log=False)
+
+
+def main(argv: list[str] | None = None) -> None:
+    """stdio entry point (greenlight-mcp, python -m greenlight.server)."""
+    p = argparse.ArgumentParser(prog="greenlight-mcp", description="greenlight MCP server over stdio.")
+    p.add_argument("--repo", help="owner/name: read it from GitHub, no clone needed (default: $GREENLIGHT_REPO)")
+    p.add_argument("--project", help="the checkout to work in (default: $CLAUDE_PROJECT_DIR, else here)")
+    a = p.parse_args(argv)
+    try:
+        configure(a.repo, a.project)
+    except ValueError as e:
+        sys.exit(f"greenlight-mcp: {e}")
+    run_stdio()
+
+
+def run_stdio() -> None:
+    _prune_tools()
+    if STATE.refresher:
+        STATE.refresher.kick()  # start reading the repo now, not on the first question
     mcp.run()
 
 

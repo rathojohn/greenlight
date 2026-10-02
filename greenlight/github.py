@@ -18,6 +18,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from email.message import Message
+from pathlib import Path
 from typing import Any, Iterator
 
 from . import __version__
@@ -38,16 +39,21 @@ class RateLimited(GitHubError):
     pass
 
 
+# Desktop apps on macOS start with a bare PATH, so a server they launch can miss Homebrew's gh.
+_GH_FALLBACKS = [Path("/opt/homebrew/bin/gh"), Path("/usr/local/bin/gh"), Path("/home/linuxbrew/.linuxbrew/bin/gh")]
+
+
 def resolve_token() -> tuple[str | None, str]:
     """(token, where it came from). The source is safe to print; the token is not."""
     for var in TOKEN_VARS:
         value = os.environ.get(var, "").strip()
         if value:
             return value, f"${var}"
-    gh = shutil.which("gh")
+    gh = shutil.which("gh") or next((str(p) for p in _GH_FALLBACKS if p.is_file()), None)
     if gh:
         try:
-            out = subprocess.run([gh, "auth", "token"], capture_output=True, text=True, timeout=10)
+            out = subprocess.run([gh, "auth", "token"], capture_output=True, text=True, timeout=10,
+                                 stdin=subprocess.DEVNULL)  # never the MCP server's protocol pipe
             if out.returncode == 0 and out.stdout.strip():
                 return out.stdout.strip(), "gh auth token"
         except (OSError, subprocess.SubprocessError):

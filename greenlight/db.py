@@ -32,7 +32,8 @@ def set_config_db(path: str | None) -> None:
 
 
 def default_db_path() -> str:
-    return os.environ.get("GREENLIGHT_DB") or _config_db or str(Path.home() / ".greenlight" / "greenlight.db")
+    home = Path(os.path.expanduser(os.environ.get("GREENLIGHT_HOME") or "~/.greenlight"))
+    return os.environ.get("GREENLIGHT_DB") or _config_db or str(home / "greenlight.db")
 
 
 def migrate(conn: sqlite3.Connection) -> None:

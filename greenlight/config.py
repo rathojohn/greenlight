@@ -86,6 +86,7 @@ class Config:
 def remote_repo(git_path: str) -> str | None:
     try:
         url = subprocess.run(["git", "-C", git_path, "remote", "get-url", "origin"], capture_output=True,
+                             stdin=subprocess.DEVNULL,
                              text=True, timeout=10).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return None
@@ -101,7 +102,7 @@ def find(start: Path | None = None) -> Path | None:
     for d in (here, *here.parents):
         if (d / FILE_NAME).is_file():
             return d / FILE_NAME
-    home = Path.home() / ".greenlight" / "config.toml"
+    home = Path(os.path.expanduser(os.environ.get("GREENLIGHT_HOME") or "~/.greenlight")) / "config.toml"
     return home if home.is_file() else None
 
 
@@ -113,14 +114,20 @@ def load(path: str | None = None, start: Path | None = None) -> Config:
         return Config(start=start)
     if not p.is_file():
         raise FileNotFoundError(f"No config file at {p}")
+    return parse(p.read_text(encoding="utf-8"), str(p), path=p.resolve())
+
+
+def parse(text: str, origin: str, path: Path | None = None, start: Path | None = None) -> Config:
+    """A greenlight.toml's text. origin names it in errors; relative paths resolve from path's folder
+    (or start, for a file read out of git)."""
     try:
-        data = tomllib.loads(p.read_text(encoding="utf-8"))
+        data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as e:
-        raise ValueError(f"{p}: {e}") from e
+        raise ValueError(f"{origin}: {e}") from e
     unknown = sorted(set(k for k, v in data.items() if isinstance(v, dict)) - set(DEFAULTS))
     if unknown:
-        raise ValueError(f"{p}: unknown section(s) {unknown}. Known: {sorted(DEFAULTS)}")
-    cfg = Config(path=p.resolve(), sections={k: v for k, v in data.items() if isinstance(v, dict)})
+        raise ValueError(f"{origin}: unknown section(s) {unknown}. Known: {sorted(DEFAULTS)}")
+    cfg = Config(path=path, sections={k: v for k, v in data.items() if isinstance(v, dict)}, start=start)
     if data.get("db"):
         cfg.db = cfg.resolve_path(str(data["db"]))
     return cfg
