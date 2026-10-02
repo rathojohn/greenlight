@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>flakewatch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  --ground: #F1F3F5; --surface: #FFFFFF; --ink: #16202A; --ink-2: #55606C;
+  --rule: #D3D9DF; --rule-2: #E3E7EB;
+  --pass: #2E8A67; --fail: #C4372D; --flip: #B07A00; --quar: #6366A8; --focus: #2563EB;
+  --band: rgba(176, 122, 0, .17);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #151B22; --surface: #1C242E; --ink: #E5EAEF; --ink-2: #98A4B0;
+    --rule: #33404D; --rule-2: #26313C;
+    --pass: #4DBA8F; --fail: #EF6B5E; --flip: #EDB23C; --quar: #A3A6E8; --focus: #7AA7FF;
+    --band: rgba(237, 178, 60, .18);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #151B22; --surface: #1C242E; --ink: #E5EAEF; --ink-2: #98A4B0;
+  --rule: #33404D; --rule-2: #26313C;
+  --pass: #4DBA8F; --fail: #EF6B5E; --flip: #EDB23C; --quar: #A3A6E8; --focus: #7AA7FF;
+  --band: rgba(237, 178, 60, .18);
+  color-scheme: dark;
+}
+:root { box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+*, *::before, *::after { box-sizing: inherit; }
+body {
+  margin: 0; background: var(--ground); color: var(--ink);
+  font-family: "Archivo", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 15px; line-height: 1.5; font-variant-numeric: tabular-nums;
+  -webkit-text-size-adjust: 100%;
+}
+code, .mono { font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace; font-size: .86em; }
+a { color: inherit; text-decoration-color: var(--rule); text-underline-offset: 3px; }
+a:hover { text-decoration-color: currentColor; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
+[hidden] { display: none !important; }
+
+/* Header */
+.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--ground); border-bottom: 1px solid var(--rule); }
+.top-inner { max-width: 1180px; margin: 0 auto; padding: 10px 20px; display: flex; align-items: center; gap: 28px; flex-wrap: wrap; }
+.mark { font-weight: 760; font-stretch: 125%; font-size: 1.15rem; letter-spacing: -.01em; text-decoration: none; }
+nav { display: flex; gap: 20px; overflow-x: auto; flex: 1; scrollbar-width: none; }
+nav::-webkit-scrollbar { display: none; }
+nav a { text-decoration: none; color: var(--ink-2); padding: 8px 0 6px; border-bottom: 2px solid transparent; white-space: nowrap; }
+nav a:hover { color: var(--ink); }
+nav a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--ink); }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; flex: none; }
+.seg button { font: inherit; font-size: .85rem; padding: 5px 11px; border: 0; background: transparent; color: var(--ink-2); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--rule); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--ground); }
+@media (max-width: 720px) {
+  .top-inner { gap: 4px 16px; padding-bottom: 0; }
+  nav { order: 3; flex-basis: 100%; gap: 16px; }
+  nav a { font-size: .94rem; }
+  .top .seg { margin-left: auto; }
+}
+#banner { max-width: 1180px; margin: 14px auto 0; padding: 0 20px; color: var(--ink-2); font-size: .9rem; }
+
+/* Page */
+main { max-width: 1180px; margin: 0 auto; padding: 28px 20px 72px; }
+main#view:focus, main#view:focus-visible { outline: none; }
+section { margin-top: 44px; }
+h1 { font-size: clamp(1.7rem, 4vw, 2.3rem); font-stretch: 112%; font-weight: 760; line-height: 1.08; letter-spacing: -.01em; margin: 0 0 8px; }
+h2 { font-size: 1.05rem; font-weight: 660; margin: 0 0 4px; }
+p { margin: 0 0 10px; }
+.note { color: var(--ink-2); max-width: 70ch; margin-bottom: 16px; }
+.muted { color: var(--ink-2); }
+.loading { color: var(--ink-2); padding: 24px 0; }
+.err { border-left: 3px solid var(--fail); padding: 10px 14px; background: var(--surface); max-width: 72ch; }
+.err code { word-break: break-all; }
+.empty { padding: 20px 0; color: var(--ink-2); max-width: 70ch; }
+
+/* Verdict: the one loud thing on the overview */
+.verdict h1 { font-size: clamp(2.5rem, 8.5vw, 4.8rem); font-stretch: 125%; font-weight: 820; line-height: .95; letter-spacing: -.025em; margin: 0 0 16px; }
+.v-REAL_FAILURE h1 { color: var(--fail); }
+.v-RERUN_TARGETED h1 { color: var(--flip); }
+.v-PASS h1 { color: var(--pass); }
+.verdict .detail { font-size: 1.06rem; max-width: 68ch; }
+.verdict .meta { color: var(--ink-2); }
+.idlist { list-style: none; padding: 0; margin: 6px 0 12px; }
+.idlist li { padding: 2px 0; word-break: break-all; }
+
+/* Stat row */
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.stat { padding: 16px 18px 16px 0; min-width: 0; }
+.stat + .stat { padding-left: 18px; border-left: 1px solid var(--rule); }
+.stat .k { font-weight: 600; }
+.stat .v { font-size: 2rem; font-weight: 720; font-stretch: 115%; line-height: 1.15; }
+.stat .s { color: var(--ink-2); font-size: .88rem; }
+@media (max-width: 720px) {
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat:nth-child(3) { border-left: 0; padding-left: 0; }
+  .stat:nth-child(n+3) { border-top: 1px solid var(--rule); }
+}
+
+/* Flake field and strips: height means failure, amber means one commit both passed and failed */
+.field { display: grid; gap: 4px; }
+.frow, .faxis { display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr); gap: 16px; align-items: end; }
+.frow { text-decoration: none; padding: 3px 0; }
+.frow:hover .fname { text-decoration: underline; }
+.fname { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fname .q { color: var(--quar); }
+.cells { display: flex; align-items: flex-end; gap: 2px; height: 28px; }
+.cells i { flex: 1 1 0; min-width: 2px; height: 30%; background: var(--pass); border-radius: 1px; }
+.cells i.f { height: 100%; background: var(--fail); }
+.cells i.x { height: 100%; background: var(--flip); }
+.cells i.n { height: 2px; background: var(--rule); }
+.faxis { color: var(--ink-2); font-size: .8rem; margin-top: 2px; }
+.faxis > span:last-child { display: flex; justify-content: space-between; }
+.field.animate .cells i { animation: rise .55s cubic-bezier(.2, .7, .2, 1) both; animation-delay: calc(var(--c) * 14ms); transform-origin: bottom; }
+@keyframes rise { from { transform: scaleY(0); } }
+@media (prefers-reduced-motion: reduce) { .field.animate .cells i { animation: none; } }
+@media (max-width: 720px) {
+  .frow, .faxis { grid-template-columns: 1fr; gap: 3px; }
+  .faxis > span:first-child { display: none; }
+  .frow { padding: 6px 0; }
+}
+.strip { display: inline-flex; align-items: flex-end; gap: 2px; height: 18px; vertical-align: middle; width: 178px; max-width: 100%; }
+.strip i { flex: 1 1 0; min-width: 1px; max-width: 4px; height: 32%; background: var(--pass); border-radius: 1px; }
+.strip i.f { height: 100%; background: var(--fail); }
+.legend { display: flex; gap: 6px 18px; flex-wrap: wrap; color: var(--ink-2); font-size: .85rem; margin-top: 10px; }
+.sw { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 2px; vertical-align: -1px; }
+.sw.short { height: 4px; vertical-align: 1px; }
+
+/* Tags */
+.tag { display: inline-flex; align-items: center; gap: 6px; font-size: .82rem; font-weight: 620; color: var(--c, var(--ink-2)); white-space: nowrap; }
+.tag::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--c, var(--ink-2)); }
+.t-flaky, .t-known_flaky, .t-RERUN_TARGETED { --c: var(--flip); }
+.t-suspect, .t-suspect_flaky { --c: var(--flip); }
+.t-suspect::before, .t-suspect_flaky::before { background: transparent; box-shadow: inset 0 0 0 2px var(--c); }
+.t-failing, .t-real_failure, .t-new_test, .t-REAL_FAILURE { --c: var(--fail); }
+.t-quarantined { --c: var(--quar); }
+.t-PASS, .t-stable { --c: var(--pass); }
+.tags { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 2px; }
+
+/* Lists */
+.list { border-top: 1px solid var(--rule); }
+.row { display: grid; gap: 6px 20px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--rule-2); text-decoration: none; min-width: 0; }
+a.row:hover { background: linear-gradient(90deg, transparent, var(--rule-2) 8%, var(--rule-2) 92%, transparent); }
+.row.head { color: var(--ink-2); font-size: .84rem; padding: 8px 0; }
+.row > * { min-width: 0; }
+.c-test .mono { word-break: break-all; }
+.lbl { display: none; color: var(--ink-2); font-size: .8rem; }
+.flaky-grid { grid-template-columns: minmax(0, 2.3fr) 8.5rem 8rem 7rem minmax(8rem, 1fr); }
+.runs-grid { grid-template-columns: 8rem 7.5rem 5rem 6rem 5rem minmax(9rem, 1fr); }
+.q-grid { grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) 12rem 7.5rem; }
+.q-grid > :last-child { text-align: right; }
+.score { display: flex; align-items: center; gap: 8px; }
+.score b { display: block; height: 6px; background: var(--flip); border-radius: 3px; }
+.score .track { flex: 1; max-width: 70px; background: var(--rule-2); border-radius: 3px; }
+@media (max-width: 860px) {
+  .row.head { display: none; }
+  .flaky-grid, .runs-grid, .q-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .flaky-grid .c-test, .q-grid .c-test, .runs-grid .c-wide { grid-column: 1 / -1; }
+  .lbl { display: block; }
+}
+.toolbar { display: flex; gap: 12px 18px; align-items: center; flex-wrap: wrap; margin: 4px 0 16px; }
+.toolbar label { display: inline-flex; gap: 8px; align-items: center; color: var(--ink-2); }
+
+/* Controls */
+.btn { font: inherit; font-weight: 620; font-size: .9rem; padding: 7px 14px; border-radius: 6px; border: 1px solid var(--ink); background: var(--ink); color: var(--ground); cursor: pointer; white-space: nowrap; }
+.btn.ghost { background: transparent; color: var(--ink); border-color: var(--rule); }
+.btn:disabled { opacity: .5; cursor: default; }
+input[type=text], input[type=search] { font: inherit; padding: 7px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); color: var(--ink); min-width: 0; }
+.qform { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; max-width: 640px; }
+.qform input { flex: 1 1 220px; }
+
+/* Charts */
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 44px; }
+@media (max-width: 860px) { .two { grid-template-columns: minmax(0, 1fr); } }
+.chart { width: 100%; min-height: 60px; }
+.chart svg { display: block; overflow: visible; touch-action: pan-y; }
+.chart .grid { stroke: var(--rule-2); stroke-width: 1; }
+.chart .axis { stroke: var(--rule); stroke-width: 1; }
+.chart text { fill: var(--ink-2); font-size: 11px; font-family: inherit; }
+.chart .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .band { fill: var(--band); }
+.chart .median { fill: none; stroke: var(--flip); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.chart .future { fill: var(--rule-2); opacity: .55; }
+.chart .cursor { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 2 3; }
+#tip { position: fixed; z-index: 20; pointer-events: none; background: var(--ink); color: var(--ground); padding: 8px 10px; border-radius: 6px; font-size: .8rem; line-height: 1.45; max-width: 260px; }
+#tip b { font-weight: 650; }
+
+/* Test page */
+.tid-class { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; color: var(--ink-2); font-size: .88rem; word-break: break-all; }
+.tid-name { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: clamp(1.25rem, 3.4vw, 1.9rem); font-weight: 600; line-height: 1.2; word-break: break-all; margin: 4px 0 12px; }
+.crumb { color: var(--ink-2); font-size: .9rem; margin-bottom: 18px; display: inline-block; }
+.msg { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: .8rem; white-space: pre-wrap; word-break: break-word; background: var(--surface); border: 1px solid var(--rule-2); border-radius: 4px; padding: 8px 10px; margin: 6px 0 0; }
+.sig { padding: 12px 0; border-bottom: 1px solid var(--rule-2); }
+.exec-grid { grid-template-columns: 8rem 7.5rem 6rem 5rem minmax(0, 1fr); }
+@media (max-width: 860px) { .exec-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.fail-item { padding: 14px 0; border-bottom: 1px solid var(--rule-2); }
+.fail-item .why { color: var(--ink-2); margin: 4px 0 0; }
+
+#toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--ground); padding: 9px 16px; border-radius: 6px; font-size: .9rem; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100vw - 32px); }
+#toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <a class="mark" href="#/">flakewatch</a>
+    <nav id="nav" aria-label="Views">
+      <a href="#/" data-nav="overview">Overview</a>
+      <a href="#/flaky" data-nav="flaky">Flaky tests</a>
+      <a href="#/runs" data-nav="runs">Runs</a>
+      <a href="#/trends" data-nav="trends">Trends</a>
+      <a href="#/quarantine" data-nav="quarantine">Quarantine</a>
+    </nav>
+    <div class="seg" id="window" role="group" aria-label="Time window">
+      <button type="button" data-days="7">7d</button><button type="button" data-days="30">30d</button><button type="button" data-days="90">90d</button>
+    </div>
+  </div>
+</header>
+<p id="banner" hidden></p>
+<main id="view" tabindex="-1"></main>
+<div id="tip" hidden></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script id="snapshot" type="application/json">null</script>
+<script>
+"use strict";
+const SNAP = JSON.parse(document.getElementById("snapshot").textContent || "null");
+const LIVE = !SNAP;
+const NOW = SNAP ? new Date(SNAP.generated_at) : new Date();
+const view = document.getElementById("view");
+let DAYS = SNAP ? SNAP.days : (() => { try { return Number(localStorage.getItem("fw-days")) || 30; } catch { return 30; } })();
+let renderToken = 0;
+let animatedField = false;
+
+/* ---------- data ---------- */
+class ApiError extends Error { constructor(msg, status) { super(msg); this.status = status; } }
+function snapKey(path, params) {
+  return path + "?" + Object.keys(params).sort().map(k => `${k}=${params[k]}`).join("&");
+}
+async function api(path, params = {}) {
+  const p = Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)]));
+  if (SNAP) {
+    const r = SNAP.responses[snapKey(path, p)];
+    if (!r) throw new ApiError("This view isn't in the snapshot. Run flakewatch ui locally to see it.", 404);
+    if (r.__status) throw new ApiError(r.error, r.__status);
+    return r;
+  }
+  const qs = new URLSearchParams(p).toString();
+  const res = await fetch(path + (qs ? "?" + qs : ""));
+  let data = {};
+  try { data = await res.json(); } catch { /* non-JSON error */ }
+  if (!res.ok) throw new ApiError(data.error || `${res.status} ${res.statusText}`, res.status);
+  return data;
+}
+async function post(path, body) {
+  const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Flakewatch": "1" }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(data.error || res.statusText, res.status);
+  return data;
+}
+
+/* ---------- formatting ---------- */
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const sha = s => esc(String(s || "").slice(0, 8));
+const plural = (n, word, many) => `${n} ${n === 1 ? word : (many || word + "s")}`;
+const pct = x => x == null ? "n/a" : `${Math.round(x * 100)}%`;
+const testHref = id => "#/test/" + encodeURIComponent(id);
+const splitId = id => { const i = id.lastIndexOf("::"); return i < 0 ? ["", id] : [id.slice(0, i), id.slice(i + 2)]; };
+function rel(iso) {
+  if (!iso) return "never";
+  const s = (NOW - new Date(iso)) / 1000;
+  if (s < 0) return "just now";
+  if (s < 90) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return plural(Math.round(s / 3600), "hour") + " ago";
+  if (s < 86400 * 45) return plural(Math.round(s / 86400), "day") + " ago";
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+function dur(ms) {
+  if (ms == null) return "n/a";
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(s < 10 ? 2 : 1)} s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${Math.round(s % 60)}s`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+const fmtDay = d => new Date(d + "T00:00:00Z").toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+const FMT = { count: v => Math.round(v * 10) / 10 + "", pct: v => `${Math.round(v * 1000) / 10}%`, ms: v => dur(v) };
+const AXIS = { ...FMT, ms: v => v === 0 ? "0" : v < 1000 ? `${Math.round(v)} ms` : `${+(v / 1000).toFixed(1)} s` };
+
+/* ---------- small renderers ---------- */
+function tag(kind, text) { return `<span class="tag t-${esc(kind)}">${esc(text || kind.replace(/_/g, " "))}</span>`; }
+function strip(outcomes) {
+  const fails = outcomes.filter(o => o === "f").length;
+  return `<span class="strip" role="img" aria-label="${fails} of the last ${outcomes.length} runs failed">${outcomes.map(o => `<i class="${o}"></i>`).join("")}</span>`;
+}
+function cellClass(c) { if (!c) return "n"; const [p, f] = c; return f === 0 ? "p" : p === 0 ? "f" : "x"; }
+function cells(list, commits) {
+  return `<span class="cells">${list.map((c, j) => {
+    const cm = commits[j] || {};
+    const t = c ? `${String(cm.sha || "").slice(0, 8)}: ${c[0]} passed, ${c[1]} failed` : `${String(cm.sha || "").slice(0, 8)}: not run`;
+    return `<i class="${cellClass(c)}" style="--c:${j}" title="${esc(t)}"></i>`;
+  }).join("")}</span>`;
+}
+function fieldLegend() {
+  return `<div class="legend"><span><span class="sw short" style="background:var(--pass)"></span>Passed</span><span><span class="sw" style="background:var(--fail)"></span>Failed</span><span><span class="sw" style="background:var(--flip)"></span>Passed and failed on the same commit</span><span><span class="sw short" style="background:var(--rule);height:2px"></span>Didn't run</span></div>`;
+}
+function errorBox(e) {
+  let hint = "";
+  if (e.status === 503) hint = `<p>Record a run first: <code>flakewatch ingest reports/*.xml --sha &lt;commit&gt;</code></p>`;
+  if (e.status === 501) hint = `<p>Install Toto with <code>pip install toto-models</code> (Python 3.12+), then restart <code>flakewatch ui</code>.</p>`;
+  return `<div class="err"><p>${esc(e.message)}</p>${hint}</div>`;
+}
+const loading = text => `<p class="loading">${esc(text || "Loading")}</p>`;
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), 2600);
+}
+
+/* ---------- charts (plain SVG, redrawn on resize) ---------- */
+const tip = document.getElementById("tip");
+const RO = new ResizeObserver(entries => { for (const e of entries) { const el = e.target; if (el._spec && Math.abs((el._w || 0) - el.clientWidth) > 2) drawChart(el); } });
+function chart(el, spec) { if (!el) return; el._spec = spec; drawChart(el); RO.observe(el); }
+function niceTicks(max, integer) {
+  if (!(max > 0)) return [0, 1];
+  const raw = max / 3, mag = Math.pow(10, Math.floor(Math.log10(raw))), n = raw / mag;
+  let step = (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * mag;
+  if (integer) step = Math.max(1, Math.ceil(step));
+  const ticks = []; for (let v = 0; v <= max + step * 0.999; v += step) ticks.push(Number(v.toPrecision(10)));
+  return ticks;
+}
+function drawChart(el) {
+  const s = el._spec, W = Math.max(240, el.clientWidth || 600), H = s.height || 190;
+  el._w = el.clientWidth;
+  const fmt = FMT[s.format || "count"];
+  const m = { l: s.format === "ms" ? 50 : 40, r: 6, t: 12, b: 24 };
+  const labels = s.days.concat(s.future || []);
+  const n = labels.length, pw = W - m.l - m.r, ph = H - m.t - m.b, slot = pw / n;
+  const x = i => m.l + slot * (i + .5);
+  const bars = s.bars || [], lines = s.lines || [];
+  let max = 0;
+  for (let i = 0; i < s.days.length; i++) { let sum = 0; for (const b of bars) sum += b.values[i] || 0; max = Math.max(max, sum); }
+  for (const l of lines) for (const v of l.values) if (v != null) max = Math.max(max, v);
+  if (s.band) for (const v of s.band.p90) max = Math.max(max, v);
+  const ticks = niceTicks(max, (s.format || "count") === "count"), top = ticks[ticks.length - 1] || 1;
+  const y = v => m.t + ph - (Math.max(0, v) / top) * ph;
+  let g = "";
+  for (const t of ticks) g += `<line class="grid" x1="${m.l}" x2="${W - m.r}" y1="${y(t)}" y2="${y(t)}"/><text x="${m.l - 6}" y="${y(t) + 4}" text-anchor="end">${esc(AXIS[s.format || "count"](t))}</text>`;
+  if (s.future && s.future.length) {
+    const x0 = m.l + slot * s.days.length;
+    g += `<rect class="future" x="${x0}" y="${m.t}" width="${W - m.r - x0}" height="${ph}"/><text x="${x0 + 5}" y="${m.t + ph - 6}">Forecast</text>`;
+  }
+  if (s.band) {
+    const { from, p10, p50, p90 } = s.band;
+    const pad = p90.length === 1 ? slot * .35 : 0;
+    const up = p90.map((v, j) => [x(from + j), y(v)]), lo = p10.map((v, j) => [x(from + j), y(v)]);
+    if (pad) { up.unshift([up[0][0] - pad, up[0][1]]); up.push([up[up.length - 1][0] + pad, up[up.length - 1][1]]); lo.unshift([lo[0][0] - pad, lo[0][1]]); lo.push([lo[lo.length - 1][0] + pad, lo[lo.length - 1][1]]); }
+    g += `<polygon class="band" points="${up.concat(lo.reverse()).map(p => p.join(",")).join(" ")}"/>`;
+    g += `<polyline class="median" points="${p50.map((v, j) => `${x(from + j)},${y(v)}`).join(" ")}"/>`;
+  }
+  const bw = Math.max(1.5, Math.min(slot * .7, 16));
+  for (let i = 0; i < s.days.length; i++) {
+    let acc = 0;
+    for (const b of bars) {
+      const v = b.values[i] || 0; if (!v) continue;
+      const y1 = y(acc + v), y0 = y(acc);
+      g += `<rect x="${x(i) - bw / 2}" y="${y1}" width="${bw}" height="${Math.max(0, y0 - y1)}" rx="1" style="fill:${b.color}"/>`;
+      acc += v;
+    }
+  }
+  for (const l of lines) {
+    let d = "", pen = false;
+    l.values.forEach((v, i) => {
+      if (v == null) { pen = false; return; }
+      d += `${pen ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)} `; pen = true;
+      const lone = (i === 0 || l.values[i - 1] == null) && (i === l.values.length - 1 || l.values[i + 1] == null);
+      if (lone) g += `<circle cx="${x(i)}" cy="${y(v)}" r="2.5" style="fill:${l.color}"/>`;
+    });
+    g += `<path class="line" d="${d}" style="stroke:${l.color}"/>`;
+  }
+  g += `<line class="axis" x1="${m.l}" x2="${W - m.r}" y1="${m.t + ph}" y2="${m.t + ph}"/>`;
+  const xl = [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i);
+  for (const i of xl) g += `<text x="${x(i)}" y="${H - 6}" text-anchor="${i === 0 ? "start" : i === n - 1 ? "end" : "middle"}">${esc(fmtDay(labels[i]))}</text>`;
+  g += `<line class="cursor" x1="0" x2="0" y1="${m.t}" y2="${m.t + ph}" visibility="hidden"/><rect class="hit" x="${m.l}" y="${m.t}" width="${pw}" height="${ph}" fill="transparent"/>`;
+  el.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(s.label || "Chart")}">${g}</svg>`;
+
+  const svg = el.firstChild, cursor = svg.querySelector(".cursor"), hit = svg.querySelector(".hit");
+  const show = ev => {
+    const r = svg.getBoundingClientRect();
+    const i = Math.min(n - 1, Math.max(0, Math.floor((ev.clientX - r.left - m.l) / slot)));
+    cursor.setAttribute("x1", x(i)); cursor.setAttribute("x2", x(i)); cursor.setAttribute("visibility", "visible");
+    let html = `<b>${esc(fmtDay(labels[i]))}</b>`;
+    if (i < s.days.length) {
+      for (const b of bars) html += `<br>${esc(b.label)}: ${esc(fmt(b.values[i] || 0))}`;
+      for (const l of lines) html += `<br>${esc(l.label)}: ${l.values[i] == null ? "no data" : esc(fmt(l.values[i]))}`;
+    }
+    if (s.band && i >= s.band.from && i < s.band.from + s.band.p50.length) {
+      const j = i - s.band.from;
+      html += `<br>Forecast: ${esc(fmt(s.band.p50[j]))}<br><span style="opacity:.75">likely ${esc(fmt(s.band.p10[j]))} to ${esc(fmt(s.band.p90[j]))}</span>`;
+    }
+    tip.innerHTML = html; tip.hidden = false;
+    const tx = Math.min(window.innerWidth - tip.offsetWidth - 8, ev.clientX + 14);
+    tip.style.left = Math.max(8, tx) + "px"; tip.style.top = Math.max(8, ev.clientY - tip.offsetHeight - 12) + "px";
+  };
+  const hide = () => { cursor.setAttribute("visibility", "hidden"); tip.hidden = true; };
+  hit.addEventListener("pointermove", show); hit.addEventListener("pointerdown", show); hit.addEventListener("pointerleave", hide);
+}
+function legend(items) { return `<div class="legend">${items.map(([c, t]) => `<span><span class="sw" style="background:${c}"></span>${esc(t)}</span>`).join("")}</div>`; }
+
+/* ---------- verdict (overview + run page) ---------- */
+function verdictBlock(t, { withLink } = {}) {
+  if (!t) return `<section class="verdict" style="margin-top:0"><h1>No runs yet</h1><p class="detail">Record a test run and refresh: <code>flakewatch ingest reports/*.xml --sha &lt;commit&gt;</code></p></section>`;
+  const ids = list => `<ul class="idlist">${list.slice(0, 5).map(id => `<li><a href="${testHref(id)}"><code>${esc(id)}</code></a></li>`).join("")}${list.length > 5 ? `<li class="muted">and ${list.length - 5} more</li>` : ""}</ul>`;
+  let head, detail;
+  if (t.decision === "REAL_FAILURE") {
+    head = plural(t.blocking.length, "real failure");
+    const one = t.blocking.length === 1;
+    detail = `<p class="detail">${one ? "This test has" : "These tests have"} no flake history, so this is the case that justifies a full regression once ${one ? "it's" : "they're"} fixed.</p>${ids(t.blocking)}`;
+  } else if (t.decision === "RERUN_TARGETED") {
+    head = `Rerun ${plural(t.rerun_tests.length, "flaky test")}`;
+    detail = `<p class="detail">Only known flaky tests failed. Rerun just these, not the suite.</p>${ids(t.rerun_tests)}`;
+  } else {
+    head = "Nothing to rerun";
+    const q = t.failures.length;
+    detail = `<p class="detail">${q ? `${plural(q, "quarantined test")} failed and ${q === 1 ? "was" : "were"} ignored.` : "Every test passed."}${t.passed_on_retry.length ? ` ${plural(t.passed_on_retry.length, "test")} passed only on retry.` : ""}</p>`;
+  }
+  const r = t.run;
+  const meta = `Commit <code>${sha(r.commit_sha)}</code>, attempt ${r.attempt} on this commit, ${esc(rel(r.started_at))}.${withLink ? ` <a href="#/run/${r.run_id}">Open this run</a>` : ""}`;
+  return `<section class="verdict v-${esc(t.decision)}" style="margin-top:0"><h1>${esc(head)}</h1>${detail}<p class="meta">${meta}</p></section>`;
+}
+
+/* ---------- views ---------- */
+async function overviewView(tok) {
+  view.innerHTML = loading();
+  const d = await api("/api/overview", { days: DAYS });
+  if (tok !== renderToken) return;
+  const t = d.totals, f = d.field;
+  const field = f.tests.length ? `
+    <div class="field ${animatedField ? "" : "animate"}">
+      ${f.tests.map(r => { const [cls, name] = splitId(r.test_id); return `<a class="frow" href="${testHref(r.test_id)}" title="${esc(r.test_id)}"><span class="fname">${esc(name)}${r.quarantined ? ' <span class="q">quarantined</span>' : ""}</span>${cells(r.cells, f.commits)}</a>`; }).join("")}
+      <div class="faxis"><span></span><span><span>${f.commits.length ? esc(rel(f.commits[0].first_at)) : ""}</span><span>Latest commit</span></span></div>
+    </div>${fieldLegend()}`
+    : `<p class="empty">No test has failed in the last ${DAYS} days.</p>`;
+  animatedField = true;
+  view.innerHTML = `
+    ${verdictBlock(d.latest, { withLink: true })}
+    <section class="stats" aria-label="Summary for the last ${DAYS} days">
+      <div class="stat"><div class="k">Runs that were reruns</div><div class="v">${t.runs ? pct(t.reruns / t.runs) : "0%"}</div><div class="s">${t.reruns} of ${plural(t.runs, "run")} in ${DAYS} days</div></div>
+      <div class="stat"><div class="k">Time spent rerunning</div><div class="v">${dur(t.rerun_ms)}</div><div class="s">Test time on second and later attempts</div></div>
+      <div class="stat"><div class="k">Flaky tests</div><div class="v">${t.flaky}</div><div class="s">${t.suspect} suspect, ${t.failing} failing without flips</div></div>
+      <div class="stat"><div class="k">Quarantined</div><div class="v">${t.quarantined}</div><div class="s"><a href="#/quarantine">Manage quarantine</a></div></div>
+    </section>
+    <section>
+      <h2>Unstable tests by commit</h2>
+      <p class="note">One column per commit, oldest on the left. A tall bar means the test failed there. Amber means the same commit both passed and failed, which is what makes a test flaky.</p>
+      ${field}
+    </section>
+    <section class="two">
+      <div><h2>Runs per day</h2><p class="note">Reruns are second and later attempts on a commit.</p><div class="chart" id="c-runs"></div>${legend([["var(--ink-2)", "First attempt"], ["var(--flip)", "Rerun"]])}</div>
+      <div><h2>Failure rate</h2><p class="note">Share of test executions that failed, per day.</p><div class="chart" id="c-fail"></div></div>
+    </section>`;
+  chart(document.getElementById("c-runs"), { days: d.days, label: "Runs per day", bars: [{ values: d.runs_first, color: "var(--ink-2)", label: "First attempt" }, { values: d.runs_rerun, color: "var(--flip)", label: "Rerun" }] });
+  chart(document.getElementById("c-fail"), { days: d.days, label: "Failure rate", format: "pct", lines: [{ values: d.failure_rate, color: "var(--fail)", label: "Failure rate" }] });
+}
+
+async function flakyView(tok) {
+  view.innerHTML = loading();
+  const d = await api("/api/flaky", { days: DAYS });
+  if (tok !== renderToken) return;
+  view.innerHTML = `
+    <h1>Flaky tests</h1>
+    <p class="note">Tests that both passed and failed on the same commit in the last ${DAYS} days. Ranked by confidence, so a test that flipped on 5 of 10 commits ranks above one that flipped on 1 of 1.</p>
+    <div class="toolbar">
+      <input type="search" id="q" placeholder="Filter by test name" aria-label="Filter by test name">
+      <label><input type="checkbox" id="hideq"> Hide quarantined</label>
+      <span class="muted" id="count"></span>
+    </div>
+    <div class="list" id="rows"></div>`;
+  const rowsEl = document.getElementById("rows"), q = document.getElementById("q"), hq = document.getElementById("hideq");
+  const draw = () => {
+    const term = q.value.trim().toLowerCase();
+    const rows = d.tests.filter(r => (!term || r.test_id.toLowerCase().includes(term)) && !(hq.checked && r.quarantined));
+    document.getElementById("count").textContent = plural(rows.length, "test");
+    if (!d.tests.length) { rowsEl.innerHTML = `<p class="empty">No flips in the last ${DAYS} days. A test can only flip on a commit that was tested more than once, so this fills in as reruns get recorded.</p>`; return; }
+    rowsEl.innerHTML = `<div class="row head flaky-grid"><span>Test</span><span>Flipped on</span><span>Confidence</span><span>Last flip</span><span>Last 30 runs</span></div>` +
+      rows.map(r => { const [cls, name] = splitId(r.test_id); return `
+      <a class="row flaky-grid" href="${testHref(r.test_id)}">
+        <span class="c-test"><span class="mono">${esc(name)}</span><br><span class="muted mono" style="font-size:.75rem">${esc(cls)}</span>
+          <span class="tags">${tag(r.classification)}${r.quarantined ? tag("quarantined") : ""}</span></span>
+        <span><span class="lbl">Flipped on</span>${r.flip_shas} of ${plural(r.eligible_shas, "commit")}</span>
+        <span><span class="lbl">Confidence</span><span class="score"><span class="track"><b style="width:${Math.round(r.flake_score * 100)}%"></b></span>${r.flake_score.toFixed(2)}</span></span>
+        <span><span class="lbl">Last flip</span>${esc(rel(r.last_flip_at))}</span>
+        <span><span class="lbl">Last runs</span>${strip(r.recent)}</span>
+      </a>`; }).join("");
+  };
+  q.addEventListener("input", draw); hq.addEventListener("change", draw);
+  draw();
+}
+
+async function testView(tok, id) {
+  view.innerHTML = loading();
+  const d = await api("/api/test", { days: DAYS, id });
+  if (tok !== renderToken) return;
+  const s = d.stats || { flip_shas: 0, eligible_shas: 0, failures: 0, executions: 0, distinct_failure_sigs: 0, classification: "stable" };
+  const [cls, name] = splitId(d.test_id);
+  const q = d.quarantine;
+  let qblock = "";
+  if (q) qblock = `<p>${tag("quarantined")} <span class="muted">Added ${esc(rel(q.added_at))}${q.added_by === "auto" ? " by sweep" : " by hand"}: ${esc(q.reason || "no reason given")}</span></p>${LIVE ? `<button class="btn ghost" id="unq">Release from quarantine</button>` : ""}`;
+  else if (LIVE) qblock = `<form class="qform" id="qf"><input type="text" id="reason" placeholder="Reason, e.g. times out waiting for the search index" aria-label="Quarantine reason" required minlength="3"><button class="btn" type="submit">Quarantine</button></form>`;
+  const commitsAsCells = d.commits.map(c => [c.passes, c.fails]);
+  view.innerHTML = `
+    <a class="crumb" href="#/flaky">All flaky tests</a>
+    <div class="tid-class">${esc(cls)}</div>
+    <div class="tid-name">${esc(name)}</div>
+    <div class="tags" style="margin-bottom:12px">${tag(s.classification)}</div>
+    <p style="max-width:70ch">In the last ${DAYS} days it flipped on ${s.flip_shas} of the ${plural(s.eligible_shas, "commit")} it ran on more than once, and failed ${plural(s.failures, "time")} in ${plural(s.executions, "execution")} with ${plural(s.distinct_failure_sigs, "distinct failure message")}.</p>
+    ${qblock}
+    <section>
+      <h2>By commit</h2>
+      <p class="note">Last ${plural(d.commits.length, "commit")} this test ran on, oldest on the left.</p>
+      <div class="field">${d.commits.length ? `<div class="frow" style="grid-template-columns:1fr">${cells(commitsAsCells, d.commits)}</div>` : '<p class="empty">No executions yet.</p>'}</div>
+      ${fieldLegend()}
+    </section>
+    <section>
+      <h2>Duration</h2>
+      <p class="note" id="dur-note">Daily median of passing runs.</p>
+      <div class="chart" id="c-dur"></div>
+      <div id="dur-legend">${legend([["var(--ink)", "Daily median"]])}</div>
+    </section>
+    <section>
+      <h2>Failure messages</h2>
+      ${d.signatures.length ? d.signatures.map(g => `<div class="sig"><strong>${plural(g.count, "failure")}</strong> <span class="muted">last seen ${esc(rel(g.last_at))}</span><div class="msg">${esc(g.sample || "(no message)")}</div></div>`).join("") : `<p class="empty">No failures in the last ${DAYS} days.</p>`}
+    </section>
+    <section>
+      <h2>Recent executions</h2>
+      <div class="list">
+        <div class="row head exec-grid"><span>When</span><span>Commit</span><span>Attempt</span><span>Result</span><span>Duration</span></div>
+        ${d.executions.map((e, i) => `<div class="row exec-grid"${i >= 20 ? " hidden data-more" : ""}>
+          <span>${esc(rel(e.started_at))}</span>
+          <span><a href="#/run/${e.run_id}"><code>${sha(e.sha)}</code></a></span>
+          <span><span class="lbl">Attempt</span>${e.attempt}${e.retry ? `, retry ${e.retry}` : ""}</span>
+          <span>${e.outcome === "pass" ? tag("PASS", "passed") : e.outcome === "skip" ? tag("stable", "skipped") : tag("failing", "failed")}</span>
+          <span><span class="lbl">Duration</span>${dur(e.duration_ms)}</span></div>`).join("")}
+      </div>
+      ${d.executions.length > 20 ? `<p style="margin-top:14px"><button class="btn ghost" id="more">Show ${d.executions.length - 20} more</button></p>` : ""}
+    </section>`;
+  const more = document.getElementById("more");
+  if (more) more.addEventListener("click", () => { view.querySelectorAll("[data-more]").forEach(r => r.hidden = false); more.remove(); });
+  const el = document.getElementById("c-dur");
+  chart(el, { days: d.durations.days, label: "Daily median duration", format: "ms", lines: [{ values: d.durations.values, color: "var(--ink)", label: "Median" }] });
+
+  if (LIVE) {
+    const qf = document.getElementById("qf");
+    if (qf) qf.addEventListener("submit", async ev => {
+      ev.preventDefault();
+      try { await post("/api/quarantine", { test_id: d.test_id, reason: document.getElementById("reason").value }); toast(`Quarantined ${name}`); render(); }
+      catch (e) { toast(e.message); }
+    });
+    const un = document.getElementById("unq");
+    if (un) un.addEventListener("click", async () => {
+      try { await post("/api/unquarantine", { test_id: d.test_id }); toast(`Released ${name} from quarantine`); render(); }
+      catch (e) { toast(e.message); }
+    });
+  }
+
+  try {
+    const f = await api("/api/test/forecast", { id: d.test_id });
+    if (tok !== renderToken) return;
+    const hold = f.backtest.p50.length;
+    chart(el, { days: f.days, future: f.future_days, format: "ms", label: "Duration with Toto forecast",
+      lines: [{ values: f.values, color: "var(--ink)", label: "Median" }],
+      band: { from: f.days.length - hold, p10: f.backtest.p10.concat(f.future.p10), p50: f.backtest.p50.concat(f.future.p50), p90: f.backtest.p90.concat(f.future.p90) } });
+    document.getElementById("dur-note").textContent = `Daily median of passing runs. The shaded band is Toto's forecast. Its first ${hold} days are predicted from the days before them, so a line above the band means the test got slower.`;
+    document.getElementById("dur-legend").innerHTML = legend([["var(--ink)", "Daily median"], ["var(--band)", "Toto forecast, p10 to p90"]]);
+  } catch (e) {
+    if (tok !== renderToken) return;
+    document.getElementById("dur-note").textContent = `Daily median of passing runs. No forecast: ${e.message}`;
+  }
+}
+
+async function runsView(tok) {
+  view.innerHTML = loading("Triaging recent runs");
+  const d = await api("/api/runs", { limit: 50 });
+  if (tok !== renderToken) return;
+  const label = { PASS: "Pass", RERUN_TARGETED: "Rerun flaky", REAL_FAILURE: "Real failure" };
+  view.innerHTML = `
+    <h1>Runs</h1>
+    <p class="note">The last ${plural(d.runs.length, "recorded run")} and what the gate decided for each.</p>
+    ${d.runs.length ? `<div class="list">
+      <div class="row head runs-grid"><span>When</span><span>Commit</span><span>Attempt</span><span>Source</span><span>Failed</span><span>Decision</span></div>
+      ${d.runs.map(r => `<a class="row runs-grid" href="#/run/${r.run_id}">
+        <span>${esc(rel(r.started_at))}</span>
+        <span><code>${sha(r.commit_sha)}</code></span>
+        <span><span class="lbl">Attempt</span>${r.attempt}</span>
+        <span><span class="lbl">Source</span>${esc(r.source || "n/a")}</span>
+        <span><span class="lbl">Failed</span>${r.failing} of ${r.tests}</span>
+        <span class="c-wide">${tag(r.decision, label[r.decision])}</span></a>`).join("")}
+    </div>` : `<p class="empty">No runs recorded yet. Run <code>flakewatch ingest reports/*.xml --sha &lt;commit&gt;</code> after a test run.</p>`}`;
+}
+
+const WHY = {
+  quarantined: () => "Quarantined, so the gate ignores it.",
+  known_flaky: f => `Flipped on ${f.flip_shas} of ${plural(f.eligible_shas, "commit")}. Rerun this test only.`,
+  suspect_flaky: f => `Flipped on ${plural(f.flip_shas, "commit")} before. Rerun this test only.`,
+  new_test: () => "First time this test has run, so there's no history to call it flaky. Blocks.",
+  real_failure: f => f.flip_shas ? `Has flaked before, but failed ${plural(f.this_sha.fails, "time")} on this commit without passing once. Treated as real.` : "No flake history. Blocks.",
+};
+async function runView(tok, id) {
+  view.innerHTML = loading();
+  const t = await api("/api/run", { id });
+  if (tok !== renderToken) return;
+  const order = { real_failure: 0, new_test: 1, known_flaky: 2, suspect_flaky: 3, quarantined: 4 };
+  const fails = [...t.failures].sort((a, b) => order[a.category] - order[b.category]);
+  view.innerHTML = `
+    <a class="crumb" href="#/runs">All runs</a>
+    ${verdictBlock(t)}
+    <section>
+      <h2>${t.failures.length ? plural(t.failures.length, "failing test") : "No failing tests"}</h2>
+      <p class="note">${plural(t.run.tests, "test")} ran${t.failures.length ? `, ${t.failures.length} failed on the final attempt` : ""}. Blocking failures are listed first.</p>
+      ${fails.map(f => `<div class="fail-item">
+        ${tag(f.category)}${f.new_signature ? ` <span class="tag t-failing">new failure message</span>` : ""}
+        <div style="margin-top:4px"><a href="${testHref(f.test_id)}"><code>${esc(f.test_id)}</code></a></div>
+        <p class="why">${esc(WHY[f.category](f))}</p>
+        ${f.message ? `<div class="msg">${esc(f.message)}</div>` : ""}
+      </div>`).join("")}
+    </section>
+    ${t.passed_on_retry.length ? `<section><h2>Passed only on retry</h2><p class="note">These failed at least once in this run, then passed. They count toward flake history but don't block.</p><ul class="idlist">${t.passed_on_retry.map(id => `<li><a href="${testHref(id)}"><code>${esc(id)}</code></a></li>`).join("")}</ul></section>` : ""}`;
+}
+
+const SUITE = [["reruns", "Reruns", "count"], ["failure_rate", "Failure rate", "pct"], ["suite_duration_ms", "Suite duration", "ms"], ["runs", "All runs", "count"]];
+let suiteMetric = "reruns";
+async function trendsView(tok) {
+  view.innerHTML = `<h1>Trends</h1><p class="note">Forecasts from Toto 2.0, running on your machine. The first load downloads the model.</p>${loading("Running forecasts")}`;
+  let reg;
+  try { reg = await api("/api/trends/durations"); }
+  catch (e) { if (tok !== renderToken) return; view.innerHTML = `<h1>Trends</h1>${errorBox(e)}`; return; }
+  if (tok !== renderToken) return;
+  view.innerHTML = `
+    <h1>Trends</h1>
+    <p class="note">Forecasts from Toto 2.0 (<code>${esc(reg.model)}</code>), running on your machine.</p>
+    <section style="margin-top:28px">
+      <h2>Rerun churn and suite health</h2>
+      <p class="note">Last 60 days and Toto's forecast for the next 7. If the gate is doing its job, reruns should trend down.</p>
+      <div class="seg" id="metric" role="group" aria-label="Metric">${SUITE.map(([k, l]) => `<button type="button" data-m="${k}" aria-pressed="${k === suiteMetric}">${l}</button>`).join("")}</div>
+      <div class="chart" id="c-suite" style="margin-top:16px"></div>
+      <div id="suite-note"></div>
+    </section>
+    <section>
+      <h2>Getting slower</h2>
+      <p class="note">Each test's last ${plural(reg.holdout_days, "day")} compared with what Toto predicted from its history. Flagged when a day lands above the forecast range and at least 20% over the expected value. Slowdowns tend to show up before timeout flakes do. Checked ${plural(reg.tests_checked, "test")}.</p>
+      <div id="regs">${reg.regressions.length ? "" : `<p class="empty">Nothing ran slower than forecast in the last ${plural(reg.holdout_days, "day")}.</p>`}</div>
+    </section>`;
+  const regs = document.getElementById("regs");
+  reg.regressions.forEach((r, i) => {
+    const worst = r.breaches.reduce((a, b) => b.pct_over_expected > a.pct_over_expected ? b : a);
+    regs.insertAdjacentHTML("beforeend", `<div class="sig">
+      <a href="${testHref(r.series)}"><code>${esc(r.series)}</code></a>
+      <p class="muted" style="margin:4px 0 6px">${Math.round(worst.pct_over_expected)}% over forecast on ${esc(fmtDay(worst.day))}: ${dur(worst.actual)} against an expected ${dur(worst.expected_p50)}.</p>
+      <div class="chart" id="c-reg-${i}"></div></div>`);
+    chart(document.getElementById(`c-reg-${i}`), { days: r.days, height: 130, format: "ms", label: `Duration of ${r.series}`,
+      lines: [{ values: r.values, color: "var(--ink)", label: "Median" }],
+      band: { from: r.days.length - r.forecast.p50.length, ...r.forecast } });
+  });
+  const drawSuite = async () => {
+    const el = document.getElementById("c-suite"), note = document.getElementById("suite-note");
+    const [key, label, fmt] = SUITE.find(s => s[0] === suiteMetric);
+    document.querySelectorAll("#metric button").forEach(b => b.setAttribute("aria-pressed", b.dataset.m === key));
+    try {
+      const f = await api("/api/trends/suite", { metric: key });
+      if (tok !== renderToken) return;
+      chart(el, { days: f.recent.map(r => r.day), future: f.forecast.map(r => r.day), format: fmt, label,
+        lines: [{ values: f.recent.map(r => r.value), color: key === "failure_rate" ? "var(--fail)" : "var(--ink)", label }],
+        band: { from: f.recent.length, p10: f.forecast.map(r => r.p10), p50: f.forecast.map(r => r.p50), p90: f.forecast.map(r => r.p90) } });
+      const a = f.recent_anomaly;
+      note.innerHTML = legend([[key === "failure_rate" ? "var(--fail)" : "var(--ink)", label], ["var(--band)", "Forecast, p10 to p90"]]) +
+        (a ? `<p style="margin-top:10px">${tag("failing", "Above forecast")} ${a.map(b => `${esc(fmtDay(b.day))}: ${esc(FMT[fmt](b.actual))} vs ${esc(FMT[fmt](b.expected_p50))} expected`).join("; ")}.</p>` : "");
+    } catch (e) { el.innerHTML = ""; note.innerHTML = errorBox(e); }
+  };
+  document.getElementById("metric").addEventListener("click", ev => { const b = ev.target.closest("button"); if (b) { suiteMetric = b.dataset.m; drawSuite(); } });
+  drawSuite();
+}
+
+async function quarantineView(tok) {
+  view.innerHTML = loading();
+  const d = await api("/api/quarantine", { days: DAYS });
+  if (tok !== renderToken) return;
+  const act = (label, attrs) => LIVE ? `<button class="btn ghost" ${attrs}>${label}</button>` : "";
+  view.innerHTML = `
+    <h1>Quarantine</h1>
+    <p class="note">Quarantined tests keep running and keep being recorded. They just stop blocking the gate.</p>
+    <section style="margin-top:28px">
+      <h2>Suggested</h2>
+      <p class="note">Flipped on 2 or more commits in the last ${DAYS} days and not quarantined yet.</p>
+      ${d.suggested.length ? `${LIVE ? `<p><button class="btn" id="qall">Quarantine all ${d.suggested.length}</button></p>` : ""}<div class="list">${d.suggested.map(s => `
+        <div class="row q-grid"><span class="c-test"><a href="${testHref(s.test_id)}"><code>${esc(s.test_id)}</code></a></span>
+        <span>Flipped on ${s.flip_shas} of ${plural(s.eligible_shas, "commit")}</span><span>${strip(s.recent)}</span>
+        <span>${act("Quarantine", `data-q="${esc(s.test_id)}" data-why="${esc(`flipped on ${s.flip_shas}/${s.eligible_shas} commits`)}"`)}</span></div>`).join("")}</div>`
+      : `<p class="empty">Nothing to suggest.</p>`}
+    </section>
+    <section>
+      <h2>Quarantined</h2>
+      ${d.quarantined.length ? `<div class="list">${d.quarantined.map(r => `
+        <div class="row q-grid"><span class="c-test"><a href="${testHref(r.test_id)}"><code>${esc(r.test_id)}</code></a><br><span class="muted">${esc(r.reason || "no reason given")}</span></span>
+        <span class="muted">Added ${esc(rel(r.added_at))}${r.added_by === "auto" ? " by sweep" : " by hand"}</span><span>${strip(r.recent)}</span>
+        <span>${act("Release", `data-u="${esc(r.test_id)}"`)}</span></div>`).join("")}</div>`
+      : `<p class="empty">No tests are quarantined.</p>`}
+    </section>
+    <section>
+      <h2>Clean enough to release</h2>
+      <p class="note">Quarantined tests with 10 or more runs and no failures in the last 14 days. Releasing is always your call.</p>
+      ${d.release_candidates.length ? `<ul class="idlist">${d.release_candidates.map(r => `<li><a href="${testHref(r.test_id)}"><code>${esc(r.test_id)}</code></a> <span class="muted">${r.executions} clean runs</span></li>`).join("")}</ul>` : `<p class="empty">None yet.</p>`}
+    </section>`;
+  if (!LIVE) return;
+  view.addEventListener("click", quarantineClicks);
+}
+async function quarantineClicks(ev) {
+  const b = ev.target.closest("button"); if (!b) return;
+  try {
+    if (b.id === "qall") { b.disabled = true; const r = await post("/api/sweep", { apply: true }); toast(`Quarantined ${plural(r.to_quarantine.length, "test")}`); }
+    else if (b.dataset.q) { b.disabled = true; await post("/api/quarantine", { test_id: b.dataset.q, reason: b.dataset.why }); toast(`Quarantined ${splitId(b.dataset.q)[1]}`); }
+    else if (b.dataset.u) { b.disabled = true; await post("/api/unquarantine", { test_id: b.dataset.u }); toast(`Released ${splitId(b.dataset.u)[1]} from quarantine`); }
+    else return;
+    render();
+  } catch (e) { b.disabled = false; toast(e.message); }
+}
+
+/* ---------- router ---------- */
+const ROUTES = [
+  [/^#?\/?$/, "overview", tok => overviewView(tok), true],
+  [/^#\/flaky$/, "flaky", tok => flakyView(tok), true],
+  [/^#\/test\/(.+)$/, "flaky", (tok, m) => testView(tok, decodeURIComponent(m[1])), true],
+  [/^#\/runs$/, "runs", tok => runsView(tok), false],
+  [/^#\/run\/(\d+)$/, "runs", (tok, m) => runView(tok, Number(m[1])), false],
+  [/^#\/trends$/, "trends", tok => trendsView(tok), false],
+  [/^#\/quarantine$/, "quarantine", tok => quarantineView(tok), true],
+];
+async function render() {
+  const tok = ++renderToken;
+  tip.hidden = true;
+  view.removeEventListener("click", quarantineClicks);
+  const hash = location.hash || "#/";
+  const hit = ROUTES.map(([re, nav, fn, windowed]) => [hash.match(re), nav, fn, windowed]).find(r => r[0]);
+  const [m, nav, fn, windowed] = hit || [null, "overview", tok => overviewView(tok), true];
+  win.style.visibility = windowed ? "visible" : "hidden";
+  document.querySelectorAll("#nav a").forEach(a => { if (a.dataset.nav === nav) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
+  try { await fn(tok, m); }
+  catch (e) { if (tok === renderToken) view.innerHTML = errorBox(e); }
+}
+
+/* ---------- boot ---------- */
+const win = document.getElementById("window");
+function syncWindow() { win.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", Number(b.dataset.days) === DAYS)); }
+if (SNAP) {
+  win.hidden = true;
+  const b = document.getElementById("banner");
+  b.hidden = false;
+  b.textContent = `Read-only snapshot taken ${new Date(SNAP.generated_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}, covering the last ${SNAP.days} days.`;
+} else {
+  win.addEventListener("click", ev => {
+    const b = ev.target.closest("button"); if (!b) return;
+    DAYS = Number(b.dataset.days);
+    try { localStorage.setItem("fw-days", String(DAYS)); } catch { /* storage unavailable */ }
+    syncWindow(); render();
+  });
+}
+syncWindow();
+window.addEventListener("hashchange", () => { render(); view.focus({ preventScroll: true }); window.scrollTo(0, 0); });
+render();
+</script>
+</body>
+</html>

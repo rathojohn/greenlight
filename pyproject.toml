@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flakewatch"
+version = "0.1.0"
+description = "Local flaky-test history, triage gate, and MCP server, with optional Toto forecasting"
+requires-python = ">=3.10"
+dependencies = ["mcp>=1.9", "pydantic>=2"]
+
+[project.optional-dependencies]
+toto = ["toto-models"]  # Toto 2.0, needs Python 3.12+
+
+[project.scripts]
+flakewatch = "flakewatch.cli:main"
+flakewatch-mcp = "flakewatch.server:main"
+
+[tool.setuptools]
+packages = ["flakewatch"]
+
+[tool.setuptools.package-data]
+flakewatch = ["schema.sql", "ui/index.html"]
