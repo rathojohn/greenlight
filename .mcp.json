@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "gl-uvx": {
+      "type": "stdio",
+      "command": "bash",
+      "args": ["-c", "echo \"uvx-start $(date +%s.%N) $(command -v uvx)\" >> /tmp/probe-mcp.log; exec uvx --from git+https://github.com/rathojohn/greenlight greenlight-mcp"]
+    },
+    "gl-hook": {
+      "type": "stdio",
+      "command": "bash",
+      "args": ["-c", "echo \"hook-server-start $(date +%s.%N) $(command -v greenlight-mcp)\" >> /tmp/probe-mcp.log; exec greenlight-mcp"]
+    }
+  }
+}
