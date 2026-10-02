@@ -24,6 +24,11 @@ from . import config
 from .gitrepo import Repo
 
 SERVER_NAME = "greenlight"
+# Tools that only read: approved in the repo's settings, so a session doesn't ask before each one. The ones
+# that change something (quarantine, sweep with apply, issues, sync, gating a run) still ask.
+READ_TOOLS = ("greenlight_overview", "greenlight_list_flaky", "greenlight_test_history", "greenlight_triage_run",
+              "greenlight_pipelines", "greenlight_delivery", "greenlight_query", "greenlight_duration_regressions",
+              "greenlight_suite_forecast")
 RULES_MARKER = "## Test failures (greenlight)"
 AGENT_RULES = f"""{RULES_MARKER}
 Record every test run with greenlight, passing or not (passes are the history that tells a flaky test
@@ -169,14 +174,20 @@ def project_files(target: Path, dry_run: bool = False, url: str | None = None) -
     settings = target / ".claude" / "settings.json"
     data = _read_json(settings)
     enabled = data.get("enabledMcpjsonServers") or []
-    if SERVER_NAME in enabled:
-        done.append(".claude/settings.json: greenlight already approved")
+    allow = (data.get("permissions") or {}).get("allow") or []
+    missing = [f"mcp__{SERVER_NAME}__{t}" for t in READ_TOOLS if f"mcp__{SERVER_NAME}__{t}" not in allow]
+    if SERVER_NAME in enabled and not missing:
+        done.append(".claude/settings.json: greenlight and its read-only tools already approved")
     elif dry_run:
-        done.append(".claude/settings.json: would approve greenlight, so no session has to")
+        done.append(".claude/settings.json: would approve greenlight and its read-only tools, so no session asks")
     else:
-        data["enabledMcpjsonServers"] = [*enabled, SERVER_NAME]
+        if SERVER_NAME not in enabled:
+            data["enabledMcpjsonServers"] = [*enabled, SERVER_NAME]
+        if missing:
+            data.setdefault("permissions", {})["allow"] = [*allow, *missing]
         _write_json(settings, data)
-        done.append(".claude/settings.json: approved greenlight, so no session has to")
+        done.append(".claude/settings.json: approved greenlight and its read-only tools, so no session asks "
+                    "(the ones that change something still ask)")
 
     codex = target / ".codex" / "config.toml"
     text = codex.read_text(encoding="utf-8") if codex.is_file() else ""

@@ -199,7 +199,7 @@ git add .mcp.json .claude/settings.json .codex/config.toml
 git commit -m "Start greenlight in Claude Code and Codex sessions"
 ```
 
-That writes the repo's own MCP config: `.mcp.json` for Claude Code, `.codex/config.toml` for Codex, and `.claude/settings.json` approving the server so nobody gets asked. Each starts greenlight through `uvx`, which downloads it on first use, so nobody installs anything by hand. Anyone with [uv](https://docs.astral.sh/uv/) gets it, and Claude Code on the web already has uv.
+That writes the repo's own MCP config: `.mcp.json` for Claude Code, `.codex/config.toml` for Codex, and `.claude/settings.json` approving the server and its read-only tools, so nobody gets asked (the tools that change something, like quarantine, still ask). Each starts greenlight through `uvx`, which downloads it on first use, so nobody installs anything by hand. Anyone with [uv](https://docs.astral.sh/uv/) gets it, and Claude Code on the web already has uv.
 
 That's also why it works in Claude Code on the web: each session is a fresh container, and Claude Code starts project MCP servers before SessionStart hooks run, so a server that a hook installs isn't there yet when Claude looks for it. `uvx` installs it on the spot. Codex only reads `.codex/config.toml` in projects you've marked as trusted.
 
