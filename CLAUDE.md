@@ -46,4 +46,5 @@ Tests use a fake GitHub (`tests/fakegithub.py`) and a fake OTLP collector; nothi
 - No stock AI phrasing ("Here's the thing", "It's not X, it's Y").
 - UI copy is sentence case with plain verbs.
 - No Claude attribution in commits, PRs or comments (no co-author or session lines).
+- Name branches for the work (`otel-export`, `fix-gate-retries`), never `claude/*`.
 - Prefer honest trade-offs over hedged or motivational framing.
