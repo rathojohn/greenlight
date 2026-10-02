@@ -62,7 +62,8 @@ def _short(sha: str | None) -> str:
     if not sha:
         return ""
     base, plus, _ = sha.partition("+")
-    return base[:8] + (" + local edits" if plus else "")
+    commit, at, env = base.partition("@")
+    return commit[:8] + (f" on {env}" if at else "") + (" + local edits" if plus else "")
 
 
 def _run_link(r: dict[str, Any]) -> str:

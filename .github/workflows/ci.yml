@@ -6,7 +6,9 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write        # flakewatch saves each run's record to the flakewatch-data branch
+  pull-requests: write   # and keeps one comment per job on the pull request
+  issues: read           # quarantine labels on flaky-test issues
 
 jobs:
   test:
@@ -21,10 +23,10 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: pip install -e ".[dev]"
-      - run: pytest -q --junitxml=reports/junit-${{ matrix.python }}.xml
-      - uses: actions/upload-artifact@v4
-        if: always()
+      # flakewatch decides whether a red run fails the job, so the test step itself doesn't
+      - run: pytest -q --junitxml=reports/junit.xml
+        continue-on-error: true
+      - uses: ./
         with:
-          name: junit-py${{ matrix.python }}-attempt-${{ github.run_attempt }}
-          path: reports/
-          retention-days: 30
+          junit: reports/junit.xml
+          name: py${{ matrix.python }}

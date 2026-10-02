@@ -52,7 +52,8 @@ def test_records_round_trip_through_a_data_dir(actions, tmp_path):
     path = data / res["record"]
     assert path.name == "gha_900_1_test_py3.12.json.gz" and res["record"].startswith("runs/")
     rec = json.loads(gzip.decompress(path.read_bytes()))
-    assert rec["commit_sha"] == "abc123" and len(rec["results"]) == 2 and rec["session"] == "CI / test / py3.12"
+    assert rec["commit_sha"] == "abc123@py3.12" and rec["git_commit"] == "abc123"
+    assert len(rec["results"]) == 2 and rec["session"] == "CI / test / py3.12"
     with connect(str(tmp_path / "b.db")) as fresh:
         assert ci.restore_dir(fresh, str(data)) == {"records": 1, "added": 1}
         assert ci.restore_dir(fresh, str(data)) == {"records": 1, "added": 0}
@@ -85,7 +86,7 @@ def test_report_markdown_summary_outputs_and_exit_codes(actions, tmp_path, capsy
         for outcome in ("fail", "pass"):
             with connect(db) as conn:
                 ci.record_junit(conn, [write_junit(tmp_path / "h.xml", [(FLAKY, outcome, 1.0, "Timeout")])],
-                                sha=f"h{i}", name=f"h{i}{outcome}")
+                                sha=f"h{i}")
     j = write_junit(tmp_path / "j.xml", [(FLAKY, "fail", 1.0, "Timeout"), ("t.a::ok", "pass", 0.1, None)])
     assert cli.main(["--db", db, "ci", "record", "--junit", j]) == 0
     capsys.readouterr()
@@ -117,3 +118,15 @@ def test_pr_comment_is_upserted(actions, tmp_path):
         assert len(fake.calls("POST", "{repo}/issues/12/comments")) == 2
     finally:
         fake.close()
+
+
+def test_matrix_entries_are_separate_environments(actions, tmp_path):
+    from flakewatch import analysis
+    with connect(str(tmp_path / "m.db")) as conn:
+        for name, outcome in (("py3.11", "fail"), ("py3.12", "pass"), ("py3.11", "fail")):
+            ci.record_junit(conn, [write_junit(tmp_path / "m.xml", [("t.a::x", outcome, 0.1, "boom")])], name=name)
+        s = analysis.flake_stats(conn, 30)["t.a::x"]
+        assert s["flip_shas"] == 0  # fails on 3.11 every time, passes on 3.12: not flaky
+        ids = [r[0] for r in conn.execute("SELECT external_id FROM runs ORDER BY run_id")]
+        assert ids == ["gha:900:1:test:py3.11", "gha:900:1:test:py3.12", "gha:900:1:test:py3.11:2"]
+        assert ci.this_job_run(conn, "py3.11") == 3 and ci.this_job_run(conn, "py3.12") == 2

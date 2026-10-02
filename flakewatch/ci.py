@@ -147,9 +147,7 @@ def record_junit(conn: sqlite3.Connection, files: list[str], name: str | None = 
     sha = sha or env["sha"]
     if not sha:
         raise ValueError("No commit: pass --sha, or run inside GitHub Actions")
-    label = f":{name}" if name else ""
-    base = (f"gha:{env['run_id']}:{env['attempt']}:{env['job']}{label}" if env["run_id"]
-            else f"local:{sha[:12]}{label}")
+    base = job_external_id(env, name) if env["run_id"] else f"local:{sha[:12]}{':' + name if name else ''}"
     # a job that records twice (say, after rerunning just the flaky tests) gets :2, :3... so the
     # rerun lands as a second attempt on the same commit, which is what flake detection needs
     ext, n = base, 1
@@ -157,12 +155,31 @@ def record_junit(conn: sqlite3.Connection, files: list[str], name: str | None = 
         n += 1
         ext = f"{base}:{n}"
     session = " / ".join(x for x in (env["workflow"], env["job"], name) if x) or None
-    run_id, created = record_run(conn, assign_retries(results), commit_sha=sha, branch=branch or env["branch"],
-                                 source="ci", external_id=ext, session=session, url=env["url"])
+    # a matrix entry is its own environment: a test failing on one Python and passing on another, on the
+    # same commit, is a real difference, not a flake, so the name is part of what was tested
+    code = f"{sha}@{name}" if name else sha
+    run_id, created = record_run(conn, assign_retries(results), commit_sha=code, branch=branch or env["branch"],
+                                 source="ci", external_id=ext, session=session, url=env["url"],
+                                 git_commit=sha if name else None)
     out = {"run_id": run_id, "created": created, "results": len(results), "external_id": ext}
     if out_dir:
         out["record"] = write_record(conn, run_id, out_dir)
     return out
+
+
+def job_external_id(env: dict[str, Any], name: str | None) -> str:
+    return f"gha:{env['run_id']}:{env['attempt']}:{env['job']}{':' + name if name else ''}"
+
+
+def this_job_run(conn: sqlite3.Connection, name: str | None) -> int | None:
+    """The newest run this Actions job recorded, so a report never picks up a sibling matrix job."""
+    env = actions_env()
+    if not env["run_id"]:
+        return None
+    base = job_external_id(env, name)
+    row = conn.execute("SELECT run_id FROM runs WHERE external_id = ? OR substr(external_id, 1, ?) = ? "
+                       "ORDER BY started_at DESC, run_id DESC LIMIT 1", (base, len(base) + 1, base + ":")).fetchone()
+    return row["run_id"] if row else None
 
 
 # ---------- reporting ----------

@@ -302,7 +302,8 @@ def cmd_ci_report(a: argparse.Namespace) -> int:
         except ValueError as e:
             print(f"note: no PR comment: {e}", file=sys.stderr)
     with closing(connect(a.db, readonly=gh is None)) as conn:
-        res = ci.report(conn, a.run_id, a.sha or (None if a.run_id else env["sha"]), a.name, gh, pr, a.window_days)
+        run_id = a.run_id or (None if a.sha else ci.this_job_run(conn, a.name))
+        res = ci.report(conn, run_id, None if run_id else (a.sha or env["sha"]), a.name, gh, pr, a.window_days)
     if not res["summary_written"]:
         print(res["markdown"])
     if res.get("pr_comment_error"):
