@@ -120,8 +120,9 @@ def claude_mcp(dry_run: bool = False) -> str:
 # caches it, so it works in a fresh cloud session where a SessionStart hook would run too late: Claude
 # Code starts project MCP servers before the hook finishes.
 UVX_COMMAND = ["uvx", "--from", "git+https://github.com/rathojohn/greenlight", "greenlight-mcp"]
-# Runs after every Claude turn: reads the session's transcript and records its token counts (usage.py)
-USAGE_HOOK = " ".join(UVX_COMMAND[:3]) + " greenlight usage record --hook"
+# Runs after every Claude turn: reads the session's transcript and records its token counts (usage.py).
+# `|| true`: if uvx itself fails (offline, say) it exits 2, and a Stop hook exiting 2 keeps Claude going.
+USAGE_HOOK = " ".join(UVX_COMMAND[:3]) + " greenlight usage record --hook || true"
 
 
 def _read_json(path: Path) -> dict:

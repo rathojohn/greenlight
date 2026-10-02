@@ -466,10 +466,10 @@ How many tokens went into each pull request, and into each test while it was fai
 See it with `greenlight usage`, the Token usage page, or ask an agent (it has `greenlight_token_usage`). `--no-usage-hook` leaves the hook out. To add it by hand, this goes under `hooks` in `.claude/settings.json`:
 
 ```json
-"Stop": [{"hooks": [{"type": "command", "command": "uvx --from git+https://github.com/rathojohn/greenlight greenlight usage record --hook", "timeout": 60}]}]
+"Stop": [{"hooks": [{"type": "command", "command": "uvx --from git+https://github.com/rathojohn/greenlight greenlight usage record --hook || true", "timeout": 60}]}]
 ```
 
-The transcript is Claude Code's own file, not a documented interface, so if its format changes, greenlight needs an update to read it. Claude Code's OpenTelemetry export is documented, but it carries no git branch, which is what ties tokens to a PR.
+The hook can't hold up a session: it always exits 0, and `|| true` covers uvx itself failing (a Stop hook that exits 2 tells Claude to keep going). The transcript is Claude Code's own file, not a documented interface, so if its format changes, greenlight needs an update to read it. Claude Code's OpenTelemetry export is documented, but it carries no git branch, which is what ties tokens to a PR.
 
 ## Configuration
 
