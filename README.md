@@ -118,13 +118,13 @@ Trace ids are derived from the run, so sending the same run twice gives the same
 
 The standard variables decide: `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4318`), `OTEL_EXPORTER_OTLP_HEADERS` for auth, `OTEL_SERVICE_NAME` (default: the repo name) and `OTEL_RESOURCE_ATTRIBUTES`. Or set `[otel] endpoint` in `greenlight.toml`. Keys and tokens only ever go in the environment.
 
-| Backend | Cost | Setup |
-| --- | --- | --- |
-| Local Grafana (Tempo, Prometheus, Loki) | free, on your machine | `docker compose -f deploy/otel/docker-compose.yml up -d`, then open http://localhost:3000. Keeps what your disk keeps. |
-| Grafana Cloud | free tier (traces and logs kept 14 days) | endpoint from your stack's OTLP page; `OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic%20<base64 of instance:token>"` |
-| Honeycomb | free tier | endpoint `https://api.honeycomb.io`, `OTEL_EXPORTER_OTLP_HEADERS="x-honeycomb-team=<key>"` |
-| Datadog | paid | an Agent with OTLP ingest enabled on 4318. The spans arrive as ordinary APM traces. |
-| Anything else | | an OpenTelemetry Collector in front of it |
+| Backend | Setup |
+| --- | --- |
+| Local Grafana (Tempo, Prometheus, Loki) | `docker compose -f deploy/otel/docker-compose.yml up -d`, then open http://localhost:3000. Keeps what your disk keeps. |
+| Grafana Cloud | endpoint from your stack's OTLP page; `OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic%20<base64 of instance:token>"` |
+| Honeycomb | endpoint `https://api.honeycomb.io`, `OTEL_EXPORTER_OTLP_HEADERS="x-honeycomb-team=<key>"` |
+| Datadog | an Agent with OTLP ingest enabled on 4318. The spans arrive as ordinary APM traces. |
+| Anything else | an OpenTelemetry Collector in front of it |
 
 greenlight keeps its own history in SQLite either way, so a short backend retention only limits what you can browse there, not what the gate knows.
 
