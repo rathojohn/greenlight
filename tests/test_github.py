@@ -131,7 +131,7 @@ def test_sync_issues_skips_prs_reads_markers_and_mirrors_quarantine_labels(db, f
     conn, _ = db
     conn.execute("INSERT INTO quarantine VALUES ('manual::t', 'mine', '2026-01-01', 'manual')")
     fake.pages("GET", "{repo}/issues", [
-        issue(1, "<!-- greenlight:flaky:smoke::the Lantern -->", ["flaky-test", "quarantined"]),
+        issue(1, "<!-- greenlight:flaky:smoke::the cart total -->", ["flaky-test", "quarantined"]),
         issue(2, "<!-- greenlight:perf:perf::early -->", ["perf-regression"]),
         issue(3, pr_link=True),
         issue(4, "plain bug", ["bug"]),
@@ -139,9 +139,9 @@ def test_sync_issues_skips_prs_reads_markers_and_mirrors_quarantine_labels(db, f
     out = ghsync.sync_issues(conn, gh)
     assert out == {"issues": 3, "quarantined_by_label": 1}
     keys = dict(conn.execute("SELECT number, managed_key FROM issues").fetchall())
-    assert keys == {1: "flaky:smoke::the Lantern", 2: "perf:perf::early", 4: None}
+    assert keys == {1: "flaky:smoke::the cart total", 2: "perf:perf::early", 4: None}
     q = {r["test_id"]: r["added_by"] for r in conn.execute("SELECT * FROM quarantine")}
-    assert q == {"manual::t": "manual", "smoke::the Lantern": "github#1"}
+    assert q == {"manual::t": "manual", "smoke::the cart total": "github#1"}
     # the label comes off: the next sync releases it and leaves the manual one
     conn.execute("UPDATE issues SET labels = '[\"flaky-test\"]' WHERE number = 1")
     ghsync.mirror_issue_quarantine(conn, "quarantined")

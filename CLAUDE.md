@@ -7,7 +7,7 @@ CI/CD observability on OpenTelemetry, built from git, GitHub and test reports. I
 - `greenlight/schema.sql` + `db.py`: SQLite schema (v5) and migrations. Columns added after a table first shipped go in both `schema.sql` and `db.MIGRATIONS`, and `SCHEMA_VERSION` goes up. Read-only opens upgrade an old DB first.
 - `ingest.py`: JUnit XML parsing and `record_run`, the one way runs get written. `ingest_checkout` keys a local run by `gitrepo.Repo.identity` (HEAD plus a hash of uncommitted edits, reports excluded); `greenlight run` and the `greenlight_gate_junit` MCP tool both use it.
 - `analysis.py`: flake stats, `triage_run` (the gate), quarantine, sweep, read-only SQL.
-- `playtest.py`: adapter for a test ledger committed to git (survive-project's `tools/playtest/runs`). Infers passes for watched checks; a crashed suite infers nothing.
+- `playtest.py`: adapter for a test ledger committed to git (JSON records in `tools/playtest/runs`, one per run). Infers passes for watched checks; a crashed suite infers nothing.
 - `github.py`: stdlib REST client and token resolution. `ghsync.py`: PRs, issues, Actions, deployments. `sync.py`: runs every configured source, each isolated.
 - `delivery.py`: pipeline, DORA, PR and issue analytics.
 - `issues.py`: plans and applies one GitHub issue per flaky test and perf regression.
@@ -21,7 +21,7 @@ CI/CD observability on OpenTelemetry, built from git, GitHub and test reports. I
 - `usage.py`: Claude Code token usage. A Stop hook (`greenlight usage record --hook`, added by `setup --project`) reads the session transcript and its subagents', and stores per-minute counts per model and branch (`agent_usage`, `agent_sessions`). PRs get their branch's tokens until merge; tests get a session's tokens while they were red (runs carry the session). `detail()` feeds the dashboard's side panels.
 - `insights.py`: what to do next, most at stake first (tests red on the default branch, flaky tests Claude spent tokens on, sweep suggestions, context habits), and `brief()`, the few lines an agent starts with. The server puts the brief in its MCP instructions (a property on the low-level server, refreshed off the request path every minute); subagents don't see server instructions, so `greenlight brief --hook` answers a SubagentStart hook.
 - `context.py`: where a session's context went, from the same transcript: per tool category, the tokens results added and the cache reads that carried them until a compaction (`agent_context`, with `system` and `conversation` accounting for the rest of every cache read), cache rebuilds and their cause (`agent_cache_rebuilds`), and branch switches that inherited the earlier work (`agent_task_switches`).
-- `deploy/otel/`: local Grafana (otel-lgtm) behind a Collector. `integrations/survive-project/`: worked example.
+- `deploy/otel/`: local Grafana (otel-lgtm) behind a Collector.
 - `demo.py`: synthetic history for every view (`greenlight demo`).
 
 ## Commands
@@ -36,7 +36,7 @@ Tests use a fake GitHub (`tests/fakegithub.py`), a fake OTLP collector and a loc
 
 ## Decisions worth knowing
 
-- History lives in a database: one on each machine, or one shared server. Nothing greenlight records is written to git or GitHub. It only reads from them (records a project commits itself, like survive-project's playtest ledger, are that project's choice). Clients send runs to the server as records keyed by external id, so resending or later syncing the same run adds nothing, and the server recomputes the attempt number against its own history.
+- History lives in a database: one on each machine, or one shared server. Nothing greenlight records is written to git or GitHub. It only reads from them (records a project commits itself, like a test ledger, are that project's choice). Clients send runs to the server as records keyed by external id, so resending or later syncing the same run adds nothing, and the server recomputes the attempt number against its own history.
 - A run's `commit_sha` is the identity of the code tested, not always a plain commit: `<sha>+<hash>` when it had uncommitted edits (playtest records), `<sha>@<name>` for a matrix entry in CI. The plain commit is in `git_commit`. Flips only count on identical code.
 - Gate: quarantined failures are ignored, known/suspect flaky failures get a targeted rerun, new tests and tests without flake history block. A flaky test that fails 3+ times on one commit without passing is treated as real. `new_test` only applies to runs that name every result (`total_tests IS NULL`).
 - GitHub tokens come from `GREENLIGHT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` or `gh auth token`, and are never stored or printed. Artifact downloads drop the token on the redirect off GitHub.

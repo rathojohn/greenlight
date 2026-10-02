@@ -100,12 +100,12 @@ def test_a_test_costs_what_its_session_spent_while_it_was_red(tmp_path):
     with closing(connect(str(tmp_path / "u.db"))) as conn:
         usage.store(conn, {"session": {"session_id": "s-local", "remote_session": "session_01ABC"},
                            "rows": [row(m, "fix", 10) for m in range(0, 60)]})
-        run(conn, 5, "session_01ABC", {"a::lantern": "fail", "a::gem": "fail", "a::ok": "pass"})
-        run(conn, 20, "session_01ABC", {"a::lantern": "pass", "a::gem": "fail"})
+        run(conn, 5, "session_01ABC", {"a::login": "fail", "a::search": "fail", "a::ok": "pass"})
+        run(conn, 20, "session_01ABC", {"a::login": "pass", "a::search": "fail"})
         run(conn, 30, "someone-elses-session", {"a::ok": "fail"})  # no usage for it: costs nothing
         tests = {t["test_id"]: t for t in usage.summary(conn, 3)["by_test"]}
-        assert tests["a::lantern"]["output_tokens"] == 150 and tests["a::lantern"]["still_red"] == 0  # minutes 5..19
-        assert tests["a::gem"]["output_tokens"] == 550 and tests["a::gem"]["still_red"] == 1  # red until the end
+        assert tests["a::login"]["output_tokens"] == 150 and tests["a::login"]["still_red"] == 0  # minutes 5..19
+        assert tests["a::search"]["output_tokens"] == 550 and tests["a::search"]["still_red"] == 1  # red until the end
         assert "a::ok" not in tests
 
 

@@ -248,8 +248,8 @@ Every session that connects to greenlight gets a short brief in the server's ins
 
 ```
 greenlight (acme/game), from the last 30 days of test runs and sessions:
-- Failing on the default branch, so not caused by your branch: test_lantern (since 3f2a1c90). Report these; don't fix them in other work.
-- Flaky, passed and failed on the same code: test_boss_entrance (5/12 commits). If one fails, rerun only it once; don't debug it.
+- Failing on the default branch, so not caused by your branch: test_checkout_total (since 3f2a1c90). Report these; don't fix them in other work.
+- Flaky, passed and failed on the same code: test_search_autocomplete (5/12 commits). If one fails, rerun only it once; don't debug it.
 - 2 quarantined tests: the gate ignores their failures.
 - After a test run with failures, let the gate judge them before rerunning or debugging (greenlight run, greenlight playtest gate, or the greenlight_triage_run tool).
 - When the work moves to a new branch in a long session, tell the user /compact first would cut the cost of everything after it.
@@ -479,7 +479,7 @@ It's dark by default with a light theme one click away. The time range (7, 14, 3
 How many tokens went into each pull request, and into each test while it was failing. `greenlight setup --project` adds a hook that runs after every Claude Code turn (`greenlight usage record --hook`). It reads the session's transcript, which Claude Code keeps on disk with the usage of every API call, and records per-minute counts: output, input, cache reads and writes, the model and the git branch. Prompts and code never leave the machine. With `GREENLIGHT_URL` set the counts go to the server; otherwise to the local database.
 
 - **A pull request** gets the tokens spent on its branch until it merged or closed. If a later PR reuses the branch name, what comes after goes to that one.
-- **A test** gets the tokens a session spent while it was red: from a run in that session that failed it to the next run in the same session that passed it (or the session's end, shown as unfixed). Two tests red at once both count the same tokens, so the per-test numbers don't add up to a total. `greenlight run` and survive-project's playtest records note which session ran them, which is what links the two.
+- **A test** gets the tokens a session spent while it was red: from a run in that session that failed it to the next run in the same session that passed it (or the session's end, shown as unfixed). Two tests red at once both count the same tokens, so the per-test numbers don't add up to a total. `greenlight run` and test ledger records note which session ran them, which is what links the two.
 
 ### Where the tokens go
 
@@ -562,7 +562,7 @@ Environment variables:
 
 ### Test ledgers in git
 
-Some projects run tests outside CI (in coding-agent sessions, on a laptop) and commit a small record of each run instead. `[playtest]` reads one such format, `tools/playtest/runs/*.json`, from every branch: each record names the commit, the uncommitted files it tested (by content hash), and per suite which checks failed or ran slower than a baseline. Records name only failures, so greenlight infers that a check passed when its suite passed, which is exact on the same code. `greenlight playtest gate` syncs and gates the run just made, and prints the command that reruns only the flaky suites. `integrations/survive-project/` is a worked example. Other ledger formats are a small adapter away (`greenlight/playtest.py` is about 300 lines).
+Some projects run tests outside CI (in coding-agent sessions, on a laptop) and commit a small record of each run instead. `[playtest]` reads one such format, `tools/playtest/runs/*.json`, from every branch: each record names the commit, the uncommitted files it tested (by content hash), and per suite which checks failed or ran slower than a baseline. Records name only failures, so greenlight infers that a check passed when its suite passed, which is exact on the same code. `greenlight playtest gate` syncs and gates the run just made, and prints the command that reruns only the flaky suites. Other ledger formats are a small adapter away (`greenlight/playtest.py` is about 300 lines).
 
 ## Limits
 

@@ -752,7 +752,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_sync)
 
-    s = sub.add_parser("playtest", help="a playtest ledger in git (survive-project's tools/playtest)")
+    s = sub.add_parser("playtest", help="a test ledger committed to git (tools/playtest/runs)")
     ps = s.add_subparsers(dest="playtest_cmd", required=True)
     t = ps.add_parser("sync", help="read every run record on every branch")
     t.add_argument("--repo", help="the clone (default: [git] path, or here)")
