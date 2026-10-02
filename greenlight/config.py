@@ -30,6 +30,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     "ci": {"data_branch": "greenlight-data"},
     "otel": {"endpoint": None, "service_name": None, "window_days": 30, "since_days": 90},
     "sync": {"days": 90},
+    "run": {"junit": None},
 }
 
 
@@ -38,13 +39,14 @@ class Config:
     path: Path | None = None
     db: str | None = None
     sections: dict[str, dict[str, Any]] = field(default_factory=dict)
+    start: Path | None = None   # the folder it was looked up from, when no file was found
 
     def get(self, section: str, key: str) -> Any:
         return self.sections.get(section, {}).get(key, DEFAULTS.get(section, {}).get(key))
 
     @property
     def base(self) -> Path:
-        return self.path.parent if self.path else Path.cwd()
+        return self.path.parent if self.path else (self.start or Path.cwd())
 
     def resolve_path(self, value: str | None) -> str | None:
         if not value:
@@ -103,10 +105,12 @@ def find(start: Path | None = None) -> Path | None:
     return home if home.is_file() else None
 
 
-def load(path: str | None = None) -> Config:
-    p = Path(os.path.expanduser(path)) if path else find()
+def load(path: str | None = None, start: Path | None = None) -> Config:
+    """start: where to look for greenlight.toml (default: here). The MCP server passes the project
+    Claude Code is working in, since a user-scoped server starts in ~/.claude."""
+    p = Path(os.path.expanduser(path)) if path else find(start)
     if p is None:
-        return Config()
+        return Config(start=start)
     if not p.is_file():
         raise FileNotFoundError(f"No config file at {p}")
     try:

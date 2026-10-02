@@ -1,9 +1,21 @@
 """Read-only helpers over a local git clone: refs, files on refs, and commit metadata."""
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+
+def code_identity(commit: str, changed: dict[str, str | None]) -> str:
+    """The commit, plus a short hash of the uncommitted files' contents when there were any. Two runs
+    flip only when they tested the same code, so a run with local edits is its own version."""
+    if not changed:
+        return commit
+    digest = hashlib.sha1(json.dumps(sorted(changed.items())).encode()).hexdigest()[:8]
+    return f"{commit}+{digest}"
 
 
 class GitError(RuntimeError):
@@ -23,6 +35,31 @@ class Repo:
             msg = out.stderr.decode(errors="replace").strip() or f"exit {out.returncode}"
             raise GitError(f"git {' '.join(args[:3])}: {msg}")
         return out.stdout.decode("utf-8", errors="replace")
+
+    def dirty(self, exclude: set[str] | None = None) -> dict[str, str | None]:
+        """{path from the repo root: content hash, or None if deleted} for every file that differs from
+        HEAD, untracked ones included (ignored ones not). Mirrors survive-project's ledger.cjs.
+        exclude: files to leave out (absolute, or from the repo root), like the report being recorded."""
+        top = self.git("rev-parse", "--show-toplevel", check=False).strip()
+        if not top:
+            return {}
+        root = Repo(top)
+        skip = {os.path.relpath(e, top) if os.path.isabs(e) else e for e in (exclude or ())}
+        names = set(filter(None, root.git("diff", "--name-only", "-z", "HEAD", check=False).split("\0")))
+        names |= set(filter(None, root.git("ls-files", "--others", "--exclude-standard", "-z", check=False).split("\0")))
+        names = sorted(n for n in names if n not in skip)
+        present = [n for n in names if (Path(top) / n).is_file()]
+        hashes = root.git("hash-object", "--stdin-paths", input="\n".join(present).encode(), check=False).split() if present else []
+        known = dict(zip(present, hashes))
+        return {n: known.get(n) for n in names}
+
+    def identity(self, exclude: set[str] | None = None) -> tuple[str, str, str | None] | None:
+        """(code id, commit, branch) for what this checkout would test now, or None outside git."""
+        sha = self.resolve("HEAD")
+        if not sha:
+            return None
+        branch = self.git("branch", "--show-current", check=False).strip() or None
+        return code_identity(sha, self.dirty(exclude)), sha, branch
 
     def ok(self) -> bool:
         try:

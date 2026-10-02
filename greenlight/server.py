@@ -3,9 +3,12 @@
 """
 from __future__ import annotations
 
+import glob
 import json
+import os
 import sqlite3
 from contextlib import closing
+from pathlib import Path
 from typing import Annotated, Any, Callable, Literal
 
 from pydantic import Field
@@ -29,10 +32,13 @@ mcp = _Server(
     ),
 )
 
-try:  # greenlight.toml in the folder the server starts in (or a parent) sets the DB and the repo
-    CFG = config.load()
+# The project the agent is working in. Claude Code starts a user-scoped server in ~/.claude and says
+# where the project is in CLAUDE_PROJECT_DIR; a project-scoped one (or Codex) starts in the project.
+PROJECT = Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+try:  # greenlight.toml in the project (or a parent) sets the DB and the repo
+    CFG = config.load(start=PROJECT)
 except (ValueError, FileNotFoundError):
-    CFG = config.Config()
+    CFG = config.Config(start=PROJECT)
 set_config_db(CFG.db)
 
 READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
@@ -65,6 +71,32 @@ def triage_run(
     quarantined, known_flaky, suspect_flaky, new_test, or real_failure. `new_signature` = this flaky
     test failed with a message it has not produced before, which is worth a look."""
     return _run(lambda c: analysis.triage_run(c, run_id, commit_sha, window_days))
+
+
+@mcp.tool(name="greenlight_gate_junit", annotations=WRITE)
+def gate_junit(
+    paths: Annotated[list[str], Field(min_length=1, description="JUnit XML files or globs, relative to the project.")],
+    commit_sha: Annotated[str | None, Field(description="Default: the project's HEAD.")] = None,
+    branch: Annotated[str | None, Field(description="Default: the project's current branch.")] = None,
+    window_days: WindowDays = analysis.DEFAULT_WINDOW_DAYS,
+) -> str:
+    """Record a test run from its JUnit report and return the gate's decision in one call. Use it right
+    after running tests: PASS (carry on), RERUN_TARGETED (rerun only `rerun_tests`, once) or
+    REAL_FAILURE (investigate `blocking`; no full regression until it's fixed)."""
+    from .ingest import ingest_checkout
+
+    def go(c: sqlite3.Connection) -> dict:
+        files: list[str] = []
+        for p in paths:
+            pattern = p if os.path.isabs(p) else str(PROJECT / p)
+            files.extend(sorted(glob.glob(pattern, recursive=True)))
+        if not files:
+            raise ValueError(f"No JUnit files match {paths} in {PROJECT}. Did the runner write JUnit XML?")
+        run_id, _, n = ingest_checkout(c, files, str(PROJECT), commit_sha, branch, source="agent")
+        t = analysis.triage_run(c, run_id=run_id, window_days=window_days)
+        t["recorded"] = {"run_id": run_id, "results": n, "files": len(files)}
+        return t
+    return _run(go, readonly=False)
 
 
 @mcp.tool(name="greenlight_list_flaky", annotations=READ)
@@ -161,7 +193,7 @@ def playtest_gate(
     from . import playtest
 
     def go(c: sqlite3.Connection) -> dict:
-        repo = repo_path or CFG.git_path or "."
+        repo = repo_path or CFG.git_path or str(PROJECT)
         playtest.sync(c, repo)
         run_id = playtest.latest_local_run(c, repo)
         if run_id is None:

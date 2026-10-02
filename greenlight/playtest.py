@@ -13,7 +13,6 @@ for perf, its numbers. When it is present it upgrades the matching record's run 
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 from collections import defaultdict
@@ -22,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from .db import iso, parse_time, utcnow
-from .gitrepo import Repo
+from .gitrepo import Repo, code_identity
 from .ingest import TestResult, failure_signature, insert_results, record_run, MESSAGE_LIMIT
 
 RUNS_DIR = "tools/playtest/runs"
@@ -59,13 +58,6 @@ class Record:
         return own[0] if own else ("release" if "release" in self.branches else None)
 
 
-def code_identity(commit: str, changed: dict[str, str | None]) -> str:
-    """The commit, plus a short hash of the uncommitted files' contents when there were any. Two runs
-    flip only when they tested the same code, so a run with local edits is its own version."""
-    if not changed:
-        return commit
-    digest = hashlib.sha1(json.dumps(sorted(changed.items())).encode()).hexdigest()[:8]
-    return f"{commit}+{digest}"
 
 
 def external_id(name: str) -> str:
