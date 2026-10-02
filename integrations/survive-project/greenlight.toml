@@ -1,0 +1,28 @@
+# greenlight for survive-project. Copy to the repo root (it ignores tokens; those come from the
+# environment) or to ~/.greenlight/config.toml with [git] path pointing at your clone.
+db = "~/.greenlight/survive-project.db"
+
+[github]
+repo = "rathojohn/survive-project"
+
+[playtest]
+enabled = true                   # tools/playtest/runs records, on every branch
+
+[actions]
+enabled = false                  # no CI yet (docs/TESTING.md, "CI")
+
+[delivery]
+# Every patch notes file added on main is a build that shipped (docs/PATCH_NOTES.md). Git only, so it
+# works without a token and goes back to the first build. Swap for deploy_branch = "release" to count
+# pushes to release instead (needs a token).
+deploy_files = "docs/patch-notes/20??-??-??-*.md"
+incident_labels = ["bug", "incident", "hotfix"]
+
+[issues]
+flaky_label = "flaky-test"
+perf_label = "perf-regression"   # docs/TESTING.md, "Perf regressions": a slower perf check opens an issue
+quarantine_label = "quarantined"
+min_flips = 2
+
+[otel]
+# endpoint = "http://localhost:4318"   # deploy/otel in the greenlight repo, or any OTLP backend

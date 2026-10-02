@@ -32,8 +32,11 @@ outputs:
     description: PASS, RERUN_TARGETED or REAL_FAILURE
     value: ${{ steps.report.outputs.decision }}
   rerun-tests:
-    description: Space-separated test ids to rerun when the decision is RERUN_TARGETED
+    description: Space-separated test ids (classname::name) to rerun when the decision is RERUN_TARGETED
     value: ${{ steps.report.outputs.rerun-tests }}
+  rerun-names:
+    description: The same tests by name only, for selectors like pytest -k or jest -t
+    value: ${{ steps.report.outputs.rerun-names }}
 
 runs:
   using: composite

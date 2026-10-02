@@ -264,7 +264,8 @@ def report(conn: sqlite3.Connection, run_id: int | None = None, sha: str | None 
     md = report_markdown(t, name, issue_links(conn, [f["test_id"] for f in t["failures"]]), gh.repo if gh else None)
     out = {"triage": t, "markdown": md, "summary_written": write_step_summary(md),
            "outputs_written": write_outputs({"decision": t["decision"], "exit-code": t["exit_code"],
-                                             "rerun-tests": " ".join(t["rerun_tests"])})}
+                                             "rerun-tests": " ".join(t["rerun_tests"]),
+                                             "rerun-names": " ".join(sorted({x.rsplit("::", 1)[-1] for x in t["rerun_tests"]}))})}
     if gh and pr:
         try:
             c = upsert_pr_comment(gh, pr, md, name)
