@@ -540,9 +540,11 @@ def cmd_usage(a: argparse.Namespace) -> int:
     cost = t.get("weighted") or 0
     share = lambda n: f"{n / cost:.0%}" if cost else "0%"  # noqa: E731
     if cost:
-        print(f"Cost: {k(cost)} in input tokens (cache reads {share(t['cache_read_tokens'] * usage.WEIGHTS['cache_read_tokens'])}"
-              f", output {share(t['output_tokens'] * usage.WEIGHTS['output_tokens'])}"
-              f", cache writes {share(cost - t['input_tokens'] - t['cache_read_tokens'] * usage.WEIGHTS['cache_read_tokens'] - t['output_tokens'] * usage.WEIGHTS['output_tokens'])})")
+        part = lambda f: sum(m[f] * usage.weights(m["model"])[f] for m in s.get("models", []))  # noqa: E731
+        reads, outs = part("cache_read_tokens"), part("output_tokens")
+        usd = f", ${t['dollars']:,.2f} at API prices" if t.get("dollars") else ""
+        print(f"Cost: {k(cost)} in input tokens{usd} (cache reads {share(reads)}, output {share(outs)}, "
+              f"cache writes {share(cost - t['input_tokens'] - reads - outs)})")
     cx = s.get("context") or {}
     if cx.get("categories"):
         print("\nWhere context goes (share of cost, tokens re-read):")

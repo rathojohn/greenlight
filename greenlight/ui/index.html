@@ -735,8 +735,10 @@ function tk(n) {
   const a = Math.abs(n);
   return a >= 1e9 ? `${+(n / 1e9).toFixed(1)}B` : a >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : a >= 1e4 ? `${Math.round(n / 1e3)}k` : a >= 1e3 ? `${+(n / 1e3).toFixed(1)}k` : String(Math.round(n));
 }
-const FMT = { tok: v => tk(v), count: v => Math.round(v * 10) / 10 + "", pct: v => `${Math.round(v * 1000) / 10}%`, ms: v => dur(v), h: v => hrs(v), perf: v => `${+v.toFixed(2)} ms` };
-const AXIS = { ...FMT, pct: v => `${Math.round(v * 100)}%`, ms: v => v === 0 ? "0" : v < 1000 ? `${Math.round(v)}ms` : v < 60000 ? `${+(v / 1000).toFixed(1)}s` : v < 3600000 ? `${+(v / 60000).toFixed(1)}m` : `${+(v / 3600000).toFixed(1)}h`, h: v => v === 0 ? "0" : v < 1 ? `${Math.round(v * 60)}m` : v < 48 ? `${+v.toFixed(1)}h` : `${+(v / 24).toFixed(1)}d` };
+/* dollars: cents under $100, whole dollars above */
+const money = v => v == null ? "" : `${v < 0 ? "-" : ""}$${Math.abs(v) >= 100 ? Math.round(Math.abs(v)).toLocaleString("en-US") : Math.abs(v).toFixed(2)}`;
+const FMT = { usd: v => money(v), tok: v => tk(v), count: v => Math.round(v * 10) / 10 + "", pct: v => `${Math.round(v * 1000) / 10}%`, ms: v => dur(v), h: v => hrs(v), perf: v => `${+v.toFixed(2)} ms` };
+const AXIS = { ...FMT, usd: v => v === 0 ? "$0" : Math.abs(v) >= 1000 ? `$${+(v / 1000).toFixed(1)}k` : `$${+v.toFixed(Math.abs(v) < 10 ? 2 : 0)}`, pct: v => `${Math.round(v * 100)}%`, ms: v => v === 0 ? "0" : v < 1000 ? `${Math.round(v)}ms` : v < 60000 ? `${+(v / 1000).toFixed(1)}s` : v < 3600000 ? `${+(v / 60000).toFixed(1)}m` : `${+(v / 3600000).toFixed(1)}h`, h: v => v === 0 ? "0" : v < 1 ? `${Math.round(v * 60)}m` : v < 48 ? `${+v.toFixed(1)}h` : `${+(v / 24).toFixed(1)}d` };
 
 /* ---------- building blocks ---------- */
 const icon = (name, cls = "") => `<svg class="ic ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
@@ -1914,16 +1916,16 @@ function cmdkClose() { document.getElementById("cmdk").hidden = true; document.b
 const SERIES = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--c6)"];
 const PTYPES = [["timeseries", "Time series"], ["stat", "Stat"], ["toplist", "Top list"], ["table", "Table"], ["text", "Text"], ["row", "Row"]];
 const DISPLAYS = [["bars", "Stacked bars"], ["line", "Lines"], ["area", "Area"]];
-const UNITS = [["auto", "From the column's name"], ["count", "Count"], ["tokens", "Tokens"], ["ms", "Duration"], ["percent", "Percent"]];
+const UNITS = [["auto", "From the column's name"], ["count", "Count"], ["tokens", "Tokens"], ["usd", "Dollars"], ["ms", "Duration"], ["percent", "Percent"]];
 const CALCS = [["total", "Total"], ["last", "Last"], ["mean", "Mean"], ["max", "Max"]];
 const WIDTHS = [[3, "A quarter"], [4, "A third"], [6, "Half"], [8, "Two thirds"], [12, "Full width"]];
 const REFRESHES = [["", "Off"], ["60", "Every minute"], ["300", "Every 5 minutes"], ["900", "Every 15 minutes"]];
 const isDay = v => typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v);
 const isHour = v => typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}/.test(v);
 const fmtHour = v => v.slice(11, 13) === "00" ? fmtDay(v) : v.slice(11, 16);
-/* how a column's numbers read: the panel's unit, else its name (_ms a duration, _rate or _share a percent, tokens or cost in k and M) */
-const colFmt = name => /_ms$/i.test(name) ? "ms" : /(_rate|_share|_pct)$/i.test(name) ? "pct" : /token|cost/i.test(name) ? "tok" : "count";
-const unitFmt = (unit, name) => ({ tokens: "tok", ms: "ms", percent: "pct", count: "count" })[unit] || colFmt(name || "");
+/* how a column's numbers read: the panel's unit, else its name (_ms a duration, _rate or _share a percent, dollars or _usd in dollars, tokens or cost in k and M) */
+const colFmt = name => /(^|_)(dollars|usd)$/i.test(name) ? "usd" : /_ms$/i.test(name) ? "ms" : /(_rate|_share|_pct)$/i.test(name) ? "pct" : /token|cost/i.test(name) ? "tok" : "count";
+const unitFmt = (unit, name) => ({ tokens: "tok", usd: "usd", ms: "ms", percent: "pct", count: "count" })[unit] || colFmt(name || "");
 const fmtBy = (key, v) => key === "count" && Math.abs(v) >= 10000 ? tk(v) : FMT[key](v);
 const fmtCell = (name, v, unit) => v == null ? "" : typeof v === "number" ? fmtBy(unitFmt(unit, name), v) : /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(v) ? when(v) : esc(v);
 /* a column named for something greenlight knows opens its side panel */
@@ -2280,7 +2282,9 @@ async function sqlView(tok) {
 }
 
 /* ---------- token usage (Claude Code) ---------- */
-const COST_TIP = "Tokens priced like input tokens, from Claude's API prices: output 5x, a cache read 0.1x, a cache write 1.25x (2x when it lasts an hour). The same weights for every model, so sessions compare.";
+const COST_TIP = "Tokens priced like input tokens of their model, from Claude's API prices: output 5x, a cache read 0.1x (0.05x on Opus 5.5), a cache write 1.25x (2x when it lasts an hour). A unit every model shares, so sessions compare.";
+const USD_TIP = "The same tokens at each model's API list price. On a Pro or Max plan you aren't billed this.";
+const usdCol = { h: "API price", cell: r => money(r.dollars), sort: r => r.dollars || 0, cls: "num", tip: USD_TIP };
 const CTX_NAMES = { system: "System prompt and tools", conversation: "Conversation", test: "Test runs", build: "Builds", git: "git and gh", read: "File reads", search: "Searches", web: "Web", shell: "Other shell commands", image: "Images", edit: "Edits", subagent: "Subagent reports", skill: "Skills", other: "Other tools" };
 const CTX_HINT = { system: "What every request starts with: instructions, tool definitions, CLAUDE.md", conversation: "Claude's own replies, your messages, reminders", read: "Read, and cat, sed or head in a shell", search: "Grep, Glob, and grep, find or ls in a shell", web: "WebFetch, WebSearch, curl", image: "Screenshots and pictures, priced by size" };
 const CTX_ADVICE = {
@@ -2321,7 +2325,7 @@ const copyBox = text => `<div class="copy"><code>${esc(text)}</code><button clas
 const ext = (url, text) => isUrl(url) ? `<a class="tb" href="${esc(url)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(text)}"><span class="lbl">${esc(text)}</span>${icon("ext")}</a>` : "";
 const goto = (href, text) => `<a class="tb" href="${esc(href)}" aria-label="${esc(text)}"><span class="lbl">${esc(text)}</span>${icon("right")}</a>`;
 const prState = st => st === "merged" ? tag("success", "merged") : st === "open" ? tag("open-ok", "open") : tag("closed", st);
-const tokenFacts = r => facts([["Cost", tk(r.weighted), COST_TIP], ["Output", tk(r.output_tokens)], ["Cache reads", tk(r.cache_read_tokens)], ["Requests", tk(r.requests)]]);
+const tokenFacts = r => facts([["Cost", tk(r.weighted), COST_TIP], ...(r.dollars != null ? [["API price", money(r.dollars), USD_TIP]] : []), ["Output", tk(r.output_tokens)], ["Cache reads", tk(r.cache_read_tokens)], ["Requests", tk(r.requests)]]);
 function ctxTable(id, cats, total, limit = 8) {
   return boxed(table(id, [
     { h: "What", cell: c => panelLink(`cat:${c.category}`, esc(ctxName(c.category))), sort: c => ctxName(c.category), dir: 1, cls: "wrap" },
@@ -2333,6 +2337,7 @@ const sessionCols = [
   { h: "Session", cell: x => convLabel(x), sort: x => convName(x), dir: 1, cls: "wrap" },
   { h: "Last active", cell: x => when(x.last_at), sort: x => x.last_at, cls: "nw hide-sm" },
   { h: "Cost", cell: x => tk(x.weighted), sort: x => x.weighted, cls: "num" },
+  usdCol,
 ];
 
 PANELS.test = async id => {
@@ -2379,6 +2384,7 @@ function itemList(id, rows, ridesHead, ridesTip) {
     { h: "Added", cell: r => r.adds, sort: r => r.adds, cls: "num hide-sm" },
     { h: ridesHead, cell: r => tk(r.rides), sort: r => r.rides, cls: "num", tip: ridesTip },
     { h: "Cost", cell: r => tk(r.weighted), sort: r => r.weighted, cls: "num", tip: COST_TIP },
+    usdCol,
   ], rows, { sort: 3, limit: 8, panel: r => `item:${r.kind}:${r.label}`, empty: "Nothing recorded." }));
 }
 
@@ -2437,6 +2443,7 @@ PANELS.session = async id => {
           { h: "#", cell: p => p.number, sort: p => p.number, cls: "num" },
           { h: "Pull request", cell: p => esc(p.title || ""), sort: p => p.title, dir: 1, cls: "wrap" },
           { h: "Cost", cell: p => tk(p.weighted), sort: p => p.weighted, cls: "num" },
+          usdCol,
         ], d.prs, { sort: 2, limit: 6, panel: p => `pr:${p.number}` }))) : ""),
   };
 };
@@ -2447,7 +2454,7 @@ PANELS.utest = async id => {
   return {
     title: `<span class="mono">${esc(name)}</span>`, sub: `<span class="mono">${esc(cls)}</span>`,
     actions: goto(testHref(id), "Test history"),
-    body: facts([["Cost while red", tk(t.weighted), COST_TIP], ["Times red", `${t.times_red}`], ["Still red", `${t.still_red}`, "Failed in a session, with no later run in that session passing it"], ["Sessions", `${t.sessions}`]])
+    body: facts([["Cost while red", tk(t.weighted), COST_TIP], ...(t.dollars != null ? [["API price", money(t.dollars), USD_TIP]] : []), ["Times red", `${t.times_red}`], ["Still red", `${t.still_red}`, "Failed in a session, with no later run in that session passing it"], ["Sessions", `${t.sessions}`]])
       + `<p class="advice">Tokens a session spent from a run that failed this test to the next run in that session that passed it. Two tests red at once both count the same tokens.</p>`
       + ((d.items || []).length ? section("What came in while it was red", itemList("d-titems", d.items, "Carried after",
           "Requests that read it again after it came in, until the session compacted")
@@ -2458,13 +2465,14 @@ PANELS.cat = async id => {
   const d = await api("/api/usage/detail", { days: DAYS, kind: "category", key: id }), c = d.category;
   return {
     title: esc(ctxName(id)), sub: esc(CTX_HINT[id] || ""),
-    body: facts([["Cost", tk(c.weighted || 0), COST_TIP], ["Re-read", tk(c.carried_tokens || 0), "Cache reads of these tokens by later requests"], ["Added", tk(c.tokens || 0)], ["Calls", tk(c.calls || 0)]])
+    body: facts([["Cost", tk(c.weighted || 0), COST_TIP], ["API price", money(c.dollars || 0), USD_TIP], ["Re-read", tk(c.carried_tokens || 0), "Cache reads of these tokens by later requests"], ["Added", tk(c.tokens || 0)], ["Calls", tk(c.calls || 0)]])
       + `<p class="advice">${esc(CTX_ADVICE[id] || (id.startsWith("mcp:") ? "Results from this MCP server stay in context. Prefer its narrow tools and small page sizes." : ""))}</p>`
       + section("Sessions that spent the most on it", boxed(table("d-csess", sessionCols, d.sessions, { sort: 2, limit: 6, panel: x => `session:${x.session_id}` })))
       + (d.prs.length ? section("Pull requests", boxed(table("d-cprs", [
           { h: "#", cell: p => p.number, sort: p => p.number, cls: "num" },
           { h: "Pull request", cell: p => esc(p.title || ""), sort: p => p.title, dir: 1, cls: "wrap" },
           { h: "Cost", cell: p => tk(p.weighted), sort: p => p.weighted, cls: "num" },
+          usdCol,
         ], d.prs, { sort: 2, limit: 6, panel: p => `pr:${p.number}` }))) : ""),
   };
 };
@@ -2474,7 +2482,7 @@ async function itemPanel(kind, id) {
   const each = r.adds ? r.tokens / r.adds : 0;
   return {
     title: `<span class="mono">${esc(label)}</span>`, sub: `${esc(kindName(k))}${kind === "group" ? `, ${plural(r.labels || d.rows.length, "item")}` : ""}`,
-    body: facts([["Cost", tk(r.weighted), COST_TIP], ["Tokens each time", tk(each), "Its size when it entered the context"],
+    body: facts([["Cost", tk(r.weighted), COST_TIP], ["API price", money(r.dollars || 0), USD_TIP], ["Tokens each time", tk(each), "Its size when it entered the context"],
                  ["Rode along", `${tk(r.avg_rides)} <small class="dim">requests</small>`, `On average each time it entered; ${tk(r.max_rides)} at most`],
                  ["Times added", tk(r.adds), `In ${plural(r.sessions, "session")}`]])
       + `<p class="advice">${esc(KIND_ADVICE[k] || "")}</p>`
@@ -2551,15 +2559,16 @@ async function usageView(tok, tab = "") {
   const pct = n => shareOf(n, t.weighted);
   const tokCols = [
     { h: "Cost", cell: r => tk(r.weighted), sort: r => r.weighted, cls: "num", tip: COST_TIP },
+    usdCol,
     { h: "Output", cell: r => tk(r.output_tokens), sort: r => r.output_tokens, cls: "num hide-sm" },
     { h: "Cache reads", cell: r => tk(r.cache_read_tokens), sort: r => r.cache_read_tokens, cls: "num hide-sm" },
   ];
   const counts = { items: ((d.items || {}).items || []).length, prs: d.by_pr.length, tests: d.by_test.length, sessions: d.sessions.length };
   const tabs = `<nav class="tabs" aria-label="Token usage">${USAGE_TABS.map(([k, label]) => `<a href="#/usage${k ? "/" + k : ""}"${k === tab ? ` aria-current="page"` : ""}>${label}${k ? ` <span class="n">${counts[k]}</span>` : ""}</a>`).join("")}</nav>`;
   const tiles = `<div class="grid">
-      ${stat({ cls: "s3", k: "Cost", v: tk(t.weighted), s: "in input tokens", spark: d.weighted_per_day, tip: COST_TIP })}
+      ${stat({ cls: "s3", k: "Cost", v: tk(t.weighted), s: t.dollars != null ? `${money(t.dollars)} at API prices` : "in input tokens", spark: d.weighted_per_day, tip: `${COST_TIP} ${USD_TIP}` })}
       ${stat({ cls: "s3", k: "Output tokens", v: tk(t.output_tokens), s: `${tk(t.requests)} requests`, spark: d.output_per_day })}
-      ${stat({ cls: "s3", k: "Cache reads", v: tk(t.cache_read_tokens), s: `${pct(t.cache_read_tokens * 0.1)} of cost`, spark: d.cache_read_per_day, tip: "Earlier context read back from the prompt cache by every request. Cheap per token, but the biggest number." })}
+      ${stat({ cls: "s3", k: "Cache reads", v: tk(t.cache_read_tokens), s: `${pct(t.cache_read_weighted ?? t.cache_read_tokens * 0.1)} of cost`, spark: d.cache_read_per_day, tip: "Earlier context read back from the prompt cache by every request. Cheap per token, but the biggest number." })}
       ${stat({ cls: "s3", k: "Sessions", v: t.sessions, s: d.models.map(m => m.model).slice(0, 2).join(", ") })}
     </div>${tabs}`;
   let body = "";

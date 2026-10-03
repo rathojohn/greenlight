@@ -23,7 +23,7 @@ from .db import SCHEMA, iso, parse_time, utcnow
 
 TYPES = ("timeseries", "stat", "toplist", "table", "text", "row")
 DISPLAYS = ("bars", "line", "area")
-UNITS = ("auto", "count", "tokens", "ms", "percent")
+UNITS = ("auto", "count", "tokens", "usd", "ms", "percent")
 CALCS = ("total", "last", "mean", "max")
 WIDTHS = (3, 4, 6, 8, 12)
 RESERVED = {"start", "end", "days", "today"}
@@ -45,20 +45,24 @@ CONVENTIONS = [
     "pr, sha, run_id or pipeline_id opens that thing's panel. text: markdown in `text`, no SQL. row: a heading.",
     "Variables: {name, label, sql} (the first column gives the choices, an optional second their labels) or "
     "{name, label, values}. Each binds as :name, NULL when All is picked: WHERE (:branch IS NULL OR branch = :branch).",
-    "unit: auto reads the value column's name (ending _ms a duration, _rate or _share a 0 to 1 percent, containing "
-    "tokens or cost in k and M), or set count, tokens, ms, percent. thresholds: {warn, bad, higher_is: worse|better}.",
-    "cost(input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens) prices tokens "
-    "as input tokens (output 5x, cache read 0.1x, cache write 1.25x, 2x for the hour-long cache).",
+    "unit: auto reads the value column's name (ending _ms a duration, _rate or _share a 0 to 1 percent, dollars or "
+    "ending _dollars or _usd in dollars, containing tokens or cost in k and M), or set count, tokens, usd, ms, percent. "
+    "thresholds: {warn, bad, higher_is: worse|better}.",
+    "usd(input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens, model) is what "
+    "agent_usage tokens cost in dollars at the model's API list price (NULL for a model without one). cost(the same "
+    "five, model) prices them as input tokens of that model: output 5x, a cache read 0.1x (0.05x on Opus 5.5), a "
+    "cache write 1.25x, 2x for the hour-long cache.",
     "A test run's commit is runs.git_commit when set, else runs.commit_sha (which may end in +<hash> or @<name>). "
     "agent_sessions.title names a conversation (null when titles are off); runs.session holds its claude.ai or "
     "Claude Code id.",
 ]
 
-_COST = "cost(u.input_tokens, u.output_tokens, u.cache_read_tokens, u.cache_write_tokens, u.cache_write_1h_tokens)"
+_TOKENS = "u.input_tokens, u.output_tokens, u.cache_read_tokens, u.cache_write_tokens, u.cache_write_1h_tokens, u.model"
+_USD = f"usd({_TOKENS})"
 _CONV = "COALESCE(s.title, s.remote_session, substr(u.session_id, 1, 8))"
 EXAMPLES = [
-    {"title": "Cost by conversation", "type": "timeseries", "display": "bars", "sql":
-        f"SELECT bucket(u.minute) AS time, {_CONV} AS conversation, ROUND(SUM({_COST})) AS cost FROM agent_usage u "
+    {"title": "Spend by conversation ($)", "type": "timeseries", "display": "bars", "sql":
+        f"SELECT bucket(u.minute) AS time, {_CONV} AS conversation, ROUND(SUM({_USD}), 2) AS dollars FROM agent_usage u "
         f"LEFT JOIN agent_sessions s USING (session_id) WHERE u.minute >= :start AND u.minute < :end "
         f"GROUP BY time, conversation ORDER BY time"},
     {"title": "Test failures", "type": "stat", "thresholds": {"warn": 1, "bad": 10, "higher_is": "worse"}, "sql":
@@ -334,9 +338,9 @@ STARTER = {"title": "What's trending", "description": "What changed in this peri
                           "SELECT branch FROM agent_usage WHERE minute >= :start AND branch != '' UNION "
                           "SELECT branch FROM runs WHERE started_at >= :start AND branch IS NOT NULL ORDER BY 1"}],
            "panels": [
-    {"type": "stat", "title": "Cost", "unit": "tokens", "note": "Tokens priced as input tokens.",
+    {"type": "stat", "title": "Spend", "note": "Claude Code's tokens at each model's API list price.",
      "thresholds": {"higher_is": "worse"},
-     "sql": f"SELECT bucket(u.minute) AS time, ROUND(SUM({_COST})) AS cost FROM agent_usage u WHERE u.minute >= :start "
+     "sql": f"SELECT bucket(u.minute) AS time, ROUND(SUM({_USD}), 2) AS dollars FROM agent_usage u WHERE u.minute >= :start "
             f"AND u.minute < :end AND {_BRANCH.format(col='u.branch')} GROUP BY time"},
     {"type": "stat", "title": "Test failures", "thresholds": {"warn": 1, "bad": 10, "higher_is": "worse"},
      "note": "Failed or errored results, every attempt counted.",
@@ -353,9 +357,10 @@ STARTER = {"title": "What's trending", "description": "What changed in this peri
      "sql": "SELECT bucket(at) AS time, COUNT(*) AS commits FROM agent_commits WHERE kind = 'commit' AND at >= :start "
             f"AND at < :end AND {_BRANCH.format(col='branch')} GROUP BY time"},
     {"type": "row", "title": "Where the tokens went"},
-    {"type": "timeseries", "title": "Cost by conversation", "display": "bars", "width": 8, "compare": True,
-     "note": "Split by the Claude Code session that spent it. The dashed line is the period before.",
-     "sql": f"SELECT bucket(u.minute) AS time, {_CONV} AS conversation, ROUND(SUM({_COST})) AS cost FROM agent_usage u "
+    {"type": "timeseries", "title": "Spend by conversation", "display": "bars", "width": 8, "compare": True,
+     "note": "Dollars at API list prices, split by the Claude Code session that spent them. The dashed line is the "
+             "period before.",
+     "sql": f"SELECT bucket(u.minute) AS time, {_CONV} AS conversation, ROUND(SUM({_USD}), 2) AS dollars FROM agent_usage u "
             f"LEFT JOIN agent_sessions s USING (session_id) WHERE u.minute >= :start AND u.minute < :end AND "
             f"{_BRANCH.format(col='u.branch')} GROUP BY time, conversation ORDER BY time"},
     {"type": "toplist", "title": "What rode along the most", "width": 4, "unit": "tokens",

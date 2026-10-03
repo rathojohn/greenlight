@@ -34,9 +34,23 @@ from .db import day_range, iso, norm_time, parse_time, since, utcnow
 
 FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cache_write_1h_tokens")
 # What each kind of token costs next to an input token, from Claude's API prices: output 5x, a cache read 0.1x,
-# a cache write 1.25x, or 2x when it's written for an hour (cache_write_1h_tokens is the part that was)
+# a cache write 1.25x, or 2x when it's written for an hour (cache_write_1h_tokens is the part that was). A model
+# with its own prices gets its own ratios (weights()); these are for one without.
 WEIGHTS = {"input_tokens": 1, "output_tokens": 5, "cache_read_tokens": 0.1, "cache_write_tokens": 1.25,
            "cache_write_1h_tokens": 0.75}
+# API list prices in dollars per million tokens: input, 5-minute cache write, 1-hour cache write, cache read,
+# output (platform.claude.com/docs/en/about-claude/pricing, October 2026). A dated snapshot like
+# claude-haiku-4-5-20251001 is priced as its model; a model missing here gets no dollars and WEIGHTS.
+PRICES = {
+    "claude-fable-5-1": (10, 12.5, 20, 0.25, 50), "claude-mythos-5-1": (10, 12.5, 20, 0.25, 50),
+    "claude-fable-5": (10, 12.5, 20, 1, 50), "claude-mythos-5": (10, 12.5, 20, 1, 50),
+    "claude-opus-5-5": (4, 5, 8, 0.2, 20), "claude-opus-5": (5, 6.25, 10, 0.5, 25),
+    "claude-opus-4-8": (5, 6.25, 10, 0.5, 25), "claude-opus-4-7": (5, 6.25, 10, 0.5, 25),
+    "claude-opus-4-6": (5, 6.25, 10, 0.5, 25), "claude-opus-4-5": (5, 6.25, 10, 0.5, 25),
+    "claude-opus-4": (15, 18.75, 30, 1.5, 75), "claude-sonnet-5-5": (2, 2.5, 4, 0.2, 10),
+    "claude-sonnet-5": (2, 2.5, 4, 0.2, 10), "claude-sonnet-4": (3, 3.75, 6, 0.3, 15),
+    "claude-haiku-4-5": (1, 1.25, 2, 0.1, 5), "claude-3-5-haiku": (0.8, 1, 1.6, 0.08, 4),
+}
 MAX_ROWS = 50_000  # one session's minutes; a payload bigger than this isn't usage
 
 
@@ -171,9 +185,43 @@ def commits(actions: list[dict[str, Any]], root: str | None) -> list[dict[str, A
     return out
 
 
-def weighted(row: dict[str, Any]) -> int:
-    """Tokens priced as input tokens: what the row cost, in the unit every model shares."""
-    return round(sum(row.get(k, 0) * w for k, w in WEIGHTS.items()))
+def price(model: str | None) -> tuple[float, ...] | None:
+    """A model's API prices per million tokens (input, 5-minute write, 1-hour write, cache read, output), or None."""
+    m = (model or "").lower()
+    # a dated snapshot or a context tag is the same model; claude-opus-5-7 isn't claude-opus-5
+    best = next((k for k in PRICES if m.startswith(k) and re.fullmatch(r"(-\d{8})?(\[\w+\])?", m[len(k):])), None)
+    return PRICES[best] if best else None
+
+
+def weights(model: str | None) -> dict[str, float]:
+    """What each kind of token costs next to an input token of the same model."""
+    p = price(model)
+    if not p:
+        return WEIGHTS
+    inp, cw, cw1h, cr, out = p
+    return {"input_tokens": 1, "output_tokens": out / inp, "cache_read_tokens": cr / inp, "cache_write_tokens": cw / inp,
+            "cache_write_1h_tokens": (cw1h - cw) / inp}
+
+
+def _weigh(row: dict[str, Any], model: str | None = None) -> float:
+    return sum((row.get(k) or 0) * w for k, w in weights(model or row.get("model")).items())
+
+
+def weighted(row: dict[str, Any], model: str | None = None) -> int:
+    """Tokens priced as input tokens of their model (the row's own, unless given): what the row cost, in a unit every
+    model shares."""
+    return round(_weigh(row, model))
+
+
+def dollars(row: dict[str, Any], model: str | None = None) -> float | None:
+    """What the row's tokens cost at its model's API list price, or None for a model without one."""
+    p = price(model or row.get("model"))
+    if not p:
+        return None
+    inp, cw, cw1h, cr, out = p
+    g = lambda k: row.get(k) or 0  # noqa: E731
+    return (g("input_tokens") * inp + g("output_tokens") * out + g("cache_read_tokens") * cr
+            + (g("cache_write_tokens") - g("cache_write_1h_tokens")) * cw + g("cache_write_1h_tokens") * cw1h) / 1e6
 
 
 def minute_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -307,34 +355,58 @@ def store(conn: sqlite3.Connection, payload: dict[str, Any]) -> dict[str, Any]:
     return {"session_id": sid, "minutes": len(clean)}
 
 
-def _sum(rows: list) -> dict[str, int]:
+def _sum(rows: list) -> dict[str, Any]:
+    """Usage rows added up, each priced by its own model."""
     out = {"requests": 0, **{f: 0 for f in FIELDS}}
+    cost = reads = usd = 0.0
     for r in rows:
         out["requests"] += r["requests"]
         for f in FIELDS:
             out[f] += r[f]
-    return out | {"weighted": weighted(out)}
+        cost += _weigh(r)
+        reads += r["cache_read_tokens"] * weights(r.get("model"))["cache_read_tokens"]
+        usd += dollars(r) or 0
+    return out | {"weighted": round(cost), "cache_read_weighted": round(reads), "dollars": round(usd, 2)}
 
 
-def _write_weight(conn: sqlite3.Connection, where: str = "1", args: tuple | list = ()) -> float:
-    """What a cache write cost on average here: 1.25x, up to 2x as more of them were written for an hour."""
-    w = conn.execute(f"SELECT SUM(cache_write_tokens), SUM(cache_write_1h_tokens) FROM agent_usage WHERE {where}",
-                     args).fetchone()
-    return WEIGHTS["cache_write_tokens"] + WEIGHTS["cache_write_1h_tokens"] * ((w[1] or 0) / w[0] if w[0] else 1)
+def _rates(conn: sqlite3.Connection, where: str = "1", args: tuple | list = ()) -> dict[str, float]:
+    """What a cache write and a cache read cost here on average, by the models that made them: next to an input
+    token (a write is 1.25x, up to 2x as more of them last an hour), and in dollars per token. Context tables keep
+    tokens without a model, so they're priced at these."""
+    write = read = writes = reads = write_usd = read_usd = priced_writes = priced_reads = 0.0
+    for model, cw, cw1h, cr in conn.execute(
+            f"SELECT model, SUM(cache_write_tokens), SUM(cache_write_1h_tokens), SUM(cache_read_tokens) FROM agent_usage "
+            f"WHERE {where} GROUP BY model", args):
+        cw, cw1h, cr = cw or 0, cw1h or 0, cr or 0
+        w = weights(model)
+        write += cw * w["cache_write_tokens"] + cw1h * w["cache_write_1h_tokens"]
+        read += cr * w["cache_read_tokens"]
+        writes, reads = writes + cw, reads + cr
+        p = price(model)
+        if p:
+            write_usd += ((cw - cw1h) * p[1] + cw1h * p[2]) / 1e6
+            read_usd += cr * p[3] / 1e6
+            priced_writes, priced_reads = priced_writes + cw, priced_reads + cr
+    return {"write": write / writes if writes else WEIGHTS["cache_write_tokens"] + WEIGHTS["cache_write_1h_tokens"],
+            "read": read / reads if reads else WEIGHTS["cache_read_tokens"],
+            "write_usd": write_usd / priced_writes if priced_writes else 0.0,
+            "read_usd": read_usd / priced_reads if priced_reads else 0.0}
 
 
-def _context_cost(r: dict[str, Any], write_weight: float) -> int:
-    return round(r["tokens"] * write_weight + r["carried_tokens"] * WEIGHTS["cache_read_tokens"])
+def _context_cost(r: dict[str, Any], rates: dict[str, float]) -> dict[str, Any]:
+    """Tokens that entered the context, at the cache write price, and their re-reads at the cache read price."""
+    return {"weighted": round(r["tokens"] * rates["write"] + r["carried_tokens"] * rates["read"]),
+            "dollars": round(r["tokens"] * rates["write_usd"] + r["carried_tokens"] * rates["read_usd"], 2)}
 
 
-def _categories(rows: list[dict[str, Any]], write_weight: float) -> list[dict[str, Any]]:
+def _categories(rows: list[dict[str, Any]], rates: dict[str, float]) -> list[dict[str, Any]]:
     cats: dict[str, dict[str, Any]] = {}
     for r in rows:
         c = cats.setdefault(r["category"], {"category": r["category"], "sessions": set(), **{f: 0 for f in CONTEXT_FIELDS}})
         c["sessions"].add(r["session_id"])
         for f in CONTEXT_FIELDS:
             c[f] += r[f]
-    out = [c | {"sessions": len(c["sessions"]), "weighted": _context_cost(c, write_weight)} for c in cats.values()]
+    out = [c | {"sessions": len(c["sessions"])} | _context_cost(c, rates) for c in cats.values()]
     total = sum(c["weighted"] for c in out) or 1
     return sorted((c | {"share": round(c["weighted"] / total, 3)} for c in out), key=lambda c: -c["weighted"])
 
@@ -348,7 +420,7 @@ def items_summary(conn: sqlite3.Connection, start: str, sessions: set[str] | Non
     if sessions is not None:
         where += f" AND session_id IN ({','.join('?' * len(sessions))})"
         args += sorted(sessions)
-    ww = _write_weight(conn, where.replace("seg_start", "minute"), args)  # before the filter on items' own columns
+    rates = _rates(conn, where.replace("seg_start", "minute"), args)  # before the filter on items' own columns
     if where_extra:
         where += f" AND {where_extra}"
         args += list(args_extra)
@@ -359,15 +431,14 @@ def items_summary(conn: sqlite3.Connection, start: str, sessions: set[str] | Non
         for r in conn.execute(f"SELECT {by}, kind, COUNT(DISTINCT session_id) AS sessions, {sums}, MAX(max_rides) AS "
                               f"max_rides, COUNT(DISTINCT label) AS labels FROM agent_context_items WHERE {where} "
                               f"GROUP BY {by}, kind", args):
-            d = dict(r)
-            d["weighted"] = round(d["tokens"] * ww + d["carried_tokens"] * WEIGHTS["cache_read_tokens"])
+            d = dict(r) | _context_cost(dict(r), rates)
             d["avg_rides"] = round(d["rides"] / d["adds"], 1) if d["adds"] else 0
             out.append(d)
         return sorted(out, key=lambda d: -d["weighted"])
     return {"items": rows("label")[:50], "groups": [g for g in rows("grp") if g["labels"] > 1][:20]}
 
 
-def _item_totals(rows: list[dict[str, Any]], ww: float) -> list[dict[str, Any]]:
+def _item_totals(rows: list[dict[str, Any]], rates: dict[str, float]) -> list[dict[str, Any]]:
     """Item rows summed per (label, kind), priced like items_summary."""
     out: dict[tuple, dict[str, Any]] = {}
     for r in rows:
@@ -377,8 +448,7 @@ def _item_totals(rows: list[dict[str, Any]], ww: float) -> list[dict[str, Any]]:
         for f in ("adds", "tokens", "rides", "carried_tokens"):
             t[f] += r.get(f) or 0
         t["max_rides"] = max(t["max_rides"], r.get("max_rides") or r.get("rides") or 0)
-    return sorted(({**t, "sessions": len(t["sessions"]),
-                    "weighted": round(t["tokens"] * ww + t["carried_tokens"] * WEIGHTS["cache_read_tokens"]),
+    return sorted(({**t, "sessions": len(t["sessions"]), **_context_cost(t, rates),
                     "avg_rides": round(t["rides"] / t["adds"], 1) if t["adds"] else 0} for t in out.values()),
                   key=lambda t: -t["weighted"])
 
@@ -434,8 +504,8 @@ def detail(conn: sqlite3.Connection, days: int, kind: str, key: str) -> dict[str
                            | _sum(rs) for sid, rs in per.items()), key=lambda x: -x["weighted"])
         return {"kind": kind, "pr": {k: p[k] for k in ("number", "title", "state", "head", "created_at", "merged_at", "url")}
                 | {"sessions": len(per)} | _sum(rows),
-                "context": {"categories": _categories(ctx, _write_weight(conn))}, "sessions": sessions,
-                "items": _item_totals(item_rows, _write_weight(conn))[:30]} | commits.for_pr(conn, int(key), days)
+                "context": {"categories": _categories(ctx, _rates(conn))}, "sessions": sessions,
+                "items": _item_totals(item_rows, _rates(conn))[:30]} | commits.for_pr(conn, int(key), days)
     if kind == "test":
         return {"kind": kind, "test": summary(conn, days, test_id=key)["test"], "items": _test_items(conn, key, start)}
     if kind in ("item", "group"):
@@ -466,7 +536,7 @@ def detail(conn: sqlite3.Connection, days: int, kind: str, key: str) -> dict[str
         return {"kind": kind, "item": head,
                 "rows": sorted(by_session.values(), key=lambda r: -r["carried_tokens"])[:50],
                 "prs": sorted(prs.values(), key=lambda p: -p["carried_tokens"])[:20]}
-    ww = _write_weight(conn, "minute >= ?", (start,))
+    rates = _rates(conn, "minute >= ?", (start,))
     if kind == "category":
         rows = [dict(r) for r in conn.execute("SELECT * FROM agent_context WHERE category = ? AND minute >= ?",
                                               (key, start))]
@@ -481,9 +551,9 @@ def detail(conn: sqlite3.Connection, days: int, kind: str, key: str) -> dict[str
                 prs[p["number"]].append(r)
         titles = {p["number"]: p for heads in by_head.values() for p in heads}
         top = lambda groups, head: sorted(  # noqa: E731
-            (head(k) | _categories(v, ww)[0] | {"last_at": max(r["minute"] for r in v)} for k, v in groups.items()),
+            (head(k) | _categories(v, rates)[0] | {"last_at": max(r["minute"] for r in v)} for k, v in groups.items()),
             key=lambda x: -x["weighted"])[:10]
-        return {"kind": kind, "category": (_categories(rows, ww) or [{"category": key, "weighted": 0}])[0],
+        return {"kind": kind, "category": (_categories(rows, rates) or [{"category": key, "weighted": 0, "dollars": 0}])[0],
                 "sessions": top(per, lambda sid: meta.get(sid, {"session_id": sid})),
                 "prs": top(prs, lambda n: {k: titles[n][k] for k in ("number", "title", "state", "url")})}
     if kind == "waste":
@@ -502,8 +572,8 @@ def detail(conn: sqlite3.Connection, days: int, kind: str, key: str) -> dict[str
         else:
             raise LookupError(f"No such kind of waste: {key}")
         for r in rows:
-            r["weighted"] = round(r.get("carried_tokens", 0) * WEIGHTS["cache_read_tokens"] if key == "switches"
-                                  else r.get("tokens", r.get("repeat_tokens", 0)) * ww)
+            r |= _context_cost({"tokens": 0, "carried_tokens": r.get("carried_tokens", 0)} if key == "switches"
+                               else {"tokens": r.get("tokens", r.get("repeat_tokens", 0)), "carried_tokens": 0}, rates)
             r |= {k: v for k, v in meta.get(r["session_id"], {}).items() if k != "session_id"}
         return {"kind": kind, "key": key, "rows": rows,
                 "totals": context_summary(conn, start)["task_switches" if key == "switches" else "rebuilds"]
@@ -519,10 +589,10 @@ def context_summary(conn: sqlite3.Connection, start: str, sessions: set[str] | N
     if sessions is not None:
         where += f" AND session_id IN ({','.join('?' * len(sessions))})"
         args += sorted(sessions)
-    write_weight = _write_weight(conn, where, args)
-    cats = _categories([dict(r) for r in conn.execute(f"SELECT * FROM agent_context WHERE {where}", args)], write_weight)
+    rates = _rates(conn, where, args)
+    cats = _categories([dict(r) for r in conn.execute(f"SELECT * FROM agent_context WHERE {where}", args)], rates)
     rb_where = where.replace("minute", "at")
-    causes = [dict(r) | {"weighted": round(r["tokens"] * write_weight)} for r in conn.execute(
+    causes = [dict(r) | _context_cost({"tokens": r["tokens"], "carried_tokens": 0}, rates) for r in conn.execute(
         f"SELECT cause, COUNT(*) AS rebuilds, SUM(tokens) AS tokens, COUNT(DISTINCT session_id) AS sessions, "
         f"MAX(idle_seconds) AS longest_idle FROM agent_cache_rebuilds WHERE {rb_where} GROUP BY cause "
         "ORDER BY SUM(tokens) DESC", args)]
@@ -533,11 +603,12 @@ def context_summary(conn: sqlite3.Connection, start: str, sessions: set[str] | N
     return {"categories": cats, "repeat_reads": sum(c["repeat_reads"] for c in cats),
             "task_switches": {"count": sw[0], "sessions": sw[3], "context_tokens": sw[1] or 0,
                               "carried_tokens": sw[2] or 0,
-                              "weighted": round((sw[2] or 0) * WEIGHTS["cache_read_tokens"]),
+                              **_context_cost({"tokens": 0, "carried_tokens": sw[2] or 0}, rates),
                               "compacted_to": summaries[len(summaries) // 2] if summaries else None},
             "repeat_tokens": sum(c["repeat_tokens"] for c in cats),
             "rebuilds": {"count": sum(c["rebuilds"] for c in causes), "tokens": sum(c["tokens"] for c in causes),
-                         "weighted": sum(c["weighted"] for c in causes), "by_cause": causes}}
+                         "weighted": sum(c["weighted"] for c in causes),
+                         "dollars": round(sum(c["dollars"] for c in causes), 2), "by_cause": causes}}
 
 
 def _prs(conn: sqlite3.Connection, head: str | None = None) -> tuple[list[dict[str, Any]], dict[str, list[dict]]]:
@@ -629,7 +700,7 @@ def _by_test(conn: sqlite3.Connection, rows: list, start: str) -> list[dict[str,
         lo = bisect_left(minutes, a[:16] + ":00+00:00")
         hi = bisect_left(minutes, b[:16] + ":00+00:00") if b else len(minutes)
         t = out.setdefault(test, {"test_id": test, "times_red": 0, "still_red": 0, "sessions": set(),
-                                  "requests": 0, **{f: 0 for f in FIELDS}})
+                                  "requests": 0, **{f: 0 for f in FIELDS}, "weighted": 0.0, "dollars": 0.0})
         t["times_red"] += 1
         t["still_red"] += b is None
         t["sessions"].add(sid)
@@ -637,7 +708,10 @@ def _by_test(conn: sqlite3.Connection, rows: list, start: str) -> list[dict[str,
             t["requests"] += r["requests"]
             for f in FIELDS:
                 t[f] += r[f]
-    tests = [t | {"sessions": len(t["sessions"]), "weighted": weighted(t)} for t in out.values()]
+            t["weighted"] += _weigh(r)
+            t["dollars"] += dollars(r) or 0
+    tests = [t | {"sessions": len(t["sessions"]), "weighted": round(t["weighted"]), "dollars": round(t["dollars"], 2)}
+             for t in out.values()]
     return sorted(tests, key=lambda t: -t["output_tokens"])
 
 
@@ -650,7 +724,7 @@ def _test_items(conn: sqlite3.Connection, test_id: str, start: str) -> list[dict
             continue
         q = "SELECT * FROM agent_context_adds WHERE session_id = ? AND at >= ?" + (" AND at < ?" if b else "")
         rows += [dict(r) | {"adds": 1} for r in conn.execute(q, (sid, a, b) if b else (sid, a))]
-    return _item_totals(rows, _write_weight(conn, "minute >= ?", (start,)))[:30]
+    return _item_totals(rows, _rates(conn, "minute >= ?", (start,)))[:30]
 
 
 def summary(conn: sqlite3.Connection, days: int = 30, pr: int | None = None,
@@ -658,12 +732,15 @@ def summary(conn: sqlite3.Connection, days: int = 30, pr: int | None = None,
     start = since(days)
     rows = [dict(r) for r in conn.execute(
         "SELECT * FROM agent_usage WHERE minute >= ? ORDER BY minute", (start,))]
-    daily: dict[str, dict[str, int]] = defaultdict(lambda: {f: 0 for f in FIELDS})
+    daily: dict[str, dict[str, float]] = defaultdict(lambda: {f: 0 for f in (*FIELDS, "weighted", "dollars")})
     models: dict[str, list] = defaultdict(list)
     per_session: dict[str, list] = defaultdict(list)
     for r in rows:
+        day = daily[r["minute"][:10]]
         for f in FIELDS:
-            daily[r["minute"][:10]][f] += r[f]
+            day[f] += r[f]
+        day["weighted"] += _weigh(r)
+        day["dollars"] += dollars(r) or 0
         models[r["model"]].append(r)
         per_session[r["session_id"]].append(r)
     days_ = day_range(days)
@@ -685,7 +762,8 @@ def summary(conn: sqlite3.Connection, days: int = 30, pr: int | None = None,
         "output_per_day": [daily[d]["output_tokens"] for d in days_],
         "input_per_day": [daily[d]["input_tokens"] + daily[d]["cache_write_tokens"] for d in days_],
         "cache_read_per_day": [daily[d]["cache_read_tokens"] for d in days_],
-        "weighted_per_day": [weighted(daily[d]) for d in days_],
+        "weighted_per_day": [round(daily[d]["weighted"]) for d in days_],
+        "dollars_per_day": [round(daily[d]["dollars"], 2) for d in days_],
         "totals": _sum(rows) | {"sessions": len(per_session)},
         "context": context_summary(conn, start),
         "items": items_summary(conn, start),

@@ -128,3 +128,47 @@ def test_greenlight_run_remembers_the_claude_session(monkeypatch):
     monkeypatch.setenv("CLAUDE_CODE_REMOTE_SESSION_ID", "cse_01ABC")
     assert usage.agent_session() == {"session_id": "s-local", "remote_session": "session_01ABC",
                                      "url": "https://claude.ai/code/session_01ABC"}
+
+
+def test_each_model_is_priced_at_its_own_api_list_price(tmp_path):
+    assert usage.price("claude-opus-5-5") == (4, 5, 8, 0.2, 20)
+    assert usage.price("claude-opus-5") == (5, 6.25, 10, 0.5, 25)  # the shorter prefix doesn't take 5-5
+    assert usage.price("claude-haiku-4-5-20251001") == usage.PRICES["claude-haiku-4-5"]
+    assert usage.price("claude-opus-5-5[1m]") == usage.PRICES["claude-opus-5-5"]
+    assert usage.price("claude-opus-5-7") is None and usage.price("<synthetic>") is None and usage.price(None) is None
+    assert usage.weights("claude-opus-5-5")["cache_read_tokens"] == 0.05  # Opus 5.5 reads its cache at 5%, not 10%
+    assert usage.weights("claude-fable-5-1")["cache_read_tokens"] == 0.025
+    assert usage.weights("someone-elses-model") == usage.WEIGHTS
+    # a million of each kind on Opus 5.5, half the writes for an hour: 4 + 20 + 0.2 + 5 + 8
+    row = {"input_tokens": 10**6, "output_tokens": 10**6, "cache_read_tokens": 10**6, "cache_write_tokens": 2 * 10**6,
+           "cache_write_1h_tokens": 10**6, "model": "claude-opus-5-5"}
+    assert usage.dollars(row) == pytest.approx(37.2) and usage.dollars(row, "claude-sonnet-5-5") == pytest.approx(18.7)
+    assert usage.dollars(row, "unknown") is None
+    assert usage.weighted(row) == 10**6 * (1 + 5 + 0.05 + 2 * 1.25 + 0.75)
+    from greenlight import analysis
+    with closing(connect(str(tmp_path / "p.db"))) as conn:
+        q = analysis.run_query(conn, "SELECT usd(1e6, 1e6, 1e6, 2e6, 1e6, 'claude-opus-5-5'), usd(1, 1, 1, 1, 0, 'x'), "
+                                     "cost(0, 0, 1e6, 0, 0, 'claude-opus-5-5'), cost(0, 0, 1e6, 0, 0)")
+        assert q["rows"][0][0] == pytest.approx(37.2) and q["rows"][0][1] is None
+        assert q["rows"][0][2:] == [50_000.0, 100_000.0]
+
+
+def test_a_summary_prices_each_row_by_its_model(tmp_path):
+    rows = [{"minute": at(m), "model": model, "branch": "fix-login", "requests": 1, "input_tokens": 0, "output_tokens": 0,
+             "cache_read_tokens": 10**6, "cache_write_tokens": 10**5, "cache_write_1h_tokens": 10**5}
+            for m, model in ((1, "claude-opus-5-5"), (2, "claude-sonnet-5-5"))]
+    context = [{"minute": at(1), "branch": "fix-login", "category": "read", "calls": 1, "tokens": 1000,
+                "carried_tokens": 10**6, "repeat_reads": 0, "repeat_tokens": 0}]
+    with closing(connect(str(tmp_path / "m.db"))) as conn:
+        usage.store(conn, {"session": {"session_id": "s1"}, "rows": rows, "context": context})
+        s = usage.summary(conn, 3)
+        t = s["totals"]
+        # Opus 5.5: reads 0.05x, 1-hour writes 2x; Sonnet 5.5: reads 0.1x, the same writes
+        assert t["weighted"] == 50_000 + 200_000 + 100_000 + 200_000 and t["cache_read_weighted"] == 150_000
+        assert t["dollars"] == pytest.approx(0.2 + 0.8 + 0.2 + 0.4)
+        assert {m["model"]: m["dollars"] for m in s["models"]} == {"claude-opus-5-5": 1.0, "claude-sonnet-5-5": 0.6}
+        assert sum(s["dollars_per_day"]) == pytest.approx(t["dollars"])
+        read = next(c for c in s["context"]["categories"] if c["category"] == "read")
+        # re-reads at the blended cache read price ($0.20 a million on both), the add at the 1-hour write price
+        assert read["dollars"] == pytest.approx(0.2 + 1000 * 6 / 1e6, abs=0.01)
+        assert read["weighted"] == round(1000 * 2 + 10**6 * 0.075)

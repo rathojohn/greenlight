@@ -334,22 +334,35 @@ def _only_reads(action: int, *_: Any) -> int:
     return sqlite3.SQLITE_OK if action in _READS else sqlite3.SQLITE_DENY
 
 
-def _cost(input_tokens: Any, output_tokens: Any, cache_read: Any, cache_write: Any, cache_write_1h: Any = 0) -> float:
-    """cost(...) in SQL: tokens priced as input tokens, as usage.weighted() prices them."""
-    from .usage import WEIGHTS
-    parts = zip(("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cache_write_1h_tokens"),
-                (input_tokens, output_tokens, cache_read, cache_write, cache_write_1h))
-    return sum(WEIGHTS[k] * (v or 0) for k, v in parts)
+def _tokens(*values: Any) -> dict[str, Any]:
+    return dict(zip(("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cache_write_1h_tokens"),
+                    values))
+
+
+def _cost(input_tokens: Any, output_tokens: Any, cache_read: Any, cache_write: Any, cache_write_1h: Any = 0,
+          model: Any = None) -> float:
+    """cost(...) in SQL: tokens priced as input tokens of their model, as usage.weighted() prices them."""
+    from .usage import _weigh
+    return _weigh(_tokens(input_tokens, output_tokens, cache_read, cache_write, cache_write_1h), model)
+
+
+def _usd(input_tokens: Any, output_tokens: Any, cache_read: Any, cache_write: Any, cache_write_1h: Any,
+         model: Any) -> float | None:
+    """usd(...) in SQL: the same tokens in dollars at the model's API list price, NULL for a model without one."""
+    from .usage import dollars
+    return dollars(_tokens(input_tokens, output_tokens, cache_read, cache_write, cache_write_1h), model)
 
 
 def run_query(conn: sqlite3.Connection, sql: str, limit: int = 200, params: dict[str, Any] | None = None,
               seconds: float = QUERY_SECONDS, functions: dict[str, Any] | None = None) -> dict[str, Any]:
     """Ad-hoc read-only SQL. Pass a read-only connection; the statement check is a second guard. Named parameters
-    (:start, :days) come from params; cost(input, output, cache_read, cache_write, cache_write_1h) prices tokens."""
+    (:start, :days) come from params; cost(input, output, cache_read, cache_write, cache_write_1h[, model]) prices
+    tokens as input tokens and usd(the same, model) in dollars."""
     stripped = sql.strip().rstrip(";").strip()
     if not stripped.lower().startswith(("select", "with")) or ";" in stripped:
         raise ValueError("Only a single SELECT (or WITH ... SELECT) statement is allowed.")
     conn.create_function("cost", -1, _cost, deterministic=True)
+    conn.create_function("usd", 6, _usd, deterministic=True)
     for name, fn in (functions or {}).items():
         conn.create_function(name, 1, fn, deterministic=True)
     deadline = time.monotonic() + seconds
