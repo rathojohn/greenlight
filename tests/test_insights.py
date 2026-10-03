@@ -107,3 +107,24 @@ def test_what_rode_along_longest_becomes_advice():
     assert found["item:instructions:CLAUDE.md"]["title"] == "CLAUDE.md is about 21k tokens and rides along with every request"
     assert found["group:image:out/shots/*.png"]["title"] == "34 images from out/shots/*.png stayed in context for 85 requests on average"
     assert "task list" in found["item:reminder:task list reminders"]["agent"]
+
+
+def test_what_changed_compares_each_number_with_the_period_before(tmp_path):
+    from datetime import timedelta
+    from greenlight.db import utcnow
+    from greenlight.ingest import TestResult, record_run
+    from greenlight import usage
+    now = utcnow()
+    with closing(connect(str(tmp_path / "c.db"))) as conn:
+        for days, outcome in ((1, "fail"), (2, "fail"), (9, "fail"), (10, "pass")):
+            record_run(conn, [TestResult("t::login", None, outcome, 5)], commit_sha=f"c{days}", started_at=now - timedelta(days=days))
+        usage.store(conn, {"session": {"session_id": "s1", "title": "Fix login"}, "rows": [
+            {"minute": iso(now - timedelta(days=1)), "model": "m", "branch": "fix", "requests": 1, "output_tokens": 100},
+            {"minute": iso(now - timedelta(days=8)), "model": "m", "branch": "old", "requests": 1, "output_tokens": 10}]})
+        got = {c["key"]: c for c in insights.changes(conn, 7)}
+        assert set(got) == {"cost", "failures"}  # no CI synced: no CI card
+        f = got["failures"]
+        assert (f["value"], f["previous"]) == (2, 1) and len(f["series"]) == len(f["before"]) == 7
+        assert f["movers"][0] == {"label": "t::login", "value": 2, "previous": 1, "delta": 1, "panel": "test:t::login"}
+        assert got["cost"]["value"] == 500 and got["cost"]["previous"] == 50
+        assert got["cost"]["movers"][0]["label"] == "Fix login" and got["cost"]["movers"][0]["panel"] == "session:s1"

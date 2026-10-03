@@ -64,7 +64,7 @@ def _pipelines(c: sqlite3.Connection, days: int) -> dict[str, Any]:
 def _insights(c: sqlite3.Connection, days: int) -> dict[str, Any]:
     found = insights.insights(c, days)
     return {"insights": [{k: v for k, v in i.items() if k not in ("red", "rank")} for i in found],
-            "brief": insights.brief(c, days, found=found)}
+            "brief": insights.brief(c, days, found=found), "changes": insights.changes(c, days)}
 
 
 GET_ROUTES: dict[str, Callable[[sqlite3.Connection, Params], Any]] = {
