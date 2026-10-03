@@ -294,6 +294,8 @@ In practice: the agent runs the tests through greenlight, reruns only the flaky 
 | greenlight_duration_regressions, greenlight_suite_forecast | no | Toto forecasts |
 | greenlight_token_usage | no | Claude Code tokens per pull request and per failing test |
 | greenlight_query | no | read-only SQL over every table |
+| greenlight_schema | no | every table and column, and how a dashboard panel's rows are drawn |
+| greenlight_dashboards, greenlight_dashboard_save, _delete | the DB, for save and delete | list, build and change [dashboards](#dashboards) |
 
 Read from GitHub (Claude Desktop with `--repo`, claude.ai and ChatGPT connectors, the container), there's no checkout of yours, so the two tools that record a local test run (`greenlight_gate_junit`, `greenlight_playtest_gate`) aren't offered.
 
@@ -458,7 +460,7 @@ Agents follow the same rules: see [What agents should do](#what-agents-should-do
 
 `greenlight ui` serves it on http://127.0.0.1:8765; `greenlight ui --export snapshot.html` writes a read-only, self-contained copy you can share.
 
-It's dark by default with a light theme one click away. The time range (7, 14, 30 or 90 days) applies to every view that has one, and the (i) next to a panel title explains what it counts. Tables sort by any column and page instead of growing. A row opens a side panel with its details, and the list stays where it was: j and k (or the arrows) step through the rows, Esc closes it, and the panel is part of the URL, so Back closes it and a link opens it. Each panel links to the full page for the deep dive. Filters (branch, pull request, conversation, decision) sit above the lists that have them and are part of the URL too.
+It's dark by default with a light theme one click away. The time range (24 hours, or 7, 14, 30 or 90 days) applies to every view that has one, and the (i) next to a panel title explains what it counts. Tables sort by any column and page instead of growing. A row opens a side panel with its details, and the list stays where it was: j and k (or the arrows) step through the rows, Esc closes it, and the panel is part of the URL, so Back closes it and a link opens it. Each panel links to the full page for the deep dive. Filters (branch, pull request, conversation, decision) sit above the lists that have them and are part of the URL too.
 
 - **Overview**: the latest verdict, rerun share, time spent rerunning, what to do next (most at stake first: tests failing on main, flaky tests Claude spent tokens on, what to quarantine or release, where session cost goes), and the most unstable tests across recent commits (taller bars failed more often; amber means the same commit passed and failed). `greenlight insights` prints the same list.
 - **Flaky tests**, **test pages** (results by commit, duration, failure messages, measured numbers against a baseline, linked issues, quarantine controls), **Runs** and **run pages** (why each failure did or didn't block).
@@ -468,6 +470,21 @@ It's dark by default with a light theme one click away. The time range (7, 14, 3
 - **Trends**: forecasts from the Toto 2.0 time series model (optional: the server's `:toto` image, or `uv tool install --python 3.12 "greenlight[toto] @ git+https://github.com/rathojohn/greenlight"` on your machine): rerun churn, failure rate and suite duration with a 7-day band, and tests running slower than forecast.
 - **Quarantine**: suggestions, what's quarantined, what's clean enough to release.
 - **Token usage**: cost per day, where context goes, and what could have been dropped, with tabs for pull requests, tests and sessions (see below).
+- **Dashboards** and **SQL**: your own panels over everything above (see below).
+
+### Dashboards
+
+A dashboard is panels of read-only SQL over greenlight's tables, built the way Grafana and Datadog build theirs. The easiest way to get one is to ask Claude ("make me a dashboard of which tests fail most each day, with a branch dropdown"): it reads the tables with `greenlight_schema`, tries the query with `greenlight_query`, and saves it with `greenlight_dashboard_save`, which runs every panel first and saves nothing while one fails. The SQL page and each panel's editor do the same by hand, and the Dashboards page can add a starter dashboard, "What's trending".
+
+- **Panels**: time series (stacked bars, lines or area), stat (one number with its sparkline, its change from the period before, and a status against warn and bad thresholds), top list, table, text, and rows that group and collapse the panels under them.
+- **Time**: the time range binds as `:start` and `:end`, and `bucket(time)` groups by hour for 24 hours and by day otherwise. A panel that compares runs its SQL again over the period before: a stat shows the change, a time series a dashed line.
+- **Variables**: dropdowns above the panels, each filled by a query (or a list) and bound to every panel as `:name`, NULL for All: `WHERE (:branch IS NULL OR branch = :branch)`. Picks go in the URL, like Grafana's `var-` parameters, so a link keeps them.
+- **Events**: deploys show as dashed lines and merges as dots on every time series, so a jump lines up with what shipped.
+- **Reading one**: hovering a chart shows the same time on every other chart. Clicking a legend entry hides that series; the legend shows each series' total, or its average for durations and rates. A table cell named `test_id`, `session_id`, `pr`, `sha` or `run_id` opens that thing's side panel.
+- **Each panel's menu**: view it larger with its query and rows, edit it, duplicate, copy its rows as CSV, move it, remove it.
+- **The dashboard's menu**: settings and variables, and the whole dashboard as JSON, to copy or to paste one in. Auto-refresh and TV mode (no sidebar) are in the toolbar and the URL.
+
+`cost(...)` prices tokens in SQL the way the Token usage page does. Queries can only read: an SQLite authorizer allows reads and function calls, whatever the connection allows, and stops a query after 5 seconds. Dashboards live in the database, so everyone who opens the server sees the same ones.
 
 ## Token usage (Claude Code)
 

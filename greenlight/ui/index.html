@@ -19,6 +19,7 @@
   --accent: #9d87ff; --accent-ink: #0b0d12; --wash: rgba(157, 135, 255, .14);
   --pass: #00aa82; --flip: #c08000; --fail: #c2272d; --quar: #6d78d8;
   --series: #9d87ff; --neutral: #4b5366;
+  --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500; --c5: #d55181; --c6: #008300;
   --band: rgba(160, 167, 180, .17);
   --tip-bg: #1e232d; --shadow: 0 10px 28px rgba(0, 0, 0, .5);
 }
@@ -30,6 +31,7 @@
   --accent: #6b4fdb; --accent-ink: #ffffff; --wash: rgba(107, 79, 219, .10);
   --pass: #10916d; --flip: #b06a00; --fail: #b8173f; --quar: #5a63c8;
   --series: #6b4fdb; --neutral: #b3b9c5;
+  --c1: #2a78d6; --c2: #eb6834; --c3: #1baf7a; --c4: #eda100; --c5: #e87ba4; --c6: #008300;
   --band: rgba(84, 92, 106, .13);
   --tip-bg: #ffffff; --shadow: 0 10px 28px rgba(22, 26, 34, .14);
 }
@@ -144,6 +146,97 @@ a.panel:hover { border-color: var(--ink-3); }
 .var { max-width: 100%; }
 .vars .lnk { font-size: 12.5px; }
 .tabs + .vars { margin-bottom: 8px; }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tb.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.tb.primary:hover { color: var(--accent-ink); filter: brightness(1.08); }
+.tb.danger:hover, .tb.danger[data-armed] { color: var(--fail); border-color: var(--fail); }
+.ed { display: grid; gap: 10px; }
+.ed label { display: grid; gap: 4px; color: var(--ink-2); font-size: 12px; }
+.ed label[hidden] { display: none; }
+.ed .inp { width: 100%; height: 30px; }
+.ed textarea.inp { height: auto; min-height: 170px; padding: 8px 9px; resize: vertical; font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: 12.5px; line-height: 1.5; tab-size: 2; }
+.ed .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.perr { margin: 0; padding: 8px 10px; border-left: 2px solid var(--fail); background: var(--panel-2); color: var(--ink); font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bignum { font-size: 34px; font-weight: 600; letter-spacing: -.02em; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.ranked { display: grid; gap: 7px; }
+.ranked > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px; align-items: center; font-size: 12.5px; }
+.ranked .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ranked .val { font-variant-numeric: tabular-nums; }
+.ranked .rb { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--line-2); overflow: hidden; }
+.ranked .rb i { display: block; height: 100%; min-width: 2px; border-radius: 0 3px 3px 0; background: var(--series); }
+.schema details { border-top: 1px solid var(--line-2); padding: 6px 0; }
+.schema summary { cursor: pointer; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.schema ul { margin: 6px 0 2px; padding-left: 18px; display: grid; gap: 3px; font-size: 12px; }
+.dpl:empty { display: none; }
+.dpl { margin-top: 8px; }
+.lede { margin: 0 0 10px; max-width: 72ch; color: var(--ink-2); line-height: 1.5; }
+.dhead { display: grid; gap: 6px; margin-bottom: 8px; }
+.dhead .lede { margin: 0; }
+.dbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.dbar .vars.right { margin-left: auto; }
+.dbar .var .ic { width: 14px; height: 14px; }
+.tb.ghost { border-color: transparent; background: none; }
+.tb.ghost:hover { border-color: var(--line); }
+.dp .ph { min-height: 34px; }
+.dpb { min-height: 40px; }
+.dstat .pb { display: flex; flex-direction: column; }
+.sv { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; font-size: 12px; min-height: 20px; }
+.ssp { height: 34px; margin-top: 8px; display: flex; }
+.ssp .spark { width: 100%; height: 100%; }
+.delta { display: inline-flex; align-items: center; gap: 2px; padding: 1px 6px 1px 3px; border-radius: 6px; background: var(--panel-2); color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.delta .ic { width: 13px; height: 13px; stroke-width: 2.2; }
+.delta.bad { color: var(--fail); background: color-mix(in srgb, var(--fail) 13%, transparent); }
+.delta.good { color: var(--pass); background: color-mix(in srgb, var(--pass) 13%, transparent); }
+.ranked .rb i.warn { background: var(--flip); }
+.ranked .rb i.bad { background: var(--fail); }
+.drow { display: flex; align-items: center; gap: 8px; padding: 10px 2px 2px; }
+.drow > button:first-child { display: inline-flex; align-items: center; gap: 8px; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.drow > button:first-child .ic { color: var(--ink-3); }
+.drow .dim { font-weight: 400; font-size: 12px; }
+.lgs { gap: 4px 6px; }
+.lg { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 7px; border: 0; border-radius: 6px; background: none; color: var(--ink-2); font: inherit; font-size: 12px; cursor: pointer; }
+.lg:hover { background: var(--panel-2); color: var(--ink); }
+.lg.static { cursor: default; }
+.lg.static:hover { background: none; color: var(--ink-2); }
+.lg .ll { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 28ch; }
+.lg b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.lg.off { opacity: .45; }
+.lg.off .ll { text-decoration: line-through; }
+.sw.dash { background: repeating-linear-gradient(90deg, var(--ink-3) 0 5px, transparent 5px 9px) !important; }
+.tr.ev .sw.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-2); }
+.chart .thr { stroke-width: 1.5; stroke-dasharray: 3 3; opacity: .8; }
+.chart .mark { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 2 4; opacity: .45; }
+.chart .mark-m { fill: var(--ink-2); stroke: var(--panel); stroke-width: 1.5; }
+.pmenu { position: fixed; right: auto; top: 0; }
+.pmenu button .ic { visibility: visible; color: var(--ink-3); stroke-width: 1.5; }
+.dcard { padding: 14px 14px 12px; gap: 6px; text-decoration: none; color: inherit; min-height: 96px; }
+.dcard .dt { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.dcard .dt .ic { color: var(--accent); }
+.dcard .dd { color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
+.dcard .dim { margin-top: auto; font-size: 12px; }
+.md { line-height: 1.55; }
+.md p, .md ul, .md h3 { margin: 0 0 8px; }
+.md h3 { font-size: 13px; }
+.code { position: relative; border: 1px solid var(--line-2); border-radius: 6px; background: var(--sunk); }
+.code > .tb { position: absolute; top: 6px; right: 6px; }
+.code pre { margin: 0; padding: 10px 44px 10px 0; overflow-x: auto; font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: 12px; line-height: 1.6; }
+.code .ln { display: inline-block; width: 2.6em; padding-right: 10px; margin-right: 10px; text-align: right; color: var(--ink-3); border-right: 1px solid var(--line-2); user-select: none; }
+.code .k { color: var(--accent); font-weight: 600; }
+.code .s { color: var(--pass); }
+.code .p { color: var(--flip); }
+.ed .three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.ed .checks { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.ed .chk { display: inline-flex; grid-auto-flow: column; align-items: center; gap: 6px; color: var(--ink); font-size: 12.5px; }
+.ed .fg[hidden] { display: none; }
+.ed textarea.short { min-height: 70px; }
+.ed textarea.json, textarea.json { width: 100%; min-height: 220px; padding: 8px 9px; font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: 12px; line-height: 1.5; resize: vertical; }
+.ed fieldset { margin: 0; padding: 10px; border: 1px solid var(--line-2); border-radius: 6px; display: grid; gap: 8px; }
+.ed fieldset + fieldset { margin-top: 8px; }
+#vrows { display: grid; gap: 8px; margin-bottom: 8px; }
+body.tv .side, body.tv .top { display: none; }
+body.tv .app { grid-template-columns: minmax(0, 1fr); }
+.tvx { position: fixed; right: 12px; bottom: 12px; z-index: 30; box-shadow: var(--shadow); }
 .copy { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .copy code { min-width: 0; overflow-x: auto; white-space: nowrap; padding: 4px 6px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 4px; user-select: all; }
 
@@ -230,6 +323,7 @@ table.t { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .dh .ds { margin-top: 2px; color: var(--ink-2); font-size: 12px; overflow-wrap: anywhere; }
 .dh .da, .dh .dn { display: flex; gap: 6px; flex: none; }
 .db { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 16px; padding: 14px 16px calc(24px + env(safe-area-inset-bottom, 0px)); }
+.db > * { flex-shrink: 0; }
 .db section > h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; color: var(--ink-2); font-size: 11.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
 .db .box { border: 1px solid var(--line-2); border-radius: 4px; overflow: hidden; }
 .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
@@ -389,6 +483,10 @@ details.wj[open] > summary .wn .ic { transform: rotate(90deg); }
   <symbol id="i-x" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></symbol>
   <symbol id="i-commits" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.75"/><path d="M1.5 8h3.75M10.75 8h3.75"/></symbol>
   <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.25a.75.75 0 0 0-.75-.75h-6.5a.75.75 0 0 0-.75.75v6.5c0 .41.34.75.75.75h.25"/></symbol>
+  <symbol id="i-dash" viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="7" rx="1"/><rect x="9" y="2" width="5" height="4" rx="1"/><rect x="2" y="11" width="5" height="3" rx="1"/><rect x="9" y="8" width="5" height="6" rx="1"/></symbol>
+  <symbol id="i-sql" viewBox="0 0 16 16"><ellipse cx="8" cy="3.75" rx="5.25" ry="1.75"/><path d="M2.75 3.75v8.5c0 .97 2.35 1.75 5.25 1.75s5.25-.78 5.25-1.75v-8.5M2.75 8c0 .97 2.35 1.75 5.25 1.75S13.25 8.97 13.25 8"/></symbol>
+  <symbol id="i-more" viewBox="0 0 16 16"><path d="M3.5 8h.01M8 8h.01M12.5 8h.01" stroke-width="2.6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></symbol>
   <symbol id="i-ext" viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M13.5 2.5 8 8M11.5 9.5v4h-9v-9h4"/></symbol>
 </svg>
 <div class="app">
@@ -405,6 +503,9 @@ details.wj[open] > summary .wn .ic { transform: rotate(90deg); }
       <a href="#/commits" data-nav="commits"><svg class="ic"><use href="#i-commits"/></svg>Commits</a>
       <a href="#/pipelines" data-nav="pipelines"><svg class="ic"><use href="#i-pipelines"/></svg>Pipelines</a>
       <a href="#/delivery" data-nav="delivery"><svg class="ic"><use href="#i-delivery"/></svg>DORA and GitHub</a>
+      <div class="grp">Explore</div>
+      <a href="#/dashboards" data-nav="dashboards"><svg class="ic"><use href="#i-dash"/></svg>Dashboards</a>
+      <a href="#/sql" data-nav="sql"><svg class="ic"><use href="#i-sql"/></svg>SQL</a>
       <div class="grp">Agents</div>
       <a href="#/usage" data-nav="usage"><svg class="ic"><use href="#i-tokens"/></svg>Token usage</a>
     </nav>
@@ -429,6 +530,7 @@ details.wj[open] > summary .wn .ic { transform: rotate(90deg); }
 <div id="bar" hidden></div>
 <div id="tip" hidden></div>
 <div id="toast" role="status" aria-live="polite"></div>
+<div class="menu pmenu" id="pmenu" role="menu" hidden></div>
 <aside class="drawer" id="drawer" role="dialog" aria-labelledby="drawer-title" tabindex="-1" hidden>
   <header class="dh">
     <div class="dt"><h2 id="drawer-title"></h2><div class="ds" id="drawer-sub"></div></div>
@@ -444,7 +546,8 @@ const SNAP = JSON.parse(document.getElementById("snapshot").textContent || "null
 const LIVE = !SNAP;
 const NOW = SNAP ? new Date(SNAP.generated_at) : new Date();
 const view = document.getElementById("view");
-const RANGES = [7, 14, 30, 90];
+const RANGES = [1, 7, 14, 30, 90];
+const rangeName = n => n === 1 ? "Last 24 hours" : `Last ${n} days`;
 let DAYS = SNAP ? SNAP.days : (() => { try { return Number(localStorage.getItem("greenlight-days")) || 30; } catch { return 30; } })();
 let renderToken = 0;
 
@@ -780,6 +883,7 @@ function timeTicks(max) {
   return ticks;
 }
 let GID = 0;
+const SYNCED = new Set();  /* charts that share a crosshair: hovering one shows the same time on the others */
 function drawChart(el) {
   const s = el._spec, W = Math.max(200, el.clientWidth || 600), H = s.height || 180;
   el._w = el.clientWidth;
@@ -828,6 +932,7 @@ function drawChart(el) {
       acc += v;
     });
   }
+  for (const t of s.thresholds || []) if (t.v >= 0 && t.v <= top) g += `<line class="thr" x1="${m.l}" x2="${W - m.r}" y1="${y(t.v)}" y2="${y(t.v)}" style="stroke:${t.color}"/>`;
   for (const l of lines) {
     let d = "", pen = false, start = null, last = null;
     const runs = [];
@@ -849,9 +954,15 @@ function drawChart(el) {
         g += `<path d="${p}L${x(b).toFixed(1)},${y(0)} Z" fill="url(#${id})"/>`;
       }
     }
-    g += `<path class="line" d="${d}" style="stroke:${l.color}"/>`;
+    g += `<path class="line" d="${d}" style="stroke:${l.color}${l.dash ? ";stroke-dasharray:5 4" : ""}"/>`;
   }
   g += `<line class="axis" x1="${m.l}" x2="${W - m.r}" y1="${m.t + ph}" y2="${m.t + ph}"/>`;
+  const marks = s.marks || [], markAt = new Map();
+  for (const e of marks) markAt.set(e.i, [...(markAt.get(e.i) || []), e]);
+  for (const [i, es] of markAt) {  /* deploys as a dashed line, merges as a dot on the axis */
+    if (es.some(e => e.kind === "deploy")) g += `<line class="mark" x1="${x(i)}" x2="${x(i)}" y1="${m.t}" y2="${m.t + ph}"/>`;
+    if (es.some(e => e.kind === "merge")) g += `<circle class="mark-m" cx="${x(i)}" cy="${m.t + ph}" r="2.5"/>`;
+  }
   const count = Math.max(2, Math.min(n, Math.floor(pw / 86)));
   const xl = [...new Set(Array.from({ length: count }, (_, k) => Math.round(k * (n - 1) / (count - 1))))];
   for (const i of xl) g += `<text x="${x(i)}" y="${H - 5}" text-anchor="${i === 0 ? "start" : i === n - 1 ? "end" : "middle"}">${esc(xlab(labels[i]))}</text>`;
@@ -872,13 +983,25 @@ function drawChart(el) {
       for (const b of [...bars].reverse()) html += row(b.color, b.label, fmt(b.values[i] || 0));
       for (const l of lines) html += row(l.color, l.label, l.values[i] == null ? "no data" : fmt(l.values[i]), true);
     }
+    for (const e of (markAt.get(i) || []).slice(0, 4)) html += `<div class="tr ev"><i class="sw ${e.kind === "deploy" ? "ln dash" : "dot"}"></i><span>${esc(e.label)}</span></div>`;
+    if ((markAt.get(i) || []).length > 4) html += `<div class="tr ev"><span class="dim">and ${markAt.get(i).length - 4} more</span></div>`;
     if (s.band && i >= s.band.from && i < s.band.from + s.band.p50.length) {
       const j = i - s.band.from;
       html += row("var(--ink-2)", "Forecast", fmt(s.band.p50[j]), true) + row("var(--band)", "Likely range", `${fmt(s.band.p10[j])} to ${fmt(s.band.p90[j])}`);
     }
     placeTip(html, ev.clientX, ev.clientY);
   };
-  const hide = () => { cursor.setAttribute("visibility", "hidden"); tip.hidden = true; };
+  const hide = () => { cursor.setAttribute("visibility", "hidden"); tip.hidden = true; if (s.sync) for (const o of SYNCED) if (o !== el && o._off) o._off(); };
+  if (s.sync) {
+    for (const o of [...SYNCED]) if (!o.isConnected) SYNCED.delete(o);
+    SYNCED.add(el);
+    el._at = i => { if (bars.length) cursor.setAttribute("x", x(i) - slot / 2); else { cursor.setAttribute("x1", x(i)); cursor.setAttribute("x2", x(i)); } cursor.setAttribute("visibility", "visible"); };
+    el._off = () => cursor.setAttribute("visibility", "hidden");
+    hit.addEventListener("pointermove", ev => {
+      const r = svg.getBoundingClientRect(), i = Math.min(n - 1, Math.max(0, Math.floor((ev.clientX - r.left - m.l) / slot)));
+      for (const o of SYNCED) if (o !== el && o._at && o._spec.sync === s.sync && o._spec.days.length === s.days.length) o._at(i);
+    });
+  }
   hit.addEventListener("pointermove", show); hit.addEventListener("pointerdown", show); hit.addEventListener("pointerleave", hide);
 }
 function placeTip(html, cx, cy) {
@@ -1548,6 +1671,375 @@ PANELS.commit = async id => {
   };
 };
 
+/* ---------- dashboards: panels of SQL, like Grafana's ---------- */
+const SERIES = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--c6)"];
+const PTYPES = [["timeseries", "Time series"], ["stat", "Stat"], ["toplist", "Top list"], ["table", "Table"], ["text", "Text"], ["row", "Row"]];
+const DISPLAYS = [["bars", "Stacked bars"], ["line", "Lines"], ["area", "Area"]];
+const UNITS = [["auto", "From the column's name"], ["count", "Count"], ["tokens", "Tokens"], ["ms", "Duration"], ["percent", "Percent"]];
+const CALCS = [["total", "Total"], ["last", "Last"], ["mean", "Mean"], ["max", "Max"]];
+const WIDTHS = [[3, "A quarter"], [4, "A third"], [6, "Half"], [8, "Two thirds"], [12, "Full width"]];
+const REFRESHES = [["", "Off"], ["60", "Every minute"], ["300", "Every 5 minutes"], ["900", "Every 15 minutes"]];
+const isDay = v => typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v);
+const isHour = v => typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}/.test(v);
+const fmtHour = v => v.slice(11, 13) === "00" ? fmtDay(v) : v.slice(11, 16);
+/* how a column's numbers read: the panel's unit, else its name (_ms a duration, _rate or _share a percent, tokens or cost in k and M) */
+const colFmt = name => /_ms$/i.test(name) ? "ms" : /(_rate|_share|_pct)$/i.test(name) ? "pct" : /token|cost/i.test(name) ? "tok" : "count";
+const unitFmt = (unit, name) => ({ tokens: "tok", ms: "ms", percent: "pct", count: "count" })[unit] || colFmt(name || "");
+const fmtBy = (key, v) => key === "count" && Math.abs(v) >= 10000 ? tk(v) : FMT[key](v);
+const fmtCell = (name, v, unit) => v == null ? "" : typeof v === "number" ? fmtBy(unitFmt(unit, name), v) : /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(v) ? when(v) : esc(v);
+/* a column named for something greenlight knows opens its side panel */
+const ENTITY = { test_id: "test", session_id: "session", pr: "pr", sha: "commit", commit: "commit", run_id: "run" };
+function entityLink(name, v, inner) {
+  const n = String(name).toLowerCase(), kind = ENTITY[n];
+  if (v == null || v === "") return inner;
+  if (kind) return panelLink(`${kind}:${v}`, inner);
+  return n === "pipeline_id" ? `<a class="tl" href="${esc(pipeHref(String(v)))}">${inner}</a>` : inner;
+}
+/* every bucket of the time range (and any row outside it), by hour or by day */
+function timeAxis(keys, hourly) {
+  const step = hourly ? 3600000 : 86400000, n = hourly ? DAYS * 24 : DAYS, now = Math.floor(Date.now() / step) * step;
+  const key = t => hourly ? new Date(t).toISOString().slice(0, 13) + ":00" : new Date(t).toISOString().slice(0, 10);
+  const ms = k => Date.parse(hourly ? `${k.slice(0, 13)}:00:00Z` : `${k.slice(0, 10)}T00:00:00Z`);
+  const ts = keys.map(ms).filter(t => !isNaN(t));
+  const out = [];
+  for (let t = Math.min(now - (n - 1) * step, ...ts), end = Math.max(now, ...ts); t <= end && out.length < 2400; t += step) out.push(key(t));
+  return out;
+}
+/* rows as series: (time, value, value...) or (time, group, value), the six biggest groups and the rest as Other */
+function toSeries(cols, rows, filled) {
+  if (cols.length < 2) return null;
+  const long = cols.length === 3 && rows.some(r => typeof r[1] === "string") && rows.every(r => r[2] == null || typeof r[2] === "number");
+  const timed = rows.length > 0 && rows.every(r => isDay(r[0])), hourly = timed && rows.every(r => isHour(r[0]));
+  const key = r => timed ? (hourly ? String(r[0]).slice(0, 13) + ":00" : String(r[0]).slice(0, 10)) : String(r[0] ?? "");
+  const xs = timed ? timeAxis([...new Set(rows.map(key))], hourly) : [...new Set(rows.map(key))];
+  const at = new Map(xs.map((x, i) => [x, i]));
+  const blank = () => xs.map(() => filled ? 0 : null);
+  let sers, valueCol;
+  if (long) {
+    const tot = new Map(), g = r => String(r[1] ?? "(none)");
+    for (const r of rows) tot.set(g(r), (tot.get(g(r)) || 0) + (r[2] || 0));
+    const ranked = [...tot.keys()].sort((a, b) => tot.get(b) - tot.get(a)), keep = ranked.slice(0, 6);
+    sers = keep.map((x, k) => ({ label: x, color: ranked.length > 1 ? SERIES[k] : "var(--series)", values: blank() }));
+    const other = ranked.length > 6 ? { label: `Other (${ranked.length - 6})`, color: "var(--neutral)", values: blank() } : null;
+    if (other) sers.push(other);
+    for (const r of rows) { const i = at.get(key(r)), s = sers[keep.indexOf(g(r))] || other; if (i != null && s && r[2] != null) s.values[i] = (s.values[i] || 0) + r[2]; }
+    valueCol = cols[2];
+  } else {
+    const num = cols.map((_, k) => k).filter(k => k > 0 && rows.some(r => typeof r[k] === "number")).slice(0, 6);
+    if (!num.length) return null;
+    sers = num.map((k, j) => ({ label: cols[k], color: num.length > 1 ? SERIES[j] : "var(--series)", values: blank(), k }));
+    for (const r of rows) { const i = at.get(key(r)); if (i != null) for (const s of sers) if (typeof r[s.k] === "number") s.values[i] = (s.values[i] || 0) + r[s.k]; }
+    valueCol = cols[num[0]];
+  }
+  for (const s of sers) s.total = s.values.reduce((a, v) => a + (v || 0), 0);
+  return { xs, at, key, timed, hourly, sers, valueCol };
+}
+function resultTable(id, res, limit = 10, unit) {
+  return table(id, res.columns.map((c, k) => ({ h: c, cell: r => entityLink(c, r[k], fmtCell(c, r[k], unit)), sort: r => r[k],
+    dir: typeof (res.rows[0] || [])[k] === "number" ? -1 : 1, cls: res.rows.some(r => typeof r[k] === "number") ? "num" : "wrap" })), res.rows, { limit });
+}
+/* a stat's one number: its single row, or its (time, value) rows folded by calc */
+function statOf(res, calc) {
+  if (!res || !res.rows.length) return { value: null };
+  const timed = res.columns.length > 1 && res.rows.every(r => isDay(r[0]));
+  const col = timed ? 1 : 0, vals = res.rows.map(r => r[col]).filter(v => typeof v === "number");
+  const sum = vals.reduce((a, v) => a + v, 0);
+  const value = !vals.length ? null : !timed ? vals[0] : calc === "last" ? vals.at(-1) : calc === "mean" ? sum / vals.length : calc === "max" ? Math.max(...vals) : sum;
+  return { value, col: res.columns[col], timed, caption: !timed && res.columns.length > 1 ? res.rows[0][1] : null, captionCol: res.columns[1] };
+}
+/* where a value sits against a panel's thresholds: "bad", "warn" or "" */
+function level(t, v) {
+  if (!t || v == null) return "";
+  const over = (x) => x != null && (t.higher_is === "better" ? v <= x : v >= x);
+  return over(t.bad) ? "bad" : over(t.warn) ? "warn" : "";
+}
+function deltaChip(cur, prev, fkey, t) {
+  if (cur == null || prev == null) return "";
+  const diff = cur - prev;
+  if (Math.abs(diff) < 1e-9) return `<span class="delta">no change</span>`;
+  const up = diff > 0, tone = !t ? "" : (up === (t.higher_is !== "better")) ? "bad" : "good";
+  const text = fkey === "pct" ? `${(Math.abs(diff) * 100).toFixed(1)} pts` : prev === 0 ? "new" : `${Math.round(Math.abs(diff / prev) * 100)}%`;
+  return `<span class="delta ${tone}">${icon(up ? "up" : "down")}${esc(text)}</span>`;
+}
+const LEGEND_HIDE = new Map();  /* panel -> series turned off in its legend */
+/* draws a panel's rows into el; returns the legend's html */
+function drawPanel(el, p, res, prev, id, events, sync) {
+  const cols = res.columns, rows = res.rows, kind = p.type;
+  if (kind === "stat") {
+    const s = statOf(res, p.calc), fkey = unitFmt(p.unit, s.col);
+    const pv = prev ? statOf(prev, p.calc).value : null, lv = level(p.thresholds, s.value);
+    let spk = "";
+    if (s.timed) { const ser = toSeries(cols.slice(0, 2), rows, true); if (ser) spk = spark(ser.sers[0].values, lv === "bad" ? "var(--fail)" : lv === "warn" ? "var(--flip)" : "var(--series)"); }
+    const t = p.thresholds, limit = lv && t ? `${t.higher_is === "better" ? "under" : "over"} ${fmtBy(fkey, lv === "bad" ? t.bad : t.warn)}` : "";
+    el.innerHTML = `<div class="sv"><span class="bignum">${s.value == null ? "n/a" : fmtBy(fkey, s.value)}</span>${lv ? tag(lv === "bad" ? "failure" : "flaky", limit) : ""}</div>`
+      + `<div class="sd">${p.compare ? `${deltaChip(s.value, pv, fkey, t)}<span class="dim">${pv == null ? "nothing in the period before" : `vs ${fmtBy(fkey, pv)} the ${DAYS === 1 ? "day" : `${DAYS} days`} before`}</span>` : s.caption != null ? `<span class="dim">${fmtCell(s.captionCol, s.caption)}</span>` : ""}</div>`
+      + (spk ? `<div class="ssp">${spk}</div>` : "");
+    return "";
+  }
+  if (!rows.length) { el.innerHTML = `<p class="empty">No rows in this time range.</p>`; return ""; }
+  if (kind === "table") { el.innerHTML = `<div class="box">${resultTable(id, res, 10, p.unit)}</div>`; return ""; }
+  if (kind === "toplist") {
+    const vc = cols.findIndex((c, k) => k > 0 && rows.some(r => typeof r[k] === "number")), v = vc < 0 ? 1 : vc;
+    const max = Math.max(...rows.map(r => Math.abs(r[v] || 0)), 1), fkey = unitFmt(p.unit, cols[v]);
+    el.innerHTML = `<div class="ranked">${rows.slice(0, 30).map(r => { const lv = level(p.thresholds, r[v]);
+      return `<div><span class="lbl" data-tip="${esc(r[0])}">${entityLink(cols[0], r[0], esc(r[0]))}</span><span class="val">${typeof r[v] === "number" ? fmtBy(fkey, r[v]) : esc(r[v])}</span><span class="rb"><i class="${lv}" style="width:${(100 * Math.abs(r[v] || 0) / max).toFixed(1)}%"></i></span></div>`; }).join("")}</div>`;
+    return "";
+  }
+  const s = toSeries(cols, rows, p.display === "bars");
+  if (!s) { el.innerHTML = `<div class="box">${resultTable(id, res, 10, p.unit)}</div>`; return ""; }
+  const fkey0 = unitFmt(p.unit, s.valueCol), big = s.sers.some(x => x.values.some(v => Math.abs(v || 0) >= 10000));
+  const fkey = fkey0 === "count" && big ? "tok" : fkey0;
+  const hide = LEGEND_HIDE.get(id) || new Set();
+  const shown = s.sers.filter(x => !hide.has(x.label));
+  const lines = [], spec = { days: s.xs, labels: s.xs, xfmt: s.timed ? (s.hourly ? fmtHour : fmtDay) : (x => cut(x, 14)), format: fkey, label: p.title, height: 210, sync };
+  if (p.display === "bars") spec.bars = shown; else lines.push(...shown.map(x => ({ ...x, area: p.display === "area" && shown.length === 1, dots: s.xs.length < 16 })));
+  if (prev && s.timed) {  /* the period before, all series together, dashed */
+    const before = s.xs.map(() => 0);
+    for (const r of prev.rows) { const i = s.at.get(s.key(r)); const v = cols.length === 3 && typeof r[1] === "string" ? r[2] : r[1]; if (i != null && typeof v === "number") before[i] += v; }
+    lines.push({ label: "The period before", color: "var(--ink-3)", values: before, dash: true });
+  }
+  spec.lines = lines;
+  if (events && s.timed && p.events !== false) spec.marks = events.map(e => ({ ...e, i: s.at.get(s.hourly ? e.at.slice(0, 13) + ":00" : e.at.slice(0, 10)) })).filter(e => e.i != null);
+  const t = p.thresholds;
+  if (t) spec.thresholds = [[t.warn, "var(--flip)"], [t.bad, "var(--fail)"]].filter(([v]) => v != null).map(([v, color]) => ({ v, color }));
+  el.innerHTML = `<div class="chart"></div>`;
+  chart(el.firstChild, spec);
+  const avg = fkey === "ms" || fkey === "pct", figure = x => { const vs = x.values.filter(v => v != null); return avg ? `avg ${fmtBy(fkey, vs.length ? vs.reduce((a, v) => a + v, 0) / vs.length : 0)}` : fmtBy(fkey, x.total); };
+  const items = s.sers.length > 1 ? s.sers.map(x => `<button type="button" class="lg${hide.has(x.label) ? " off" : ""}" data-act="lgd" data-id="${esc(id)}" data-s="${esc(x.label)}" aria-pressed="${!hide.has(x.label)}"><span class="sw${p.display !== "bars" ? " ln" : ""}" style="background:${x.color}"></span><span class="ll">${esc(x.label)}</span><b>${figure(x)}</b></button>`) : [];
+  if (prev && s.timed) items.push(`<span class="lg static"><span class="sw ln dash"></span><span class="ll">The period before</span></span>`);
+  return items.length ? `<div class="legend lgs">${items.join("")}</div>` : "";
+}
+/* a little markdown for text panels: paragraphs, **bold**, `code`, [links](https://...) and - lists */
+function md(text) {
+  const inline = s => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/\[([^\]]+)\]\((https:\/\/[^)\s]+)\)/g, '<a class="lnk" href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  return String(text).split(/\n{2,}/).map(b => /^\s*[-*] /.test(b) ? `<ul>${b.split("\n").filter(l => l.trim()).map(l => `<li>${inline(l.replace(/^\s*[-*] /, ""))}</li>`).join("")}</ul>`
+    : /^#{1,3} /.test(b) ? `<h3>${inline(b.replace(/^#{1,3} /, ""))}</h3>` : `<p>${inline(b).replace(/\n/g, "<br>")}</p>`).join("");
+}
+/* SQL with line numbers and its keywords marked, for reading */
+function codeBlock(sql) {
+  const kw = /\b(SELECT|FROM|WHERE|GROUP BY|ORDER BY|HAVING|LIMIT|JOIN|LEFT JOIN|USING|ON|AND|OR|NOT|IN|IS|NULL|AS|WITH|CASE|WHEN|THEN|ELSE|END|DISTINCT|UNION|ALL|DESC|ASC|COUNT|SUM|AVG|MIN|MAX|ROUND|COALESCE)\b/g;
+  const pretty = sql.replace(/\s+(FROM|WHERE|GROUP BY|ORDER BY|HAVING|LIMIT|LEFT JOIN|JOIN|UNION)\b/g, "\n$1").replace(/\s+(AND)\s+/g, "\n  AND ");
+  const lines = pretty.split("\n").map(l => esc(l).replace(/'([^']*)'/g, `<span class="s">'$1'</span>`).replace(kw, `<span class="k">$1</span>`).replace(/(:[a-z_]+)/g, `<span class="p">$1</span>`));
+  return `<div class="code"><button class="tb icon" type="button" data-act="copy" data-copy="${esc(sql)}" aria-label="Copy the SQL" data-tip="Copy">${icon("copy")}</button><pre>${lines.map((l, i) => `<span class="ln">${i + 1}</span>${l}`).join("\n")}</pre></div>`;
+}
+const csvOf = res => [res.columns, ...res.rows].map(r => r.map(v => v == null ? "" : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v)).join(",")).join("\n");
+/* what a saved dashboard holds, without what rendering added */
+function specOf(d) {
+  const keep = (o, ks) => Object.fromEntries(ks.filter(k => o[k] !== undefined && o[k] !== null && o[k] !== "").map(k => [k, o[k]]));
+  return { title: d.title, description: d.description || "", variables: (d.variables || []).map(v => keep(v, ["name", "label", "sql", "values", "default", "all"])),
+           panels: (d.panels || []).map(p => keep(p, ["type", "title", "sql", "width", "display", "unit", "calc", "compare", "thresholds", "events", "note", "text", "collapsed"])) };
+}
+async function saveDash(id, spec) { CACHE.clear(); return post("/api/dashboards", { ...spec, ...(id ? { id } : {}), days: DAYS }); }
+async function freshSpec(id) { CACHE.clear(); return specOf(await api("/api/dashboard", { id, days: DAYS })); }
+
+let DASH = null, SCHEMA_CACHE = null, REFRESH_TIMER = null;
+const dashVars = () => Object.fromEntries([...hashParts()[1]].filter(([k]) => k.startsWith("var-")));
+function rowCollapsed(d, i) { try { const v = localStorage.getItem(`greenlight-row:${d.id}:${i}`); if (v != null) return v === "1"; } catch { /* default */ } return !!d.panels[i].collapsed; }
+function drawDashPanel(i) {
+  const p = DASH && DASH.panels[i], el = document.getElementById(`dp-${i}`), lg = document.getElementById(`dpl-${i}`);
+  if (!p || !el || p.type === "row") return;
+  if (p.type === "text") { el.innerHTML = `<div class="md">${md(p.text)}</div>`; return; }
+  if (p.error) { el.innerHTML = `<p class="perr">${esc(p.error)}</p>`; lg.innerHTML = ""; return; }
+  lg.innerHTML = drawPanel(el, p, p.result, p.previous, `dp-t-${i}`, DASH.events, "dash");
+}
+async function dashboardsView(tok) {
+  const d = await api("/api/dashboards");
+  if (tok !== renderToken) return;
+  const ask = "Make me a greenlight dashboard of the tests that fail most each day, and what each conversation cost per day, with a branch dropdown.";
+  const have = d.dashboards.some(x => x.id === "whats-trending");
+  const start = panel({ cls: "s12", title: d.dashboards.length ? "Make another" : "No dashboards yet",
+    body: `<p class="lede">A dashboard is panels of SQL over everything greenlight keeps: test runs, CI, pull requests, commits, and every session's tokens and context. Ask Claude for one (it has <code>greenlight_schema</code> and <code>greenlight_dashboard_save</code>), write the SQL yourself, or start from the trends dashboard and change it.</p>${copyBox(ask)}`
+      + (LIVE ? `<div class="btns" style="margin-top:12px"><a class="tb" href="#/sql">${icon("sql")}Write SQL</a>${have ? "" : `<button class="tb primary" type="button" data-act="starter">${icon("plus")}Add the trends dashboard</button>`}</div>` : "") });
+  const cards = d.dashboards.map(x => `<a class="panel dcard s4" href="#/dashboards/${esc(x.id)}"><span class="dt">${icon("dash")}${esc(x.title)}</span><span class="dd">${esc(x.description || "")}</span><span class="dim">${plural(x.panels, "panel")}, changed ${esc(ago(x.updated_at))}</span></a>`).join("");
+  view.innerHTML = (cards ? `<div class="grid">${cards}</div>` : "") + `<div class="grid">${start}</div>`;
+}
+async function dashboardView(tok, id) {
+  const q = hashParts()[1], vars = dashVars();
+  const d = await api("/api/dashboard", { id, days: DAYS, ...vars });
+  if (tok !== renderToken) return;
+  DASH = d;
+  setCrumbs([["Explore"], ["Dashboards", "#/dashboards"]], d.title);
+  document.body.classList.toggle("tv", q.get("tv") === "1");
+  const varBar = d.variables.map(v => `<label class="var"><span>${esc(v.label)}</span><select data-filter="var-${esc(v.name)}">${v.all ? `<option value="">All</option>` : ""}${v.options.map(([val, label]) => `<option value="${esc(val)}"${val === v.value ? " selected" : ""}>${esc(cut(label))}</option>`).join("")}</select></label>`).join("");
+  const refresh = q.get("refresh") || "";
+  const tools = `<label class="var"><span>${icon("refresh")}</span><select data-filter="refresh" aria-label="Refresh">${REFRESHES.map(([v, t]) => `<option value="${v}"${v === refresh ? " selected" : ""}>${t}</option>`).join("")}</select></label>`
+    + `<a class="tb" href="${esc(filterHref("tv", q.get("tv") === "1" ? "" : "1"))}">${q.get("tv") === "1" ? "Leave TV mode" : "TV mode"}</a>`
+    + (LIVE ? `<a class="tb" href="${esc(panelHref(`dpanel:${d.id}:new`))}">${icon("plus")}Add panel</a>` : "")
+    + `<button class="tb icon" type="button" data-act="dmenu" aria-label="Dashboard menu">${icon("more")}</button>`;
+  const head = `<div class="dhead">${d.description ? `<p class="lede">${esc(d.description)}</p>` : ""}<div class="dbar"><div class="vars">${varBar}</div><div class="vars right">${tools}</div></div></div>`;
+  let hidden = false;
+  const body = d.panels.map((p, i) => {
+    if (p.type === "row") {
+      hidden = rowCollapsed(d, i);
+      let n = 0; for (let j = i + 1; j < d.panels.length && d.panels[j].type !== "row"; j++) n++;
+      return `<div class="drow s12"><button type="button" data-act="prow" data-i="${i}" aria-expanded="${!hidden}">${icon(hidden ? "right" : "down")}<span>${esc(p.title)}</span><span class="dim">${plural(n, "panel")}</span></button>${LIVE ? `<button class="tb icon ghost" type="button" data-act="pmenu" data-i="${i}" aria-label="Row menu">${icon("more")}</button>` : ""}</div>`;
+    }
+    const html = panel({ cls: `s${p.width} dp${p.type === "stat" ? " dstat" : ""}`, title: p.title, tip: p.note,
+      actions: `<button class="tb icon ghost" type="button" data-act="pmenu" data-i="${i}" aria-label="Panel menu">${icon("more")}</button>`,
+      body: `<div id="dp-${i}" class="dpb"></div><div class="dpl" id="dpl-${i}"></div>` });
+    return hidden ? html.replace("<section ", "<section hidden ") : html;
+  }).join("");
+  view.innerHTML = head + `<div class="grid">${body || noData("No panels yet.", "Add one, or ask Claude to.")}</div>` + (q.get("tv") === "1" ? `<a class="tb tvx" href="${esc(filterHref("tv", ""))}">Leave TV mode</a>` : "");
+  d.panels.forEach((_, i) => drawDashPanel(i));
+  clearTimeout(REFRESH_TIMER);
+  if (refresh) { const key = pageKey(); REFRESH_TIMER = setTimeout(() => { if (pageKey() === key) { CACHE.clear(); render(); } }, Number(refresh) * 1000); }
+}
+function popMenu(anchor, items) {
+  const m = document.getElementById("pmenu");
+  m.innerHTML = items.filter(Boolean).map(([act, label, ic, extra = ""]) => `<button type="button" data-act="${act}"${extra}>${icon(ic)}${esc(label)}</button>`).join("");
+  m.hidden = false;
+  const r = anchor.getBoundingClientRect(), w = m.offsetWidth;
+  m.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w))}px`;
+  m.style.top = `${Math.min(window.innerHeight - m.offsetHeight - 8, r.bottom + 6)}px`;
+  m.querySelector("button")?.focus();
+}
+const closePop = () => { const m = document.getElementById("pmenu"); if (m) m.hidden = true; };
+async function panelAction(act, i) {
+  const d = DASH, p = d && d.panels[i];
+  if (!p) return;
+  if (act === "pview") { setPanel(`dview:${d.id}:${i}`); return; }
+  if (act === "pedit") { setPanel(`dpanel:${d.id}:${i}`); return; }
+  if (act === "pcsv") { navigator.clipboard.writeText(csvOf(p.result)).then(() => toast("Copied as CSV"), () => toast("Couldn't copy")); return; }
+  const spec = await freshSpec(d.id);
+  if (act === "pdup") spec.panels.splice(i + 1, 0, { ...spec.panels[i], title: `${spec.panels[i].title} (copy)` });
+  if (act === "pup" && i > 0) [spec.panels[i - 1], spec.panels[i]] = [spec.panels[i], spec.panels[i - 1]];
+  if (act === "pdown" && i < spec.panels.length - 1) [spec.panels[i + 1], spec.panels[i]] = [spec.panels[i], spec.panels[i + 1]];
+  if (act === "premove") spec.panels.splice(i, 1);
+  try { await saveDash(d.id, spec); toast(act === "premove" ? "Removed" : "Saved"); render(); } catch (e) { toast(e.message); }
+}
+function field(label, html, cls = "") { return `<label class="${cls}">${esc(label)}${html}</label>`; }
+const opt = (v, cur, text) => `<option value="${esc(v)}"${String(v) === String(cur ?? "") ? " selected" : ""}>${esc(text)}</option>`;
+const sel = (name, list, cur) => `<select class="inp" name="${name}">${list.map(([v, t]) => opt(v, cur, t)).join("")}</select>`;
+/* the panel inspector: fields show for the panel types they apply to */
+function editorForm(p, o = {}) {
+  const t = p.thresholds || {};
+  const f = (types, html) => `<div class="fg" data-for="${types}">${html}</div>`;
+  return `<form class="ed" id="ed">
+    ${o.saveTo ? `<div class="two">${field("Save to", `<select class="inp" name="dash">${o.saveTo.map(d => opt(d.id, o.saveTo[0].id, d.title)).join("")}${opt("", o.saveTo.length ? "-" : "", "A new dashboard")}</select>`)}${field("New dashboard's name", `<input class="inp" name="dtitle" placeholder="Trends">`, "dtl")}</div>` : ""}
+    <div class="two">${field("Type", sel("type", PTYPES, p.type))}${f("timeseries stat toplist table text", field("Width", sel("width", WIDTHS, p.width || 6)))}</div>
+    ${field("Title", `<input class="inp" name="title" value="${esc(p.title || "")}" placeholder="Failed tests">`)}
+    ${f("timeseries stat toplist table", field("SQL", `<textarea class="inp" name="sql" spellcheck="false" autocapitalize="off">${esc(p.sql || "")}</textarea>`))}
+    ${f("text", field("Text", `<textarea class="inp" name="text" placeholder="Markdown: **bold**, \`code\`, [links](https://...), - lists">${esc(p.text || "")}</textarea>`))}
+    <div class="two">${f("timeseries", field("Display", sel("display", DISPLAYS, p.display || "bars")))}${f("stat", field("Number", sel("calc", CALCS, p.calc || "total")))}${f("timeseries stat toplist table", field("Unit", sel("unit", UNITS, p.unit || "auto")))}</div>
+    ${f("timeseries stat toplist", `<div class="three">${field("Warn at", `<input class="inp" name="warn" inputmode="decimal" value="${esc(t.warn ?? "")}">`)}${field("Bad at", `<input class="inp" name="bad" inputmode="decimal" value="${esc(t.bad ?? "")}">`)}${field("Higher is", sel("higher_is", [["worse", "Worse"], ["better", "Better"]], t.higher_is || "worse"))}</div>`)}
+    <div class="checks">${f("timeseries stat", `<label class="chk"><input type="checkbox" name="compare"${(p.compare ?? p.type === "stat") ? " checked" : ""}>Compare with the period before</label>`)}${f("timeseries", `<label class="chk"><input type="checkbox" name="events"${p.events !== false ? " checked" : ""}>Mark deploys and merges</label>`)}</div>
+    ${f("timeseries stat toplist table text", field("Note", `<input class="inp" name="note" value="${esc(p.note || "")}" placeholder="What it shows, in a sentence">`))}
+    <p class="perr" id="ed-err" hidden></p>
+    <div class="btns">${f("timeseries stat toplist table", `<button class="tb" type="button" data-ed="run">Run</button>`)}<button class="tb primary" type="submit">Save</button>${o.remove ? `<button class="tb danger" type="button" data-ed="remove">Remove panel</button>` : ""}${f("timeseries stat toplist table", `<span class="dim">Ctrl+Enter runs it</span>`)}</div>
+  </form>`;
+}
+const schemaRef = s => `<div class="schema">${s.tables.map(t => `<details><summary><code>${esc(t.table)}</code> <span class="dim">${esc(cut(t.about, 90))}</span></summary><ul>${t.columns.map(c => { const sp = c.indexOf(" "); return `<li><code>${esc(c.slice(0, sp))}</code> <span class="dim">${esc(c.slice(sp + 1))}</span></li>`; }).join("")}</ul></details>`).join("")}</div>`;
+function bindEditor(ctx) {
+  const f = document.getElementById("ed"), out = document.getElementById("ed-out"), err = document.getElementById("ed-err");
+  const F = n => f.elements.namedItem(n);
+  const sync = () => { const ty = F("type").value; f.querySelectorAll("[data-for]").forEach(g => { g.hidden = !g.dataset.for.split(" ").includes(ty); }); };
+  F("type").addEventListener("change", sync); sync();
+  const num = n => { const v = F(n).value.trim(); return v === "" ? null : Number(v); };
+  const val = () => {
+    const ty = F("type").value, p = { type: ty, title: F("title").value.trim() };
+    if (ty === "row") return p;
+    Object.assign(p, { width: Number(F("width").value), note: F("note").value.trim() });
+    if (ty === "text") return { ...p, text: F("text").value.trim() };
+    Object.assign(p, { sql: F("sql").value.trim(), unit: F("unit").value });
+    if (ty === "timeseries") Object.assign(p, { display: F("display").value, compare: F("compare").checked, events: F("events").checked });
+    if (ty === "stat") Object.assign(p, { calc: F("calc").value, compare: F("compare").checked });
+    if (ty !== "table" && (num("warn") != null || num("bad") != null || F("higher_is").value === "better")) p.thresholds = { warn: num("warn"), bad: num("bad"), higher_is: F("higher_is").value };
+    return p;
+  };
+  const fail = msg => { err.textContent = msg; err.hidden = false; };
+  const run = async () => {
+    err.hidden = true;
+    const p = val();
+    if (!p.sql) return;
+    if (ctx.page) { try { localStorage.setItem("greenlight-sql", p.sql); } catch { /* a convenience */ } }
+    out.innerHTML = `<div class="panel skel"></div>`;
+    try {
+      const vars = ctx.dash ? Object.fromEntries((ctx.dash.variables || []).map(v => [`var-${v.name}`, v.value ?? "__all"])) : {};
+      const res = await api("/api/sql", { q: p.sql, days: DAYS, ...vars, ...dashVars() });
+      out.innerHTML = `<div class="dim" style="margin-bottom:8px">${plural(res.rows.length, "row")}${res.truncated ? ", more not shown" : ""}</div><div id="ed-chart" class="dpb ${p.type === "stat" ? "dstat" : ""}"></div><div class="dpl" id="ed-leg"></div>`
+        + (p.type !== "table" && res.rows.length ? `<div class="box" style="margin-top:10px">${resultTable("ed-rows", res, 8, p.unit)}</div>` : "");
+      document.getElementById("ed-leg").innerHTML = drawPanel(document.getElementById("ed-chart"), p, res, null, "ed-t", null, null);
+    } catch (e) { out.innerHTML = ""; fail(e.message); }
+  };
+  const save = async p => {
+    err.hidden = true;
+    if (p && !p.title && p.type !== "text") { fail("Give it a title."); return; }
+    const dash = ctx.dash ? ctx.dash.id : F("dash").value, name = ctx.dash ? "" : F("dtitle").value.trim();
+    if (!dash && !name) { fail("Name the new dashboard."); return; }
+    try {
+      const spec = dash ? await freshSpec(dash) : { title: name, description: "", variables: [], panels: [] };
+      const idx = ctx.dash ? ctx.idx : "new";
+      if (idx === "new") spec.panels.push(p); else if (p) spec.panels[Number(idx)] = p; else spec.panels.splice(Number(idx), 1);
+      const r = await saveDash(dash, spec);
+      toast(p ? "Saved" : "Removed");
+      if (ctx.page) location.hash = `#/dashboards/${r.id}`; else { drawerKey = null; setPanel(null, true); render(); }
+    } catch (e) { fail(e.message); }
+  };
+  f.addEventListener("click", ev => { const b = ev.target.closest("[data-ed]"); if (b && b.dataset.ed === "run") run(); if (b && b.dataset.ed === "remove") save(null); });
+  F("sql").addEventListener("keydown", ev => { if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); run(); } });
+  f.addEventListener("submit", ev => { ev.preventDefault(); save(val()); });
+  if (F("dash")) { const s = () => { f.querySelector(".dtl").hidden = !!F("dash").value; }; F("dash").addEventListener("change", s); s(); }
+  if (ctx.autorun) run();
+}
+PANELS.dpanel = async key => {
+  const k = key.lastIndexOf(":"), did = key.slice(0, k), idx = key.slice(k + 1);
+  const [d, schema] = await Promise.all([DASH && DASH.id === did ? DASH : api("/api/dashboard", { id: did, days: DAYS }), api("/api/schema")]);
+  SCHEMA_CACHE = schema;
+  const p = idx === "new" ? { type: "timeseries", title: "", sql: "", display: "bars", width: 6 } : d.panels[Number(idx)];
+  if (!p) throw new Error("That panel isn't on this dashboard any more.");
+  return { title: idx === "new" ? "New panel" : esc(p.title || "Text"), sub: esc(d.title),
+           body: editorForm(p, { remove: idx !== "new" }) + `<div id="ed-out" style="margin-top:12px"></div>` + section("Tables", schemaRef(schema), "Every table greenlight keeps. Open one for its columns."),
+           after: () => bindEditor({ dash: d, idx, autorun: idx !== "new" && !!p.sql }) };
+};
+PANELS.dview = async key => {
+  const k = key.lastIndexOf(":"), did = key.slice(0, k), i = Number(key.slice(k + 1));
+  const d = DASH && DASH.id === did ? DASH : await api("/api/dashboard", { id: did, days: DAYS, ...dashVars() });
+  const p = d.panels[i];
+  if (!p || !p.result) throw new Error(p && p.error ? p.error : "That panel has no rows to show.");
+  return { title: esc(p.title), sub: `${esc(d.title)}${p.note ? `<br>${esc(p.note)}` : ""}`,
+           actions: LIVE ? `<a class="tb" href="${esc(panelHref(`dpanel:${d.id}:${i}`))}">Edit</a>` : "",
+           body: `<div id="dv-chart" class="dpb ${p.type === "stat" ? "dstat" : ""}"></div><div class="dpl" id="dv-leg"></div>`
+             + section("Query", codeBlock(p.sql)) + section(`Rows (${p.result.rows.length}${p.result.truncated ? "+" : ""})`, `<div class="btns" style="margin-bottom:8px"><button class="tb" type="button" data-act="copy" data-copy="${esc(csvOf(p.result))}">${icon("copy")}Copy as CSV</button></div><div class="box">${resultTable("dv-rows", p.result, 15, p.unit)}</div>`),
+           after: () => { document.getElementById("dv-leg").innerHTML = drawPanel(document.getElementById("dv-chart"), p, p.result, p.previous, "dv-t", d.events, null); } };
+};
+PANELS.dsettings = async did => {
+  const spec = await freshSpec(did);
+  const varRow = (v, j) => `<fieldset class="vrow" data-j="${j}"><div class="two">${field("Name", `<input class="inp" name="vname" value="${esc(v.name || "")}" placeholder="branch">`)}${field("Label", `<input class="inp" name="vlabel" value="${esc(v.label || "")}" placeholder="Branch">`)}</div>${field("Choices (SQL)", `<textarea class="inp short" name="vsql" spellcheck="false">${esc(v.sql || "")}</textarea>`)}<button class="tb danger" type="button" data-ed="vdel">Remove variable</button></fieldset>`;
+  return { title: "Dashboard settings", sub: esc(spec.title),
+    body: `<form class="ed" id="ds">${field("Title", `<input class="inp" name="title" value="${esc(spec.title)}">`)}${field("Description", `<input class="inp" name="description" value="${esc(spec.description)}">`)}
+      ${section("Variables", `<p class="dim" style="margin:0 0 8px">Each is a dropdown above the panels. Its value binds to every panel's SQL as <code>:name</code>, NULL for All: <code>WHERE (:branch IS NULL OR branch = :branch)</code>.</p><div id="vrows">${spec.variables.map(varRow).join("")}</div><button class="tb" type="button" data-ed="vadd">${icon("plus")}Add a variable</button>`)}
+      <p class="perr" id="ds-err" hidden></p><div class="btns"><button class="tb primary" type="submit">Save</button></div></form>`
+      + section("As JSON", `<p class="dim" style="margin:0 0 8px">The whole dashboard. Copy it to keep or share; paste one in to replace this dashboard.</p><textarea class="inp json" id="ds-json" spellcheck="false">${esc(JSON.stringify(spec, null, 2))}</textarea><div class="btns" style="margin-top:8px"><button class="tb" type="button" data-act="copy" data-copy="${esc(JSON.stringify(spec, null, 2))}">${icon("copy")}Copy</button><button class="tb" type="button" id="ds-apply">Replace with this JSON</button></div>`),
+    after: () => {
+      const f = document.getElementById("ds"), err = document.getElementById("ds-err"), rows = document.getElementById("vrows");
+      const fail = m => { err.textContent = m; err.hidden = false; };
+      const done = async next => { try { await saveDash(did, next); toast("Saved"); drawerKey = null; setPanel(null, true); render(); } catch (e) { fail(e.message); } };
+      f.addEventListener("click", ev => { const b = ev.target.closest("[data-ed]"); if (!b) return; if (b.dataset.ed === "vadd") rows.insertAdjacentHTML("beforeend", varRow({}, rows.children.length)); if (b.dataset.ed === "vdel") b.closest("fieldset").remove(); });
+      f.addEventListener("submit", ev => {
+        ev.preventDefault(); err.hidden = true;
+        const variables = [...rows.querySelectorAll("fieldset")].map(fs => ({ name: fs.querySelector('[name="vname"]').value.trim(), label: fs.querySelector('[name="vlabel"]').value.trim(), sql: fs.querySelector('[name="vsql"]').value.trim() })).filter(v => v.name || v.sql);
+        done({ ...spec, title: f.elements.namedItem("title").value.trim(), description: f.elements.namedItem("description").value.trim(), variables });
+      });
+      document.getElementById("ds-apply").addEventListener("click", () => { err.hidden = true; let next; try { next = JSON.parse(document.getElementById("ds-json").value); } catch (e) { fail(`That isn't JSON: ${e.message}`); return; } done(next); });
+    } };
+};
+async function sqlView(tok) {
+  if (!LIVE) { view.innerHTML = `<div class="grid">${noData("Queries run on the live dashboard.", "This is a read-only snapshot.")}</div>`; return; }
+  const [schema, list] = await Promise.all([api("/api/schema"), api("/api/dashboards")]);
+  if (tok !== renderToken) return;
+  SCHEMA_CACHE = schema;
+  let last = "";
+  try { last = localStorage.getItem("greenlight-sql") || ""; } catch { /* a convenience */ }
+  const ex = schema.examples[0], p = last ? { type: "timeseries", display: "bars", title: "", sql: last, width: 6 } : { ...ex, width: 6 };
+  view.innerHTML = `<div class="grid">${panel({ cls: "s12", title: "Query", tip: "One read-only SELECT. :start and :end follow the time range, bucket(time) groups by hour or day. Save it as a panel on a dashboard.",
+      actions: schema.examples.map((e, i) => `<button class="tb" type="button" data-act="example" data-i="${i}">${esc(e.title)}</button>`).join(""),
+      body: editorForm(p, { saveTo: list.dashboards }) })}</div>
+    <div class="grid">${panel({ cls: "s12", title: "Result", body: `<div id="ed-out"><p class="empty">Run the query to see it.</p></div>` })}</div>
+    <div class="grid">${panel({ cls: "s12", title: "Tables", tip: "Every table greenlight keeps. Open one for its columns.", body: schemaRef(schema) })}</div>`;
+  bindEditor({ page: true });
+}
+
 /* ---------- token usage (Claude Code) ---------- */
 const COST_TIP = "Tokens priced like input tokens, from Claude's API prices: output 5x, a cache read 0.1x, a cache write 1.25x (2x when it lasts an hour). The same weights for every model, so sessions compare.";
 const CTX_NAMES = { system: "System prompt and tools", conversation: "Conversation", test: "Test runs", build: "Builds", git: "git and gh", read: "File reads", search: "Searches", web: "Web", shell: "Other shell commands", image: "Images", edit: "Edits", subagent: "Subagent reports", skill: "Skills", other: "Other tools" };
@@ -1915,6 +2407,31 @@ document.addEventListener("click", async ev => {
     if (a === "step") { stepPanel(Number(b.dataset.d)); return; }
     if (a === "close") { setPanel(null, true); return; }
     if (a === "copy") { navigator.clipboard.writeText(b.dataset.copy).then(() => toast("Copied"), () => toast(b.dataset.copy)); return; }
+    if (b.closest("#pmenu")) {
+      const m = document.getElementById("pmenu"), i = Number(m.dataset.i); closePop();
+      if (a === "dsettings") { setPanel(`dsettings:${DASH.id}`); return; }
+      if (a === "djson") { navigator.clipboard.writeText(JSON.stringify(specOf(DASH), null, 2)).then(() => toast("Copied the dashboard as JSON"), () => toast("Couldn't copy")); return; }
+      if (a === "ddel") { if (!LIVE) return; try { await post("/api/dashboards/delete", { id: DASH.id }); toast("Deleted"); location.hash = "#/dashboards"; } catch (e) { toast(e.message); } return; }
+      if (a === "ddel0") { popMenu(document.querySelector('[data-act="dmenu"]'), [["ddel", `Delete ${DASH.title} for good`, "x"]]); return; }
+      if (a === "premove0") { m.dataset.i = i; popMenu(document.querySelector(`[data-act="pmenu"][data-i="${i}"]`), [["premove", "Remove it for good", "x"]]); return; }
+      panelAction(a, i); return;
+    }
+    if (a === "pmenu" || a === "dmenu") {
+      const m = document.getElementById("pmenu"), i = Number(b.dataset.i), p = DASH && DASH.panels[i];
+      if (!m.hidden && m.dataset.from === `${a}:${b.dataset.i || ""}`) { closePop(); return; }
+      m.dataset.from = `${a}:${b.dataset.i || ""}`; m.dataset.i = b.dataset.i || "";
+      if (a === "dmenu") popMenu(b, [LIVE && ["dsettings", "Settings and variables", "dash"], ["djson", "Copy as JSON", "copy"], LIVE && ["ddel0", "Delete dashboard", "x"]]);
+      else if (p && p.type === "row") popMenu(b, [["pup", "Move up", "up"], ["pdown", "Move down", "down"], ["pedit", "Edit", "sql"], ["premove0", "Remove row", "x"]]);
+      else popMenu(b, [p && p.result && ["pview", "View larger, with its rows", "ext"], LIVE && ["pedit", "Edit", "sql"], LIVE && ["pdup", "Duplicate", "plus"], p && p.result && ["pcsv", "Copy rows as CSV", "copy"],
+                       LIVE && i > 0 && ["pup", "Move up", "up"], LIVE && i < DASH.panels.length - 1 && ["pdown", "Move down", "down"], LIVE && ["premove0", "Remove", "x"]]);
+      return;
+    }
+    if (a === "prow") { const i = Number(b.dataset.i), now = !rowCollapsed(DASH, i); try { localStorage.setItem(`greenlight-row:${DASH.id}:${i}`, now ? "1" : "0"); } catch { /* per browser */ } render(); return; }
+    if (a === "lgd") { const set = LEGEND_HIDE.get(b.dataset.id) || new Set(); if (!set.delete(b.dataset.s)) set.add(b.dataset.s); LEGEND_HIDE.set(b.dataset.id, set);
+      const m = b.dataset.id.match(/^dp-t-(\d+)$/); if (m) drawDashPanel(Number(m[1])); else if (b.dataset.id === "dv-t") { drawerKey = null; syncDrawer(); } return; }
+    if (a === "example") { const f = document.getElementById("ed"), ex = (SCHEMA_CACHE || { examples: [] }).examples[Number(b.dataset.i)];
+      if (f && ex) { const F = n => f.elements.namedItem(n); F("sql").value = ex.sql; F("title").value = ex.title; F("type").value = ex.type; F("type").dispatchEvent(new Event("change")); if (ex.display) F("display").value = ex.display; } return; }
+    if (a === "starter") { if (!LIVE) return; b.disabled = true; try { const r = await post("/api/dashboards", { starter: true }); location.hash = `#/dashboards/${r.id}`; } catch (e) { b.disabled = false; toast(e.message); } return; }
     if (!LIVE) return;
     b.disabled = true;
     try {
@@ -1934,7 +2451,7 @@ document.addEventListener("click", async ev => {
 document.addEventListener("keydown", ev => {
   if (ev.key === "Enter" && ev.target.matches && ev.target.matches("th[data-col]")) sortBy(ev.target);
   if (ev.key === "Enter" && ev.target.matches && ev.target.matches("tr[data-panel]")) setPanel(ev.target.dataset.panel, !drawer.hidden);
-  if (ev.key === "Escape") { closeMenu(); document.body.classList.remove("nav-open"); tipOff(); if (!drawer.hidden) setPanel(null, true); }
+  if (ev.key === "Escape") { closePop(); closeMenu(); document.body.classList.remove("nav-open"); tipOff(); if (!drawer.hidden) setPanel(null, true); }
   const typing = ev.target.closest && ev.target.closest("input, textarea, select, [contenteditable]");
   if (!drawer.hidden && !typing && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
     const inside = drawer.contains(document.activeElement);
@@ -1960,8 +2477,8 @@ function setSynced(synced) {
 const range = document.getElementById("range"), rangeMenu = document.getElementById("range-menu");
 let windowed = true;
 function syncRange() {
-  document.getElementById("range-label").textContent = `Last ${DAYS} days`;
-  rangeMenu.innerHTML = RANGES.map(n => `<button type="button" role="menuitemradio" aria-checked="${n === DAYS}" data-days="${n}">${icon("check")}Last ${n} days</button>`).join("");
+  document.getElementById("range-label").textContent = rangeName(DAYS);
+  rangeMenu.innerHTML = RANGES.map(n => `<button type="button" role="menuitemradio" aria-checked="${n === DAYS}" data-days="${n}">${icon("check")}${rangeName(n)}</button>`).join("");
 }
 function closeMenu() { rangeMenu.hidden = true; range.setAttribute("aria-expanded", "false"); }
 range.addEventListener("click", () => {
@@ -1976,7 +2493,7 @@ rangeMenu.addEventListener("click", ev => {
   try { localStorage.setItem("greenlight-days", String(DAYS)); } catch { /* storage unavailable */ }
   closeMenu(); syncRange(); drawerKey = null; render();  /* an open side panel reloads for the new range too */
 });
-document.addEventListener("pointerdown", ev => { if (!ev.target.closest("#picker")) closeMenu(); });
+document.addEventListener("pointerdown", ev => { if (!ev.target.closest("#picker")) closeMenu(); if (!ev.target.closest("#pmenu, [data-act=pmenu], [data-act=dmenu]")) closePop(); });
 const themeBtn = document.getElementById("theme");
 function syncTheme() {
   const light = document.documentElement.dataset.theme === "light";
@@ -2007,12 +2524,16 @@ const ROUTES = [
   [/^#\/pipelines$/, "pipelines", [["Delivery"]], "Pipelines", tok => pipelinesView(tok), true],
   [/^#\/pipeline\/(.+)$/, "pipelines", [["Delivery"], ["Pipelines", "#/pipelines"]], "Pipeline run", (tok, m) => pipelineView(tok, decodeURIComponent(m[1])), false],
   [/^#\/delivery$/, "delivery", [["Delivery"]], "DORA and GitHub", tok => deliveryView(tok), true],
+  [/^#\/dashboards$/, "dashboards", [["Explore"]], "Dashboards", tok => dashboardsView(tok), false],
+  [/^#\/dashboards\/([\w-]+)$/, "dashboards", [["Explore"], ["Dashboards", "#/dashboards"]], "Dashboard", (tok, m) => dashboardView(tok, m[1]), true],
+  [/^#\/sql$/, "sql", [["Explore"]], "SQL", tok => sqlView(tok), true],
   [/^#\/usage(?:\/(items|prs|tests|sessions))?$/, "usage", [["Agents"]], "Token usage", (tok, m) => usageView(tok, m[1] || ""), true],
 ];
 let lastHash = null;
 async function render() {
   const tok = ++renderToken;
-  tipOff(); closeMenu();
+  tipOff(); closeMenu(); closePop();
+  if (!/^#\/dashboards\//.test(hashParts()[0])) document.body.classList.remove("tv");
   const [hash] = hashParts();
   const hit = ROUTES.map(r => [hash.match(r[0]), ...r.slice(1)]).find(r => r[0]) || [null, ...ROUTES[0].slice(1)];
   const [m, nav, trail, title, fn, isWindowed] = hit;

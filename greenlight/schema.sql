@@ -264,6 +264,14 @@ CREATE TABLE IF NOT EXISTS agent_task_switches (
     PRIMARY KEY (session_id, agent, at)
 );
 
+-- Dashboards: panels of read-only SQL (dashboards.py), made in the page or by an agent through MCP
+CREATE TABLE IF NOT EXISTS dashboards (
+    dashboard_id    TEXT PRIMARY KEY,          -- from its title: lower case, dashes
+    title           TEXT NOT NULL,
+    spec            TEXT NOT NULL DEFAULT '{}',  -- JSON: {description, variables, panels}
+    updated_at      TEXT NOT NULL
+);
+
 -- Commits a session made and pull requests it merged: a git commit matched to the checkout's reflog by time, so
 -- the sha is exact; a merge from the GitHub MCP tool's result, or `gh pr merge` (then only the number is known)
 CREATE TABLE IF NOT EXISTS agent_commits (

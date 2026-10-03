@@ -7,6 +7,7 @@ executed at least twice could have flipped, so those are the denominator ("eligi
 from __future__ import annotations
 
 import math
+import time
 import sqlite3
 from collections import defaultdict
 from typing import Any
@@ -323,12 +324,48 @@ def sweep(
     }
 
 
-def run_query(conn: sqlite3.Connection, sql: str, limit: int = 200) -> dict[str, Any]:
-    """Ad-hoc read-only SQL. Pass a read-only connection; the statement check is a second guard."""
-    stripped = sql.strip().rstrip(";")
+QUERY_SECONDS = 5.0  # a query that runs longer is stopped, so one can't tie up a shared server
+# What a query may do, whatever the connection allows: read tables and call functions (WITH ... DELETE is a SELECT
+# to the prefix check, and a dashboard is saved on a connection that can write)
+_READS = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION, getattr(sqlite3, "SQLITE_RECURSIVE", 33)}
+
+
+def _only_reads(action: int, *_: Any) -> int:
+    return sqlite3.SQLITE_OK if action in _READS else sqlite3.SQLITE_DENY
+
+
+def _cost(input_tokens: Any, output_tokens: Any, cache_read: Any, cache_write: Any, cache_write_1h: Any = 0) -> float:
+    """cost(...) in SQL: tokens priced as input tokens, as usage.weighted() prices them."""
+    from .usage import WEIGHTS
+    parts = zip(("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cache_write_1h_tokens"),
+                (input_tokens, output_tokens, cache_read, cache_write, cache_write_1h))
+    return sum(WEIGHTS[k] * (v or 0) for k, v in parts)
+
+
+def run_query(conn: sqlite3.Connection, sql: str, limit: int = 200, params: dict[str, Any] | None = None,
+              seconds: float = QUERY_SECONDS, functions: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Ad-hoc read-only SQL. Pass a read-only connection; the statement check is a second guard. Named parameters
+    (:start, :days) come from params; cost(input, output, cache_read, cache_write, cache_write_1h) prices tokens."""
+    stripped = sql.strip().rstrip(";").strip()
     if not stripped.lower().startswith(("select", "with")) or ";" in stripped:
         raise ValueError("Only a single SELECT (or WITH ... SELECT) statement is allowed.")
-    cur = conn.execute(stripped)
-    cols = [c[0] for c in cur.description or []]
-    rows = cur.fetchmany(limit + 1)
+    conn.create_function("cost", -1, _cost, deterministic=True)
+    for name, fn in (functions or {}).items():
+        conn.create_function(name, 1, fn, deterministic=True)
+    deadline = time.monotonic() + seconds
+    conn.set_progress_handler(lambda: time.monotonic() > deadline, 10_000)
+    conn.set_authorizer(_only_reads)
+    try:
+        cur = conn.execute(stripped, params or {})
+        cols = [c[0] for c in cur.description or []]
+        rows = cur.fetchmany(limit + 1)
+    except sqlite3.DatabaseError as e:
+        if time.monotonic() > deadline:
+            raise ValueError(f"The query ran longer than {seconds:g} seconds and was stopped.") from e
+        if "not authorized" in str(e):
+            raise ValueError("Only reads are allowed: SELECT from tables and call functions.") from e
+        raise ValueError(f"SQL: {e}") from e
+    finally:
+        conn.set_authorizer(None)
+        conn.set_progress_handler(None, 0)
     return {"columns": cols, "rows": [list(r) for r in rows[:limit]], "truncated": len(rows) > limit}

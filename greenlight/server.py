@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Callable, Literal
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from . import analysis, config, forecast, remote
 from .db import connect, default_db_path, set_config_db
@@ -40,7 +40,8 @@ INSTRUCTIONS = (
     "deployments, DORA metrics and Claude Code token usage. Start with greenlight_overview. After a test run, "
     "record and judge it with greenlight_gate_junit (or greenlight_playtest_gate) before rerunning anything: PASS "
     "means carry on, RERUN_TARGETED means rerun only rerun_tests, REAL_FAILURE means investigate. Never quarantine "
-    "a test or apply issue changes without telling the user why."
+    "a test or apply issue changes without telling the user why. Dashboards are SQL: read greenlight_schema, try the "
+    "query with greenlight_query, keep it with greenlight_dashboard_save."
 )
 mcp = _Server("greenlight_mcp", instructions=INSTRUCTIONS)
 
@@ -364,15 +365,112 @@ def suite_forecast(
 
 @mcp.tool(name="greenlight_query", annotations=READ)
 def query(
-    sql: Annotated[str, Field(min_length=6, description="Single SELECT. Tables: runs, results, quarantine, metrics, "
-                                                        "pipelines, jobs, steps, deployments, deploy_commits, "
-                                                        "pull_requests, issues, sync_state.")],
+    sql: Annotated[str, Field(min_length=6, description="One SELECT (or WITH ... SELECT). :start, :end, :days and "
+                                                        ":today follow window_days. greenlight_schema lists every "
+                                                        "table and column.")],
     limit: Annotated[int, Field(ge=1, le=1000)] = 200,
+    window_days: WindowDays = 30,
 ) -> str:
-    """Read-only SQL escape hatch for questions the other tools don't cover. Connection is opened
-    read-only. results.outcome is pass|fail|error|skip and results.flags may hold inferred, slower or known;
-    timestamps are ISO 8601 UTC; issues.labels is a JSON array; issues.managed_key marks the issues greenlight manages."""
-    return _run(lambda c: analysis.run_query(c, sql, limit))
+    """Read-only SQL for questions the other tools don't cover, and to try a dashboard panel's query before saving
+    it. Reads only, stopped after 5 seconds. bucket(time) groups by hour or day; cost(input, output, cache_read,
+    cache_write, cache_write_1h) prices tokens as input tokens."""
+    from . import dashboards
+    return _run(lambda c: dashboards.run(c, sql, window_days, limit))
+
+
+@mcp.tool(name="greenlight_schema", annotations=READ)
+def schema_tool() -> str:
+    """Every table and column greenlight keeps and what each holds, how a dashboard panel's SQL is drawn (number,
+    line, bar, table), the :start/:days parameters, and example queries. Read it before writing SQL."""
+    from . import dashboards
+    return json.dumps(dashboards.schema(), separators=(",", ":"))
+
+
+class Thresholds(BaseModel):
+    warn: float | None = None
+    bad: float | None = None
+    higher_is: Literal["worse", "better"] = "worse"
+
+
+class Panel(BaseModel):
+    type: Literal["timeseries", "stat", "toplist", "table", "text", "row"] = "timeseries"
+    title: Annotated[str, Field(max_length=120, description="Required, except on a text panel.")] = ""
+    sql: Annotated[str, Field(description="One SELECT, filtered by :start and :end. Not for text or row.")] = ""
+    width: Literal[3, 4, 6, 8, 12] | None = Field(None, description="Of 12 columns. Default 3 for a stat, else 6.")
+    display: Literal["bars", "line", "area"] | None = Field(None, description="timeseries: stacked bars (default), "
+                                                                               "lines or area.")
+    unit: Literal["auto", "count", "tokens", "ms", "percent"] = "auto"
+    calc: Literal["total", "last", "mean", "max"] | None = Field(None, description="stat: how rows fold into one "
+                                                                                    "number. Default total.")
+    compare: bool | None = Field(None, description="Also show the period before. Default on for a stat.")
+    thresholds: Thresholds | None = None
+    events: bool | None = Field(None, description="timeseries: mark deploys and merges. Default on.")
+    note: Annotated[str, Field(max_length=400, description="What it shows, in a sentence: the (i) tip.")] = ""
+    text: Annotated[str, Field(max_length=4000, description="text: markdown.")] = ""
+    collapsed: bool | None = None
+
+
+class Variable(BaseModel):
+    name: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,30}$", description="Binds as :name in every panel.")]
+    label: str = ""
+    sql: Annotated[str, Field(description="Its choices: the first column, a second as their labels.")] = ""
+    values: list[str] | None = None
+    default: str | None = Field(None, description="Default: All, which binds NULL.")
+    all: bool = True
+
+
+@mcp.tool(name="greenlight_dashboards", annotations=READ)
+def dashboards_tool(
+    dashboard_id: Annotated[str | None, Field(description="One dashboard, with its spec and each panel's first rows. "
+                                                          "Default: the list.")] = None,
+    window_days: WindowDays = 30,
+) -> str:
+    """The dashboards people and agents have made, or one of them with its variables, panels and first rows, to change
+    it with greenlight_dashboard_save."""
+    from . import dashboards
+
+    def go(c: sqlite3.Connection) -> Any:
+        if not dashboard_id:
+            return {"dashboards": dashboards.all_dashboards(c)}
+        d = dashboards.render(c, dashboard_id, window_days)
+        d.pop("events", None)
+        for p in d["panels"]:
+            for k in ("result", "previous"):
+                if k in p:
+                    p[k]["rows"] = p[k]["rows"][:8]
+        return d
+    return _run(go)
+
+
+@mcp.tool(name="greenlight_dashboard_save", annotations=WRITE)
+def dashboard_save(
+    title: Annotated[str, Field(min_length=1, max_length=120)],
+    panels: Annotated[list[Panel], Field(min_length=1, max_length=40, description="Every panel in order: this replaces "
+                                                                                  "the dashboard's panels.")],
+    variables: Annotated[list[Variable] | None, Field(max_length=6, description="Dropdowns that filter every panel.")] = None,
+    description: Annotated[str, Field(max_length=400)] = "",
+    dashboard_id: Annotated[str | None, Field(description="The dashboard to replace. Default: one named from the "
+                                                          "title, replaced if it exists.")] = None,
+) -> str:
+    """Create a dashboard, or replace one: SQL panels like Grafana's (greenlight_schema says how rows are drawn).
+    Every query runs first, and nothing is saved while one fails; the result has each panel's columns and first rows
+    to check it shows what was meant. Tell the user it's under Dashboards in greenlight's page."""
+    from . import dashboards
+
+    def go(c: sqlite3.Connection) -> Any:
+        spec = {"description": description, "variables": [v.model_dump(exclude_none=True) for v in variables or []],
+                "panels": [p.model_dump(exclude_none=True) for p in panels]}
+        with closing(connect(readonly=True)) as ro:
+            return dashboards.save(c, title, spec, dashboard_id, check=ro)
+    return _run(go, readonly=False)
+
+
+@mcp.tool(name="greenlight_dashboard_delete", annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False))
+def dashboard_delete(dashboard_id: Annotated[str, Field(min_length=1)]) -> str:
+    """Delete a dashboard. Only when the user asks."""
+    from . import dashboards
+    return _run(lambda c: {"deleted": dashboards.delete(c, dashboard_id)}, readonly=False)
 
 
 @mcp.tool(name="greenlight_playtest_gate", annotations=WRITE)
