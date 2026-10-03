@@ -458,10 +458,11 @@ Agents follow the same rules: see [What agents should do](#what-agents-should-do
 
 `greenlight ui` serves it on http://127.0.0.1:8765; `greenlight ui --export snapshot.html` writes a read-only, self-contained copy you can share.
 
-It's dark by default with a light theme one click away. The time range (7, 14, 30 or 90 days) applies to every view that has one, and the (i) next to a panel title explains what it counts. Tables sort by any column and page instead of growing. A row opens a side panel with its details, and the list stays where it was: j and k (or the arrows) step through the rows, Esc closes it, and the panel is part of the URL, so Back closes it and a link opens it. Each panel links to the full page for the deep dive.
+It's dark by default with a light theme one click away. The time range (7, 14, 30 or 90 days) applies to every view that has one, and the (i) next to a panel title explains what it counts. Tables sort by any column and page instead of growing. A row opens a side panel with its details, and the list stays where it was: j and k (or the arrows) step through the rows, Esc closes it, and the panel is part of the URL, so Back closes it and a link opens it. Each panel links to the full page for the deep dive. Filters (branch, pull request, conversation, decision) sit above the lists that have them and are part of the URL too.
 
 - **Overview**: the latest verdict, rerun share, time spent rerunning, what to do next (most at stake first: tests failing on main, flaky tests Claude spent tokens on, what to quarantine or release, where session cost goes), and the most unstable tests across recent commits (taller bars failed more often; amber means the same commit passed and failed). `greenlight insights` prints the same list.
 - **Flaky tests**, **test pages** (results by commit, duration, failure messages, measured numbers against a baseline, linked issues, quarantine controls), **Runs** and **run pages** (why each failure did or didn't block).
+- **Commits**: every commit something recorded, with the conversation that made it, its pull request, the gate's decision on its tests, its CI and where it shipped. A **Merges** tab lists each merged pull request with every conversation that had a hand in it and the one that merged it. See [Which conversation it came from](#which-conversation-it-came-from).
 - **Pipelines**: runs per day, per-workflow success rate, p50/p95 duration and queue time, flaky and slow jobs, and a job waterfall per run.
 - **DORA and GitHub**: the four DORA numbers, the deployments behind them, pull request flow and the issue backlog.
 - **Trends**: forecasts from the Toto 2.0 time series model (optional: the server's `:toto` image, or `uv tool install --python 3.12 "greenlight[toto] @ git+https://github.com/rathojohn/greenlight"` on your machine): rerun churn, failure rate and suite duration with a 7-day band, and tests running slower than forecast.
@@ -470,7 +471,7 @@ It's dark by default with a light theme one click away. The time range (7, 14, 3
 
 ## Token usage (Claude Code)
 
-How many tokens went into each pull request, and into each test while it was failing. `greenlight setup --project` adds a hook that runs after every Claude Code turn (`greenlight usage record --hook`). It reads the session's transcript, which Claude Code keeps on disk with the usage of every API call, and records per-minute counts: output, input, cache reads and writes, the model and the git branch (and where context went, below). Prompts, code and file contents never leave the machine. With `GREENLIGHT_URL` set the counts go to the server; otherwise to the local database.
+How many tokens went into each pull request, and into each test while it was failing. `greenlight setup --project` adds a hook that runs after every Claude Code turn (`greenlight usage record --hook`). It reads the session's transcript, which Claude Code keeps on disk with the usage of every API call, and records per-minute counts: output, input, cache reads and writes, the model and the git branch (and where context went, below). Code, file contents and the conversation never leave the machine; the one exception is the first line of a session's first prompt, kept as its name (see below). With `GREENLIGHT_URL` set the counts go to the server; otherwise to the local database.
 
 - **A pull request** gets the tokens spent on its branch until it merged or closed. If a later PR reuses the branch name, what comes after goes to that one.
 - **A test** gets the tokens a session spent while it was red: from a run in that session that failed it to the next run in the same session that passed it (or the session's end, shown as unfixed). Two tests red at once both count the same tokens, so the per-test numbers don't add up to a total. `greenlight run` and test ledger records note which session ran them, which is what links the two.
@@ -489,7 +490,19 @@ Most of what a session costs is context being read again. Every request sends th
   - **By pull request:** each re-read is charged to the branch of the request that made it, so a pull request's panel shows what rode along while the work was on its branch, and an item's panel shows which pull requests carried it. Something read for one task and carried into the next is split between them by the requests that carried it.
   - **By test:** a test's panel shows what came into the context while it was red in a session (the logs, files and screenshots pulled in while it failed) and what each cost from then on. That's a time window, not a cause: something that arrived while the test was red wasn't necessarily for it.
 
-What leaves the machine: categories, token numbers, branch names, times, and item labels. A label is a path from the repo root, an image's name, a skill's name, or a command's program and subcommand (`npm run test:changed`, `git diff`, `curl`), never its arguments, never anything's contents. `[usage] item_labels = false` in greenlight.toml sends the rest without them.
+### Which conversation it came from
+
+The same hook records the git work a session did, so a commit, a merge, a test run or a CI run points back to the conversation behind it:
+
+- **Commits it made.** Claude commits with `-q`, so the output has no sha. The transcript says when each `git commit` (or merge, cherry-pick, revert) ran, and the checkout's reflog says which commit was made then and on which branch, so the sha is exact. Commits made in another checkout aren't found.
+- **Pull requests it merged**, from the GitHub MCP tool's result (it has the merge commit) or `gh pr merge` (the number; the synced pull request has the commit).
+- **Tests it ran**: runs recorded from a session carry its id.
+
+The Commits page joins all of it on the commit: test runs (including a test ledger's short shas), CI runs, pull requests and deployments. Each commit's panel lists who made, merged or tested it. A conversation in claude.ai opens there; a local one has no page, so its panel shows `claude --resume <id>`, which reopens it from the project's folder on the computer that ran it.
+
+A conversation is named by the first line of its first prompt, cut at about 80 characters, with file paths shortened to their names and anything shaped like a key (a `ghp_` token, a long run of letters and digits) replaced with `[redacted]`. That line is the only prompt text greenlight sends. `[usage] titles = false` keeps it on the machine, and conversations show their ids instead.
+
+What leaves the machine: categories, token numbers, branch names, times, item labels, commit shas and pull request numbers, and each session's title. A label is a path from the repo root, an image's name, a skill's name, or a command's program and subcommand (`npm run test:changed`, `git diff`, `curl`), never its arguments, never anything's contents. `[usage] item_labels = false` in greenlight.toml sends the rest without labels, and `titles = false` without titles.
 
 See it with `greenlight usage`, the Token usage page, or ask an agent (it has `greenlight_token_usage`). `--no-usage-hook` leaves the hook out. To add it by hand, this goes under `hooks` in `.claude/settings.json`:
 
@@ -541,6 +554,7 @@ junit = "reports/*.xml"          # what `greenlight run` records (default: any J
 [usage]                          # the Claude Code token usage hook
 test_commands = "pytest|make check"  # shell commands that count as test runs (a regex; default covers the usual runners)
 item_labels = true               # false: send categories and counts, but no item labels (paths, skills, commands)
+titles = true                    # false: don't send each session's first prompt line as its name
 
 [playtest]                       # a test ledger committed to git, see below
 enabled = false
@@ -576,6 +590,7 @@ Some projects run tests outside CI (in coding-agent sessions, on a laptop) and c
 - One repo per DB. Point `db` at a different file per project.
 - `greenlight otel receive` takes JSON only (set `encoding: json` on the Collector's otlphttp exporter); protobuf would need a dependency the CLI otherwise avoids.
 - Toto forecasts need about two weeks of daily data before they mean anything.
+- A commit made by hand, or in a session without the usage hook, has no conversation. Sessions from before the hook recorded commits are linked to a pull request through its branch, not to its commits.
 - No live view of runs in progress, and no log search.
 - New tests aren't run several times up front to shake out flakes; a new test that fails just blocks.
 - Change failure rate counts incidents from issue labels, not an incident tool.

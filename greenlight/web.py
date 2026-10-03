@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
-from . import analysis, dashboard, delivery, insights, usage
+from . import analysis, commits, dashboard, delivery, insights, usage
 from .db import connect, iso, utcnow
 
 UI_FILE = Path(__file__).with_name("ui") / "index.html"
@@ -52,6 +52,15 @@ def _forecast():
     return forecast
 
 
+def _pipelines(c: sqlite3.Connection, days: int) -> dict[str, Any]:
+    """CI runs, each recent one with the conversation that made its commit."""
+    out = delivery.pipelines_summary(c, days)
+    made = commits.by_sha(c, [r.get("commit_sha") for r in out["recent"]])
+    for r in out["recent"]:
+        r["conversation"] = made.get(commits._sha(r.get("commit_sha")))
+    return out
+
+
 def _insights(c: sqlite3.Connection, days: int) -> dict[str, Any]:
     found = insights.insights(c, days)
     return {"insights": [{k: v for k, v in i.items() if k not in ("red", "rank")} for i in found],
@@ -63,9 +72,11 @@ GET_ROUTES: dict[str, Callable[[sqlite3.Connection, Params], Any]] = {
     "/api/flaky": lambda c, p: dashboard.flaky_table(c, _int(p, "days", 30)),
     "/api/test": lambda c, p: dashboard.test_detail(c, _require(p, "id"), _int(p, "days", 30)),
     "/api/runs": lambda c, p: dashboard.runs_list(c, _int(p, "limit", 50, hi=500)),
+    "/api/commits": lambda c, p: commits.commit_list(c, _int(p, "days", 30)),
+    "/api/commit": lambda c, p: commits.commit_detail(c, _require(p, "sha")),
     "/api/run": lambda c, p: analysis.triage_run(c, run_id=_int(p, "id", 0, lo=0, hi=10**12)),
     "/api/quarantine": lambda c, p: dashboard.quarantine_view(c, _int(p, "days", 30)),
-    "/api/pipelines": lambda c, p: delivery.pipelines_summary(c, _int(p, "days", 30)),
+    "/api/pipelines": lambda c, p: _pipelines(c, _int(p, "days", 30)),
     "/api/pipeline": lambda c, p: delivery.pipeline_detail(c, _require(p, "id")),
     "/api/delivery": lambda c, p: delivery.delivery_view(c, _int(p, "days", 30), _incident_labels, p.get("env") or None),
     "/api/test/forecast": lambda c, p: _forecast().test_duration_forecast(
@@ -252,7 +263,8 @@ def export_snapshot(db: str | None, out: str, days: int = 30, with_forecasts: bo
     d = str(days)
     ov = grab("/api/overview", {"days": d}) or {}
     flaky = grab("/api/flaky", {"days": d}) or {}
-    runs = grab("/api/runs", {"limit": "50"}) or {}
+    runs = grab("/api/runs", {"limit": "500"}) or {}
+    grab("/api/commits", {"days": d})
     quar = grab("/api/quarantine", {"days": d}) or {}
     pipes = grab("/api/pipelines", {"days": d}) or {}
     deliv = grab("/api/delivery", {"days": d}) or {}

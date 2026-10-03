@@ -33,7 +33,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     "run": {"junit": None},
     # test_commands: a regex for Bash commands that run tests (default: context.TEST_COMMANDS); item_labels: send
     # each context item's label (a path, a skill, a command's program); false sends categories and counts only
-    "usage": {"test_commands": None, "item_labels": True},
+    "usage": {"test_commands": None, "item_labels": True, "titles": True},
 }
 
 

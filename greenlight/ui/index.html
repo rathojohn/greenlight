@@ -140,7 +140,12 @@ a.panel:hover { border-color: var(--ink-3); }
 .vars { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .var { display: inline-flex; align-items: stretch; height: 30px; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: var(--panel); }
 .var span { display: flex; align-items: center; padding: 0 10px; background: var(--panel-2); color: var(--ink-2); border-right: 1px solid var(--line); font-size: 12px; }
-.var select { border: 0; background: var(--panel); color: var(--ink); font: inherit; padding: 0 8px; min-width: 0; }
+.var select { border: 0; background: var(--panel); color: var(--ink); font: inherit; padding: 0 8px; min-width: 0; max-width: 240px; text-overflow: ellipsis; }
+.var { max-width: 100%; }
+.vars .lnk { font-size: 12.5px; }
+.tabs + .vars { margin-bottom: 8px; }
+.copy { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.copy code { min-width: 0; overflow-x: auto; white-space: nowrap; padding: 4px 6px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 4px; user-select: all; }
 
 /* Stat tiles */
 .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
@@ -382,6 +387,8 @@ details.wj[open] > summary .wn .ic { transform: rotate(90deg); }
   <symbol id="i-left" viewBox="0 0 16 16"><path d="M9.75 4.5 6.25 8l3.5 3.5"/></symbol>
   <symbol id="i-up" viewBox="0 0 16 16"><path d="M4.5 9.75 8 6.25l3.5 3.5"/></symbol>
   <symbol id="i-x" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></symbol>
+  <symbol id="i-commits" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.75"/><path d="M1.5 8h3.75M10.75 8h3.75"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.25a.75.75 0 0 0-.75-.75h-6.5a.75.75 0 0 0-.75.75v6.5c0 .41.34.75.75.75h.25"/></symbol>
   <symbol id="i-ext" viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M13.5 2.5 8 8M11.5 9.5v4h-9v-9h4"/></symbol>
 </svg>
 <div class="app">
@@ -395,6 +402,7 @@ details.wj[open] > summary .wn .ic { transform: rotate(90deg); }
       <a href="#/quarantine" data-nav="quarantine"><svg class="ic"><use href="#i-quarantine"/></svg>Quarantine</a>
       <a href="#/trends" data-nav="trends"><svg class="ic"><use href="#i-trends"/></svg>Trends</a>
       <div class="grp">Delivery</div>
+      <a href="#/commits" data-nav="commits"><svg class="ic"><use href="#i-commits"/></svg>Commits</a>
       <a href="#/pipelines" data-nav="pipelines"><svg class="ic"><use href="#i-pipelines"/></svg>Pipelines</a>
       <a href="#/delivery" data-nav="delivery"><svg class="ic"><use href="#i-delivery"/></svg>DORA and GitHub</a>
       <div class="grp">Agents</div>
@@ -635,7 +643,11 @@ function hashParts() {
   const h = location.hash || "#/", i = h.indexOf("?");
   return i < 0 ? [h, new URLSearchParams()] : [h.slice(0, i), new URLSearchParams(h.slice(i + 1))];
 }
-function panelHref(key) { const [path] = hashParts(); return key ? `${path}?panel=${encodeURIComponent(key)}` : path; }
+/* the URL with the side panel changed and the page's own filters kept */
+function withParams(edit) { const [path, q] = hashParts(); edit(q); const s = q.toString(); return s ? `${path}?${s}` : path; }
+function panelHref(key) { return withParams(q => { q.delete("panel"); if (key) q.set("panel", key); }); }
+/* what the page shows: the route and its filters, without the side panel */
+const pageKey = () => withParams(q => q.delete("panel"));
 const panelLink = (key, text, cls = "tl") => `<a class="${cls}" href="${esc(panelHref(key))}">${text}</a>`;
 function markSelected(key) {
   document.querySelectorAll("tr.sel").forEach(r => r.classList.remove("sel"));
@@ -721,6 +733,30 @@ function stepPanel(d) {
 const facts = items => `<div class="facts">${items.map(([k, v, tipText]) => `<div><div class="k">${esc(k)}${info(tipText)}</div><div class="v">${v}</div></div>`).join("")}</div>`;
 const section = (title, body, tipText) => `<section><h3>${esc(title)}${info(tipText)}</h3>${body}</section>`;
 const boxed = html => `<div class="box">${html}</div>`;
+
+/* ---------- filters: in the URL (#/runs?branch=main), so Back undoes one and a link keeps them ---------- */
+const filterVal = k => hashParts()[1].get(k) || "";
+const filterHref = (k, v) => withParams(q => { q.delete("panel"); if (v) q.set(k, v); else q.delete(k); });
+/* [value, label, rows] for each value a column takes, most rows first */
+function optionsOf(rows, value, label = value) {
+  const seen = new Map();
+  for (const r of rows) { const v = value(r); if (v == null || v === "") continue; const o = seen.get(String(v)) || [String(v), label(r), 0]; o[2]++; seen.set(String(v), o); }
+  return [...seen.values()].sort((a, b) => b[2] - a[2] || String(a[1]).localeCompare(String(b[1])));
+}
+const cut = (s, n = 48) => { s = String(s ?? ""); return s.length > n ? s.slice(0, n - 1) + "…" : s; };
+/* one select per filter that has a choice to make; [{ k, label, options, extra: [[value, label]] }] */
+function filterBar(defs) {
+  const shown = defs.filter(d => d.options.length > 1 || filterVal(d.k));
+  if (!shown.length) return "";
+  const active = defs.some(d => filterVal(d.k));
+  const clear = withParams(q => { q.delete("panel"); defs.forEach(d => q.delete(d.k)); });
+  return `<div class="vars">${shown.map(d => { const cur = filterVal(d.k), opts = [...(d.extra || []), ...d.options];
+    return `<label class="var"><span>${esc(d.label)}</span><select data-filter="${esc(d.k)}"><option value="">All</option>${opts.map(([v, text, n]) => `<option value="${esc(v)}"${v === cur ? " selected" : ""}>${esc(cut(text))}${n ? ` (${n})` : ""}</option>`).join("")}${cur && !opts.some(o => o[0] === cur) ? `<option value="${esc(cur)}" selected>${esc(cut(cur))}</option>` : ""}</select></label>`; }).join("")}${active ? `<a class="lnk" href="${esc(clear)}">Clear filters</a>` : ""}</div>`;
+}
+document.addEventListener("change", ev => {
+  const s = ev.target.closest && ev.target.closest("select[data-filter]");
+  if (s) location.hash = filterHref(s.dataset.filter, s.value);
+});
 
 /* ---------- charts (plain SVG, redrawn on resize) ---------- */
 const tip = document.getElementById("tip");
@@ -1050,27 +1086,39 @@ async function testView(tok, id) {
 }
 
 async function runsView(tok) {
-  const d = await api("/api/runs", { limit: 50 });
+  const d = await api("/api/runs", { limit: 500 });
   if (tok !== renderToken) return;
-  const by = k => d.runs.filter(r => r.decision === k).length;
+  const f = { branch: filterVal("branch"), conv: filterVal("conv"), source: filterVal("source"), decision: filterVal("decision") };
+  const runs = d.runs.filter(r => (!f.branch || r.branch === f.branch) && (!f.source || r.source === f.source) && (!f.decision || r.decision === f.decision)
+    && (!f.conv || (f.conv === "none" ? !r.conversation : (r.conversation || {}).session_id === f.conv)));
+  const by = k => runs.filter(r => r.decision === k).length;
+  const of = Object.values(f).some(Boolean) ? `of ${runs.length} shown` : `of the last ${runs.length}`;
   const cols = [
     { h: "When", cell: r => when(r.started_at), sort: r => r.started_at, cls: "nw" },
-    { h: "Commit", cell: r => `<a href="#/run/${r.run_id}">${sha(r.commit_sha)}</a>`, cls: "nw" },
-    { h: "Branch", cell: r => esc(r.branch || ""), sort: r => r.branch, dir: 1, cls: "hide-sm" },
+    { h: "Commit", cell: r => `<a href="#/run/${r.run_id}">${sha(r.commit_sha)}</a>${r.branch ? `<div class="sub">${esc(r.branch)}</div>` : ""}`, sort: r => r.branch, dir: 1, cls: "nw" },
+    { h: "Conversation", cell: r => convCell(r.conversation), sort: r => r.conversation ? convName(r.conversation) : null, dir: 1, cls: "wrap hide-sm",
+      tip: "The Claude Code session that ran these tests, else the one that made the commit" },
     { h: "Attempt", cell: r => r.attempt, sort: r => r.attempt, cls: "num hide-sm" },
     { h: "Source", cell: r => `<span class="muted">${esc(r.source || "")}</span>`, sort: r => r.source, dir: 1, cls: "hide-sm" },
     { h: "Failed", cell: r => `${r.failing}<span class="dim"> / ${r.tests}</span>`, sort: r => r.failing, cls: "num" },
     { h: "Duration", cell: r => dur(r.duration_ms), sort: r => r.duration_ms, cls: "num hide-sm" },
     { h: "Decision", cell: r => tag(r.decision, DECISION[r.decision]), sort: r => r.decision, dir: 1 },
   ];
-  view.innerHTML = `
+  const filters = filterBar([
+    { k: "branch", label: "Branch", options: optionsOf(d.runs, r => r.branch) },
+    { k: "conv", label: "Conversation", options: optionsOf(d.runs, r => r.conversation && r.conversation.session_id, r => convName(r.conversation)),
+      extra: d.runs.some(r => !r.conversation) && d.runs.some(r => r.conversation) ? [["none", "None recorded"]] : [] },
+    { k: "source", label: "Source", options: optionsOf(d.runs, r => r.source) },
+    { k: "decision", label: "Decision", options: optionsOf(d.runs, r => r.decision, r => DECISION[r.decision]) },
+  ]);
+  view.innerHTML = `${filters}
     <div class="grid">
-      ${stat({ cls: "s4", k: "Passed", v: by("PASS"), s: `of the last ${d.runs.length}` })}
+      ${stat({ cls: "s4", k: "Passed", v: by("PASS"), s: of })}
       ${stat({ cls: "s4", k: "Rerun flaky", v: by("RERUN_TARGETED"), s: "only flaky tests failed" })}
       ${stat({ cls: "s4", k: "Real failures", v: by("REAL_FAILURE"), s: "blocked" })}
     </div>
-    <div class="grid">${panel({ title: "Runs", tip: "The newest recorded runs and what the gate decided for each.", flush: true, actions: `<span class="dim">${plural(d.runs.length, "run")}</span>`,
-      body: table("t-runs", cols, d.runs, { limit: 20, panel: r => `run:${r.run_id}`, empty: "No runs yet. Record one with <code>greenlight run -- pytest</code>." }) })}</div>`;
+    <div class="grid">${panel({ title: "Runs", tip: "The newest recorded runs and what the gate decided for each.", flush: true, actions: `<span class="dim">${plural(runs.length, "run")}</span>`,
+      body: table("t-runs", cols, runs, { limit: 20, panel: r => `run:${r.run_id}`, empty: d.runs.length ? "No run matches these filters." : "No runs yet. Record one with <code>greenlight run -- pytest</code>." }) })}</div>`;
 }
 
 const WHY = {
@@ -1234,7 +1282,8 @@ async function pipelinesView(tok) {
     { h: "When", cell: r => when(r.created_at), sort: r => r.created_at, cls: "nw" },
     { h: "Workflow", cell: r => `<a href="${pipeHref(r.pipeline_id)}">${esc(r.workflow)} <span class="dim">#${esc(r.run_number)}</span></a>${r.attempt > 1 ? ` <span class="dim">attempt ${r.attempt}</span>` : ""}`, sort: r => r.workflow, dir: 1, cls: "wrap" },
     { h: "Branch", cell: r => esc(r.branch || ""), sort: r => r.branch, dir: 1, cls: "hide-sm" },
-    { h: "Commit", cell: r => sha(r.commit_sha), cls: "nw hide-sm" },
+    { h: "Commit", cell: r => `${sha(r.commit_sha)}${r.conversation ? `<div class="sub">${esc(cut(convName(r.conversation), 40))}</div>` : ""}`, cls: "wrap hide-sm",
+      tip: "Under it, the Claude Code session that made the commit, when one did" },
     { h: "Event", cell: r => `<span class="muted">${esc(r.event || "")}</span>`, sort: r => r.event, dir: 1, cls: "hide-sm" },
     { h: "Duration", cell: r => dur(r.duration_ms), sort: r => r.duration_ms, cls: "num hide-sm" },
     { h: "Result", cell: r => statusTag(r.status), sort: r => r.status, dir: 1 },
@@ -1399,6 +1448,106 @@ async function deliveryView(tok) {
   if (env) env.addEventListener("change", () => { deliveryEnv = env.value; render(); });
 }
 
+/* ---------- commits and merges, and the conversations they came from ---------- */
+const COMMIT_TABS = [["", "Commits"], ["merges", "Merges"]];
+const prCell = p => p ? `<span class="dim">#${p.number}</span> ${esc(p.title || "")}` : "";
+const testsCell = c => c.decision ? `${tag(c.decision, DECISION[c.decision])}${c.runs > 1 ? `<div class="sub">${plural(c.runs, "run")}</div>` : ""}` : "";
+const ciCell = c => c.ci ? statusTag(c.ci) : "";
+/* rows whose conversations include the one picked, or none when "none" is */
+const convMatch = (convs, want) => !want || (want === "none" ? !convs.length : convs.some(c => c.session_id === want));
+function convOptions(rows, convsOf) {
+  const all = rows.flatMap(r => convsOf(r).map(c => ({ c })));
+  return { options: optionsOf(all, x => x.c.session_id, x => convName(x.c)),
+           extra: rows.some(r => !convsOf(r).length) && all.length ? [["none", "None recorded"]] : [] };
+}
+async function commitsView(tok, tab) {
+  const d = await api("/api/commits", { days: DAYS });
+  if (tok !== renderToken) return;
+  if (!d.commits.length && !d.merges.length) {
+    view.innerHTML = `<div class="grid">${noData(`No commits in the last ${DAYS} days.`, "Commits come from test runs, CI, synced pull requests and the usage hook, which records the commits each Claude Code session makes.")}</div>`;
+    return;
+  }
+  const tabs = `<nav class="tabs" aria-label="Commits">${COMMIT_TABS.map(([k, label]) => `<a href="#/commits${k ? "/" + k : ""}"${k === tab ? ` aria-current="page"` : ""}>${label} <span class="n">${(k ? d.merges : d.commits).length}</span></a>`).join("")}</nav>`;
+  const conv = filterVal("conv");
+  if (tab === "merges") {
+    const rows = d.merges.filter(m => convMatch(m.conversations, conv));
+    const cols = [
+      { h: "Merged", cell: m => when(m.merged_at), sort: m => m.merged_at, cls: "nw" },
+      { h: "Pull request", cell: m => `${prCell(m)}<div class="sub">${esc(m.head || "")} into ${esc(m.base || "")}</div>`, sort: m => m.number, cls: "wrap" },
+      { h: "Conversations", cell: m => convCell(m.conversations[0], m.conversations.length - 1), sort: m => m.conversations.length, cls: "wrap hide-sm",
+        tip: "Sessions that made its commits, merged it, ran its tests or spent tokens on its branch" },
+      { h: "Merged by", cell: m => m.merged_by ? panelLink(`session:${m.merged_by.session_id}`, convLabel(m.merged_by)) : `<span class="dim">not a recorded session</span>`, sort: m => m.merged_by ? convName(m.merged_by) : null, dir: 1, cls: "wrap hide-sm" },
+      { h: "Commits", cell: m => m.commits || "", sort: m => m.commits, cls: "num hide-sm", tip: "Commits on its branch that something recorded: a session, a test run or CI" },
+      { h: "Tests", cell: testsCell, sort: m => m.decision, dir: 1 },
+      { h: "CI", cell: ciCell, sort: m => m.ci, dir: 1, cls: "hide-sm" },
+    ];
+    const co = convOptions(d.merges, m => m.conversations);
+    view.innerHTML = tabs + filterBar([{ k: "conv", label: "Conversation", ...co }]) + `<div class="grid">${panel({ title: "Merged pull requests", flush: true,
+      tip: "Each pull request merged in the window, with every session that had a hand in it. Open one for its commits and where its tokens went.",
+      actions: `<span class="dim">${plural(rows.length, "merge")}</span>`,
+      body: table("t-merges", cols, rows, { limit: 20, panel: m => `pr:${m.number}`, empty: d.merges.length ? "No merge matches these filters." : "No pull request merged in this window." }) })}</div>`;
+    return;
+  }
+  const f = { branch: filterVal("branch"), pr: filterVal("pr"), kind: filterVal("kind") };
+  const rows = d.commits.filter(c => (!f.branch || c.branch === f.branch) && (!f.pr || String((c.pr || {}).number) === f.pr)
+    && (!f.kind || c.kind === f.kind) && convMatch(c.conversations, conv));
+  const fromConv = rows.filter(c => c.conversations.some(x => x.how === "made" || x.how === "merged")).length;
+  const cols = [
+    { h: "When", cell: c => when(c.at), sort: c => c.at, cls: "nw" },
+    { h: "Commit", cell: c => `<code>${esc(c.sha.slice(0, 8))}</code>${c.kind === "merge" ? ` ${tag("neutral", "merge")}` : ""}<div class="sub">${esc(c.branch || "")}</div>`, sort: c => c.branch, dir: 1, cls: "nw" },
+    { h: "Pull request", cell: c => prCell(c.pr), sort: c => c.pr ? c.pr.number : null, cls: "wrap hide-sm" },
+    { h: "Conversation", cell: c => convCell(c.conversations[0], c.conversations.length - 1), sort: c => c.conversations[0] ? convName(c.conversations[0]) : null, dir: 1, cls: "wrap" },
+    { h: "Tests", cell: testsCell, sort: c => c.decision, dir: 1, tip: "The gate's decision on its latest test run" },
+    { h: "CI", cell: ciCell, sort: c => c.ci, dir: 1, cls: "hide-sm", tip: "The latest attempt of each workflow on it" },
+  ];
+  const co = convOptions(d.commits, c => c.conversations);
+  const filters = filterBar([
+    { k: "branch", label: "Branch", options: optionsOf(d.commits, c => c.branch) },
+    { k: "pr", label: "Pull request", options: optionsOf(d.commits, c => c.pr && c.pr.number, c => `#${c.pr.number} ${c.pr.title || ""}`) },
+    { k: "conv", label: "Conversation", ...co },
+    { k: "kind", label: "Kind", options: optionsOf(d.commits, c => c.kind, c => c.kind === "merge" ? "Merges" : "Commits") },
+  ]);
+  view.innerHTML = tabs + filters + `
+    <div class="grid">
+      ${stat({ cls: "s3", k: "Commits", v: rows.length, s: `${rows.filter(c => c.kind === "merge").length} of them merges` })}
+      ${stat({ cls: "s3", k: "From a conversation", v: rows.length ? pct(fromConv / rows.length) : "n/a", s: `${plural(fromConv, "commit")} a recorded session made or merged`, tip: "The usage hook records each commit a Claude Code session makes and each pull request it merges." })}
+      ${stat({ cls: "s3", k: "Real failures", v: rows.filter(c => c.decision === "REAL_FAILURE").length, s: "latest test run blocked" })}
+      ${stat({ cls: "s3", k: "Failed CI", v: rows.filter(c => c.ci === "failure").length, s: "a workflow's latest attempt failed" })}
+    </div>
+    <div class="grid">${panel({ title: "Commits", flush: true, tip: "Every commit something recorded: a session that made or merged it, a test run, CI, a pull request or a release. Open one for all of it.",
+      actions: `<span class="dim">${plural(rows.length, "commit")}</span>`,
+      body: table("t-commits", cols, rows, { limit: 20, panel: c => `commit:${c.sha}`, empty: "No commit matches these filters." }) })}</div>`;
+}
+PANELS.commit = async id => {
+  const d = await api("/api/commit", { sha: id });
+  const gh = d.repo_url ? `${d.repo_url}/commit/${d.sha}` : null;
+  const shipped = d.deploys.length ? d.deploys.map(x => `${esc(x.environment)} ${esc(x.version || "")}`).join(", ") : `<span class="dim">not yet</span>`;
+  return {
+    title: `<span class="mono">${esc(d.sha.slice(0, 10))}</span>`,
+    sub: `${d.kind === "merge" ? "Merge" : "Commit"}${d.branch ? ` on ${esc(d.branch)}` : ""}${d.at ? `, ${esc(full(d.at))}` : ""}`,
+    actions: ext(gh, "GitHub"),
+    body: facts([["Tests", d.decision ? tag(d.decision, DECISION[d.decision]) : `<span class="dim">no run</span>`, "The gate's decision on its latest test run"],
+                 ["CI", d.ci ? statusTag(d.ci) : `<span class="dim">no run</span>`], ["Pull request", d.pr ? panelLink(`pr:${d.pr.number}`, `#${d.pr.number}`) : `<span class="dim">none</span>`],
+                 ["Shipped", shipped]])
+      + section("Conversations", d.conversations.length ? boxed(table("d-cconv", [
+          { h: "Conversation", cell: c => `${panelLink(`session:${c.session_id}`, convLabel(c))}<div class="sub">${esc(HOW[c.how] || "")}</div>`, cls: "wrap" },
+          { h: "", cell: c => c.url ? ext(c.url, "Open in Claude") : "", cls: "fit" },
+        ], d.conversations, {})) : `<p class="empty">No recorded session made, merged or tested it.</p>`, "Sessions that made it, merged it or ran its tests, from the usage hook")
+      + section("Commit", copyBox(d.sha))
+      + (d.test_runs.length ? section(`Test runs (${d.test_runs.length})`, boxed(table("d-cruns", [
+          { h: "When", cell: r => when(r.started_at), sort: r => r.started_at, cls: "nw" },
+          { h: "Run", cell: r => `Run ${r.run_id}<div class="sub">${esc(r.source || "")}${r.attempt > 1 ? `, attempt ${r.attempt}` : ""}</div>`, cls: "wrap" },
+          { h: "Failed", cell: r => `${r.failing}<span class="dim"> / ${r.tests}</span>`, sort: r => r.failing, cls: "num hide-sm" },
+          { h: "Decision", cell: r => tag(r.decision, DECISION[r.decision]), sort: r => r.decision, dir: 1 },
+        ], d.test_runs, { sort: 0, limit: 8, panel: r => `run:${r.run_id}` }))) : "")
+      + (d.ci_runs.length ? section(`CI runs (${d.ci_runs.length})`, boxed(table("d-cci", [
+          { h: "When", cell: r => when(r.created_at), sort: r => r.created_at, cls: "nw" },
+          { h: "Workflow", cell: r => `${esc(r.workflow)} <span class="dim">#${esc(r.run_number)}</span>${r.attempt > 1 ? `<div class="sub">attempt ${r.attempt}</div>` : ""}`, cls: "wrap" },
+          { h: "Result", cell: r => statusTag(r.status), sort: r => r.status, dir: 1 },
+        ], d.ci_runs, { sort: 0, limit: 8, href: r => pipeHref(r.pipeline_id) }))) : ""),
+  };
+};
+
 /* ---------- token usage (Claude Code) ---------- */
 const COST_TIP = "Tokens priced like input tokens, from Claude's API prices: output 5x, a cache read 0.1x, a cache write 1.25x (2x when it lasts an hour). The same weights for every model, so sessions compare.";
 const CTX_NAMES = { system: "System prompt and tools", conversation: "Conversation", test: "Test runs", build: "Builds", git: "git and gh", read: "File reads", search: "Searches", web: "Web", shell: "Other shell commands", image: "Images", edit: "Edits", subagent: "Subagent reports", skill: "Skills", other: "Other tools" };
@@ -1429,6 +1578,15 @@ const shareOf = (n, total) => !total || !n ? "0%" : n / total < .001 ? "<0.1%" :
 const meter = (n, total) => `<span class="meter"><i style="width:${total ? Math.min(100, n / total * 100) : 0}%"></i></span> ${shareOf(n, total)}`;
 /* a claude.ai id when there is one; a local session's UUID is recognizable by its first block */
 const sessionName = x => x.remote_session || (/^[0-9a-f]{8}-[0-9a-f-]{27}$/.test(x.session_id || "") ? x.session_id.slice(0, 8) : String(x.session_id || ""));
+/* a conversation by its first prompt when the hook sent one, else by its id */
+const convName = x => x.title || sessionName(x);
+const convLabel = x => x.title ? esc(x.title) : `<span class="mono">${esc(sessionName(x))}</span>`;
+const HOW = { made: "made it", merged: "merged it", tested: "ran its tests", worked: "worked on it" };
+/* a conversation in a table cell: opens its side panel; a row that opens something else still can */
+const convCell = (c, more = 0) => c ? `${panelLink(`session:${c.session_id}`, convLabel(c))}<div class="sub">${esc(HOW[c.how] || "")}${more ? `${c.how ? ", " : ""}${plural(more, "other")}` : ""}</div>` : "";
+/* how to get back to a conversation: its page on claude.ai, or resuming it where it ran */
+const resumeCmd = x => `claude --resume ${x.session_id}`;
+const copyBox = text => `<div class="copy"><code>${esc(text)}</code><button class="tb icon" type="button" data-act="copy" data-copy="${esc(text)}" aria-label="Copy" data-tip="Copy">${icon("copy")}</button></div>`;
 const ext = (url, text) => isUrl(url) ? `<a class="tb" href="${esc(url)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(text)}"><span class="lbl">${esc(text)}</span>${icon("ext")}</a>` : "";
 const goto = (href, text) => `<a class="tb" href="${esc(href)}" aria-label="${esc(text)}"><span class="lbl">${esc(text)}</span>${icon("right")}</a>`;
 const prState = st => st === "merged" ? tag("success", "merged") : st === "open" ? tag("open-ok", "open") : tag("closed", st);
@@ -1441,7 +1599,7 @@ function ctxTable(id, cats, total, limit = 8) {
   ], cats, { sort: 2, limit, empty: "No context breakdown recorded." }));
 }
 const sessionCols = [
-  { h: "Session", cell: x => esc(sessionName(x)), sort: x => sessionName(x), dir: 1, cls: "mono" },
+  { h: "Session", cell: x => convLabel(x), sort: x => convName(x), dir: 1, cls: "wrap" },
   { h: "Last active", cell: x => when(x.last_at), sort: x => x.last_at, cls: "nw hide-sm" },
   { h: "Cost", cell: x => tk(x.weighted), sort: x => x.weighted, cls: "num" },
 ];
@@ -1498,7 +1656,15 @@ PANELS.pr = async id => {
   const ctxTotal = d.context.categories.reduce((a, c) => a + c.weighted, 0);
   return {
     title: `#${p.number} ${esc(p.title || "")}`, sub: `${esc(p.head)} ${prState(p.state)}`, actions: ext(p.url, "GitHub"),
-    body: tokenFacts(p) + section("Where its context went", ctxTable("d-prctx", d.context.categories, ctxTotal))
+    body: tokenFacts(p)
+      + (d.merged_by ? `<p class="advice">Merged by the conversation ${panelLink(`session:${d.merged_by.session_id}`, convLabel(d.merged_by))}${d.merged_by.url ? ` ${ext(d.merged_by.url, "Open in Claude")}` : ""}</p>` : "")
+      + ((d.commits || []).length ? section(`Commits (${d.commits.length})`, boxed(table("d-prcommits", [
+          { h: "When", cell: c => when(c.at), sort: c => c.at, cls: "nw" },
+          { h: "Commit", cell: c => `<code>${esc(c.sha.slice(0, 8))}</code>${c.kind === "merge" ? ` ${tag("neutral", "merge")}` : ""}`, cls: "nw" },
+          { h: "Conversation", cell: c => convCell(c.conversations[0], c.conversations.length - 1), cls: "wrap" },
+          { h: "Tests", cell: testsCell, sort: c => c.decision, dir: 1 },
+        ], d.commits, { sort: 0, limit: 8, panel: c => `commit:${c.sha}` })), "Commits on its branch, and its merge, that something recorded") : "")
+      + section("Where its context went", ctxTable("d-prctx", d.context.categories, ctxTotal))
       + ((d.items || []).length ? section("What rode along during it", itemList("d-pritems", d.items, "Carried",
           "Requests on this pull request's branch that read it again. Added 0 means it came in earlier, on other work, and rode along into this one."),
           "Each thing in context while the work was on this branch, charged for the requests here that carried it") : "")
@@ -1510,9 +1676,16 @@ PANELS.session = async id => {
   const total = cx.categories.reduce((a, c) => a + c.weighted, 0);
   const sw = d.switches, rb = d.rebuilds;
   return {
-    title: esc(sessionName(x)), sub: `${esc(x.branches.slice(0, 4).join(", "))}${x.branches.length > 4 ? ", ..." : ""}${x.first_at ? `<br>${esc(full(x.first_at))} to ${esc(full(x.last_at))}` : ""}`,
+    title: x.title ? esc(x.title) : esc(sessionName(x)), sub: `${x.title ? `<span class="mono">${esc(sessionName(x))}</span> on ` : ""}${esc(x.branches.slice(0, 4).join(", "))}${x.branches.length > 4 ? ", ..." : ""}${x.first_at ? `<br>${esc(full(x.first_at))} to ${esc(full(x.last_at))}` : ""}`,
     actions: ext(x.url, "Open in Claude"),
-    body: tokenFacts(x) + section("Where its context went", ctxTable("d-sctx", cx.categories, total))
+    body: tokenFacts(x)
+      + (x.url ? "" : section("Open it again", copyBox(resumeCmd(x)), "A local session has no page on claude.ai. Run this in the project's folder on the computer that ran it."))
+      + ((d.commits || []).length ? section(`Commits and merges (${d.commits.length})`, boxed(table("d-scommits", [
+          { h: "When", cell: c => when(c.at), sort: c => c.at, cls: "nw" },
+          { h: "Commit", cell: c => `${c.sha ? `<code>${esc(c.sha.slice(0, 8))}</code>` : ""}${c.kind === "merge" ? ` ${tag("neutral", "merge")}` : ""}<div class="sub">${esc(c.branch || "")}</div>`, cls: "nw" },
+          { h: "Pull request", cell: c => prCell(c.pr), cls: "wrap" },
+        ], d.commits, { sort: 0, limit: 8, panel: c => c.sha ? `commit:${c.sha}` : null }))) : "")
+      + section("Where its context went", ctxTable("d-sctx", cx.categories, total))
       + ((d.items || []).length ? section("What rode along longest", boxed(table("d-sitems", [
           { h: "What", cell: r => `<span class="mono">${esc(r.label)}</span><div class="sub">${esc(kindName(r.kind))}</div>`, sort: r => r.label, dir: 1, cls: "wrap" },
           { h: "Rode along", cell: r => tk(r.avg_rides), sort: r => r.avg_rides, cls: "num" },
@@ -1640,7 +1813,7 @@ async function usageView(tok, tab = "") {
   if (tok !== renderToken) return;
   const t = d.totals;
   if (!t.requests) {
-    view.innerHTML = `<div class="grid">${noData(`No token usage in the last ${DAYS} days.`, "<code>greenlight setup --project</code> adds a hook that records each Claude Code session's token counts after every turn: counts, branches and times, never prompts or code.")}</div>`;
+    view.innerHTML = `<div class="grid">${noData(`No token usage in the last ${DAYS} days.`, "<code>greenlight setup --project</code> adds a hook that records each Claude Code session's token counts after every turn: counts, branches, times and commits, never code or the conversation.")}</div>`;
     return;
   }
   const cx = d.context || { categories: [], rebuilds: { by_cause: [] }, task_switches: {} };
@@ -1691,7 +1864,7 @@ async function usageView(tok, tab = "") {
     body = `<div class="grid">${panel({ title: "Sessions", flush: true,
       body: table("t-usess", [
         { h: "Last active", cell: x => when(x.last_at), sort: x => x.last_at, cls: "nw" },
-        { h: "Session", cell: x => `<span class="mono">${esc(sessionName(x))}</span><div class="sub">${esc(x.branches.slice(0, 3).join(", "))}${x.branches.length > 3 ? ", ..." : ""}</div>`, sort: x => sessionName(x), dir: 1, cls: "wrap" },
+        { h: "Session", cell: x => `${convLabel(x)}<div class="sub">${esc(x.branches.slice(0, 3).join(", "))}${x.branches.length > 3 ? ", ..." : ""}</div>`, sort: x => convName(x), dir: 1, cls: "wrap" },
         { h: "Requests", cell: x => x.requests, sort: x => x.requests, cls: "num hide-sm" },
         ...tokCols,
       ], d.sessions, { sort: 0, limit: 15, panel: x => `session:${x.session_id}` }) })}</div>`;
@@ -1741,6 +1914,7 @@ document.addEventListener("click", async ev => {
     if (a === "page") { const T = TABLES[b.dataset.t]; T.page += Number(b.dataset.d); document.getElementById(b.dataset.t).innerHTML = tableInner(b.dataset.t); stepButtons(); return; }
     if (a === "step") { stepPanel(Number(b.dataset.d)); return; }
     if (a === "close") { setPanel(null, true); return; }
+    if (a === "copy") { navigator.clipboard.writeText(b.dataset.copy).then(() => toast("Copied"), () => toast(b.dataset.copy)); return; }
     if (!LIVE) return;
     b.disabled = true;
     try {
@@ -1829,6 +2003,7 @@ const ROUTES = [
   [/^#\/run\/(\d+)$/, "runs", [["Tests"], ["Runs", "#/runs"]], "Run", (tok, m) => runView(tok, Number(m[1])), false],
   [/^#\/quarantine$/, "quarantine", [["Tests"]], "Quarantine", tok => quarantineView(tok), true],
   [/^#\/trends$/, "trends", [["Tests"]], "Trends", tok => trendsView(tok), false],
+  [/^#\/commits(?:\/(merges))?$/, "commits", [["Delivery"]], "Commits", (tok, m) => commitsView(tok, m[1] || ""), true],
   [/^#\/pipelines$/, "pipelines", [["Delivery"]], "Pipelines", tok => pipelinesView(tok), true],
   [/^#\/pipeline\/(.+)$/, "pipelines", [["Delivery"], ["Pipelines", "#/pipelines"]], "Pipeline run", (tok, m) => pipelineView(tok, decodeURIComponent(m[1])), false],
   [/^#\/delivery$/, "delivery", [["Delivery"]], "DORA and GitHub", tok => deliveryView(tok), true],
@@ -1846,7 +2021,7 @@ async function render() {
   if (!windowed) range.dataset.tip = "This view isn't filtered by time"; else delete range.dataset.tip;
   document.querySelectorAll("#nav a").forEach(a => { if (a.dataset.nav === nav) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
   setCrumbs(trail, title);
-  if (hash !== lastHash) { view.innerHTML = skeleton(); lastHash = hash; } else view.classList.add("busy");
+  if (pageKey() !== lastHash) { view.innerHTML = skeleton(); lastHash = pageKey(); } else view.classList.add("busy");
   const bar = document.getElementById("bar"); bar.hidden = false;
   try { await fn(tok, m); }
   catch (e) { if (tok === renderToken) view.innerHTML = errorBox(e); }
@@ -1865,7 +2040,7 @@ if (SNAP) {
 }
 syncRange(); syncTheme();
 window.addEventListener("hashchange", () => {
-  if (hashParts()[0] === lastHash) { syncDrawer(); return; }  /* only the side panel changed */
+  if (pageKey() === lastHash) { syncDrawer(); return; }  /* only the side panel changed */
   document.body.classList.remove("nav-open"); closeDrawerUI(); render(); view.focus({ preventScroll: true }); window.scrollTo(0, 0);
 });
 /* a browser signed in with a cookie (the hosted server) gets a way out */

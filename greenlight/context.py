@@ -20,6 +20,9 @@ output, a skill, CLAUDE.md. For each, how many requests it rode along with and w
 early in a session can be re-read by the next 85 requests. CLAUDE.md is in every request of every session and
 subagent, so it's measured from disk and charged to all of them. Items are named by a label only: a path from
 the repo root, a skill's name, or a command's program and subcommand (never its arguments or output).
+
+Last, the git work a session did (actions): when it ran a command that can make a commit, so the hook can find the
+commit in the checkout's reflog, and the pull requests it merged.
 """
 from __future__ import annotations
 
@@ -67,6 +70,10 @@ REMINDERS = {"task_reminder": "task list reminders", "total_tokens_reminder": "t
              "deferred_tools_delta": "tool list changes", "agent_listing_delta": "agent list changes",
              "date_change": "date changes", "plan_mode": "plan mode notes", "hook_additional_context": "hook output"}
 INSTRUCTION_FILES = ("CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md")  # from the repo root; and ~/.claude/CLAUDE.md
+# Commands that can make a commit (git -C dir -c key=value commit ..., not commit-tree), and gh merging a PR
+GIT_COMMITS = re.compile(r"\bgit(?:\s+-[cC]\s+\S+|\s+--?[\w-]+(?:=\S+)?)*\s+(?:commit|merge|cherry-pick|revert)(?![\w-])")
+GH_MERGE = re.compile(r"\bgh\s+pr\s+merge\b([^;&|]*)")
+_MERGED_SHA = re.compile(r'"sha"\s*:\s*"([0-9a-f]{40})"')
 
 
 def category(tool: str, args: dict[str, Any], test: re.Pattern[str], build: re.Pattern[str]) -> str:
@@ -238,13 +245,16 @@ def read_file(path: Path, agent: str = "", test: str | None = None, root: str | 
     items: list[dict[str, Any]] = []      # what entered the context, and the request that first read it
     pending: list[dict[str, Any]] = []
     tools: dict[str, tuple[str, dict]] = {}
+    started: dict[str, Any] = {}          # tool call -> when it was asked for
+    actions: list[dict[str, Any]] = []
     seen: set[str] = set()
     window, compacted = 0, False
     in_context: dict[str, set] = defaultdict(set)  # path -> read ranges still in context, unedited
     try:
         lines = path.open(encoding="utf-8", errors="replace")
     except OSError:
-        return {"requests": [], "items": [], "rebuilds": [], "switches": [], "chars_per_token": CHARS_PER_TOKEN}
+        return {"requests": [], "items": [], "rebuilds": [], "switches": [], "actions": [],
+                "chars_per_token": CHARS_PER_TOKEN}
     with lines:
         for line in lines:
             try:
@@ -261,6 +271,7 @@ def read_file(path: Path, agent: str = "", test: str | None = None, root: str | 
                 for block in msg.get("content") or []:
                     if isinstance(block, dict) and block.get("type") == "tool_use":
                         tools[str(block.get("id"))] = (str(block.get("name") or ""), block.get("input") or {})
+                        started[str(block.get("id"))] = e.get("timestamp")
                 u, key = msg.get("usage"), msg.get("id") or e.get("requestId") or e.get("uuid")
                 if not isinstance(u, dict) or not key or key in seen or msg.get("model") == "<synthetic>":
                     continue
@@ -289,6 +300,9 @@ def read_file(path: Path, agent: str = "", test: str | None = None, root: str | 
                         pending.append({"category": None, "chars": len(str(block.get("text") or "")), "images": 0})
                         continue
                     name, args = tools.get(str(block.get("tool_use_id")), ("", {}))
+                    act = _action(name, args, block, started.get(str(block.get("tool_use_id"))), e)
+                    if act:
+                        actions.append(act)
                     chars, images = _text_size(block.get("content"))
                     cat = "image" if images else category(name, args, test_re, build_re)
                     item = {"category": cat, "chars": chars, "images": images, "at": e.get("timestamp"),
@@ -309,7 +323,42 @@ def read_file(path: Path, agent: str = "", test: str | None = None, root: str | 
     for item in items:
         item["tokens"] = round(item["chars"] / ratio) + item["images"]
     return {"requests": requests, "items": items, "rebuilds": _rebuilds(requests), "switches": task_switches(requests),
-            "chars_per_token": ratio}
+            "actions": actions, "chars_per_token": ratio}
+
+
+def _result_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    return "\n".join(str(b.get("text") or "") for b in content if isinstance(b, dict)) if isinstance(content, list) else ""
+
+
+def _action(name: str, args: Any, block: dict[str, Any], asked: Any, e: dict[str, Any]) -> dict[str, Any] | None:
+    """A tool call that made a commit or merged a pull request. A commit is only a time window here (Claude commits
+    with -q, so the output has no sha): the hook finds the commit made in it in the checkout's reflog."""
+    if block.get("is_error") or not isinstance(args, dict):
+        return None
+    done, branch = norm_time(e.get("timestamp")), e.get("gitBranch") or ""
+    if not done:
+        return None
+    if name.endswith("merge_pull_request"):  # the GitHub MCP server's tool: {"sha": ..., "merged": true}
+        text = _result_text(block.get("content"))
+        m = _MERGED_SHA.search(text)
+        number = args.get("pullNumber") or args.get("pull_number")
+        if m and re.search(r'"merged"\s*:\s*true', text):
+            return {"kind": "merge", "at": done, "sha": m.group(1), "pr": int(number) if str(number).isdigit() else None,
+                    "branch": branch}
+        return None
+    if name != "Bash":
+        return None
+    cmd = str(args.get("command") or "")
+    gh = GH_MERGE.search(cmd)
+    if gh:
+        number = re.search(r"/pull/(\d+)|(?:^|\s)#?(\d+)(?=\s|$)", gh.group(1))
+        return {"kind": "merge", "at": done, "sha": "", "branch": branch,
+                "pr": int(number.group(1) or number.group(2)) if number else None}
+    if GIT_COMMITS.search(cmd):
+        return {"kind": "commit", "from": norm_time(asked) or done, "to": done, "branch": branch}
+    return None
 
 
 def _attachment(a: dict[str, Any], e: dict[str, Any], root: str | None) -> list[dict[str, Any]]:

@@ -29,6 +29,11 @@ FLAKY = {  # test_id -> failure probability
 SLOWING = "tests.test_reports::test_monthly_rollup"
 BREAKS = "tests.test_billing::test_invoice_total"
 PERF = "perf::frame time under 25ms at 4x throttle"
+# what each demo pull request did, and the first prompt of the session that did it
+TITLES = ["Fix the flaky checkout test", "Speed up the search index rebuild", "Show the cart total on the receipt",
+          "Retry the login redirect once, not three times", "Stop the settings menu clipping on small phones",
+          "Round invoice totals the right way", "Cache product images between pages", "Add a colorblind palette option",
+          "Move the monthly rollup off the request path", "Log why a payment was declined"]
 
 
 def junit(cases: list[tuple[str, str, float, str | None]]) -> str:
@@ -158,20 +163,22 @@ def seed(db: str, days: int = 60, seed_value: int = 7) -> None:
                              (did, shipped[-1][0], iso(at), f"0.{d // 7}.{d % 7}"))
                 conn.executemany("INSERT OR REPLACE INTO deploy_commits VALUES (?, ?, ?)", [(did, s, iso(c)) for s, c in shipped])
             # pull requests: one per commit, opened a few hours before it merged
-            opened_at = {}
+            opened_at, squashed = {}, {}
             for n, (s, c) in enumerate(commits, start=1):
                 opened = opened_at[n] = c - timedelta(hours=rng.uniform(0.5, 9))
                 state = "open" if n > len(commits) - 2 else "merged"
-                conn.execute("INSERT OR REPLACE INTO pull_requests (number, title, author, state, base, head, head_sha, created_at, merged_at, updated_at) "
-                             "VALUES (?, ?, 'demo', ?, 'main', ?, ?, ?, ?, ?)",
-                             (n, f"Change {n}", state, f"work-{n}", s, iso(opened), iso(c) if state == "merged" else None, iso(c)))
+                squashed[n] = f"{rng.getrandbits(160):040x}" if state == "merged" else None  # a squash merge's commit
+                conn.execute("INSERT OR REPLACE INTO pull_requests (number, title, author, state, base, head, head_sha, merge_sha, "
+                             "created_at, merged_at, updated_at) VALUES (?, ?, 'demo', ?, 'main', ?, ?, ?, ?, ?, ?)",
+                             (n, TITLES[n % len(TITLES)], state, f"work-{n}", s, squashed[n], iso(opened),
+                              iso(c) if state == "merged" else None, iso(c)))
             # a Claude Code session per pull request: its branch until it merged, then main while its tests ran
             # with where its context went: shares of each minute's cache reads, some rebuilds after idle, and some
             # sessions that started a pull request with the last one still in context
             shares = [("conversation", .34), ("system", .2), ("read", .15), ("test", .08), ("search", .05),
                       ("shell", .04), ("image", .04), ("git", .03), ("web", .02), ("mcp:github", .02), ("edit", .02),
                       ("subagent", .01)]
-            usage_rows, ctx_rows, rebuilds, switches, items, entries = [], [], [], [], [], []
+            usage_rows, ctx_rows, rebuilds, switches, items, entries, made = [], [], [], [], [], [], []
             for n, (s, c) in enumerate(commits, start=1):
                 sid, t = f"demo-session-{n}", opened_at[n]
                 end = last_run_at.get(n, c) + timedelta(minutes=20)
@@ -207,10 +214,10 @@ def seed(db: str, days: int = 60, seed_value: int = 7) -> None:
                         items.append((sid, path, "file", path.rsplit("/", 1)[0] + "/*." + path.rsplit(".", 1)[1] if "/" in path
                                       else "*.json", iso(opened_at[n]), f"work-{n}", 1, size, rides, rides, size * rides))
                 for cmd, size, grp in (("pytest", 2_400, "test runs"), ("npm run build", 900, "builds")):
-                    runs, rides = rng.randint(1, 6), rng.randint(5, max(6, n_req))
-                    items.append((sid, cmd, "command", grp, iso(opened_at[n]), f"work-{n}", runs, size * runs,
-                                  rides * runs, rides, size * rides * runs))
-                    for k in range(runs):
+                    times, rides = rng.randint(1, 6), rng.randint(5, max(6, n_req))
+                    items.append((sid, cmd, "command", grp, iso(opened_at[n]), f"work-{n}", times, size * times,
+                                  rides * times, rides, size * rides * times))
+                    for k in range(times):
                         entries.append((sid, cmd, "command", iso(opened_at[n] + timedelta(minutes=rng.randint(0, span), seconds=k)),
                                      f"work-{n}", size, rides, size * rides))
                 if n % 2:
@@ -223,8 +230,13 @@ def seed(db: str, days: int = 60, seed_value: int = 7) -> None:
                     at = opened_at[n] + (end - opened_at[n]) / 2
                     rebuilds.append((sid, "", iso(at), f"work-{n}", rng.randint(80_000, 250_000), "1h",
                                      rng.randint(3700, 20_000), "idle"))
-                conn.execute("INSERT OR REPLACE INTO agent_sessions (session_id, agent, first_at, last_at, updated_at) "
-                             "VALUES (?, 'claude-code', ?, ?, ?)", (sid, iso(opened_at[n]), iso(end), iso(end)))
+                # it made the pull request's commit and, once merged, merged it
+                made.append((sid, iso(c - timedelta(minutes=rng.randint(5, 25))), "commit", s, None, f"work-{n}"))
+                if squashed[n]:
+                    made.append((sid, iso(c), "merge", squashed[n], n, f"work-{n}"))
+                conn.execute("INSERT OR REPLACE INTO agent_sessions (session_id, agent, first_at, last_at, updated_at, title) "
+                             "VALUES (?, 'claude-code', ?, ?, ?, ?)", (sid, iso(opened_at[n]), iso(end), iso(end),
+                                                                       TITLES[n % len(TITLES)]))
             conn.executemany("INSERT OR REPLACE INTO agent_usage (session_id, minute, model, branch, requests, input_tokens, "
                              "output_tokens, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens) "
                              "VALUES (?,?,?,?,?,?,?,?,?,?)", usage_rows)
@@ -233,6 +245,7 @@ def seed(db: str, days: int = 60, seed_value: int = 7) -> None:
             conn.executemany("INSERT OR REPLACE INTO agent_task_switches VALUES (?,?,?,?,?,?,?)", switches)
             conn.executemany("INSERT OR REPLACE INTO agent_context_items VALUES (?,?,?,?,?,?,?,?,?,?,?)", items)
             conn.executemany("INSERT OR REPLACE INTO agent_context_adds VALUES (?,?,?,?,?,?,?,?)", entries)
+            conn.executemany("INSERT OR REPLACE INTO agent_commits VALUES (?,?,?,?,?,?)", made)
             # issues: two bugs after releases (incidents), the ones greenlight manages, and some plain ones
             now = utcnow()
             issues = [

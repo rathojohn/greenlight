@@ -196,7 +196,7 @@ def project_files(target: Path, dry_run: bool = False, url: str | None = None, u
     allow = (data.get("permissions") or {}).get("allow") or []
     missing = [f"mcp__{SERVER_NAME}__{t}" for t in READ_TOOLS if f"mcp__{SERVER_NAME}__{t}" not in allow]
     hooks = [("Stop", "greenlight usage record", USAGE_HOOK, 60, usage_hook,
-              "the hook that records token usage after each turn (counts only, never prompts or code)"),
+              "the hook that records token usage and commits after each turn (counts and shas, never code)"),
              ("SubagentStart", "greenlight brief", BRIEF_HOOK, 30, brief_hook,
               "the hook that gives subagents the brief: what fails on main, flaky tests, costly habits")]
     for event, marker, command, timeout, wanted, what in hooks:
