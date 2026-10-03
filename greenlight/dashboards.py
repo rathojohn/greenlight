@@ -6,7 +6,9 @@ greenlight_dashboard_save to keep it); the page edits them too. The model follow
   period before), toplist (ranked bars), table, text (a note), and row (a heading that groups the panels under it);
 - variables: dropdowns at the top whose values bind to every panel's SQL as :name (NULL for All);
 - the time range binds as :start and :end; compare runs a panel again over the period before; deploys and merges
-  are drawn on time series.
+  are drawn on time series;
+- annotations: queries whose rows (time, label) are drawn as a labeled line on every time series, to see what
+  followed a change.
 
 How rows become a panel is in CONVENTIONS, which greenlight_schema hands to an agent.
 """
@@ -29,6 +31,7 @@ WIDTHS = (3, 4, 6, 8, 12)
 RESERVED = {"start", "end", "days", "today"}
 MAX_PANELS = 40
 MAX_VARIABLES = 6
+MAX_ANNOTATIONS = 10
 ROWS = 1000  # per panel
 
 CONVENTIONS = [
@@ -52,6 +55,9 @@ CONVENTIONS = [
     "agent_usage tokens cost in dollars at the model's API list price (NULL for a model without one). cost(the same "
     "five, model) prices them as input tokens of that model: output 5x, a cache read 0.1x (0.05x on Opus 5.5), a "
     "cache write 1.25x, 2x for the hour-long cache.",
+    "Annotations: {name, sql}, rows of (time, label) drawn as a labeled vertical line on every time series, like "
+    "Grafana's: a change to see what followed. One fixed moment is SELECT '2026-10-03T00:15:00+00:00', 'Trimmed "
+    "CLAUDE.md'; a query finds many: SELECT merged_at, title FROM pull_requests WHERE title LIKE '%CLAUDE.md%'.",
     "A test run's commit is runs.git_commit when set, else runs.commit_sha (which may end in +<hash> or @<name>). "
     "agent_sessions.title names a conversation (null when titles are off); runs.session holds its claude.ai or "
     "Claude Code id.",
@@ -171,18 +177,28 @@ def _variable(v: Any, i: int) -> dict[str, Any]:
     return out | {"values": [str(x) for x in values][:200]}
 
 
+def _annotation(a: Any, i: int) -> dict[str, Any]:
+    if not isinstance(a, dict) or not str(a.get("name") or "").strip() or not str(a.get("sql") or "").strip():
+        raise ValueError(f"annotation {i + 1}: send {{name, sql}}, the SQL giving (time, label) rows")
+    return {"name": str(a["name"]).strip()[:60], "sql": str(a["sql"]).strip()[:4000]}
+
+
 def _spec(spec: Any) -> dict[str, Any]:
     if not isinstance(spec, dict):
-        raise ValueError("send {title, panels, variables}")
+        raise ValueError("send {title, panels, variables, annotations}")
     panels, variables = spec.get("panels") or [], spec.get("variables") or []
+    notes = spec.get("annotations") or []
     if not isinstance(panels, list) or len(panels) > MAX_PANELS:
         raise ValueError(f"panels is a list of at most {MAX_PANELS}")
     if not isinstance(variables, list) or len(variables) > MAX_VARIABLES:
         raise ValueError(f"variables is a list of at most {MAX_VARIABLES}")
+    if not isinstance(notes, list) or len(notes) > MAX_ANNOTATIONS:
+        raise ValueError(f"annotations is a list of at most {MAX_ANNOTATIONS}")
     vs = [_variable(v, i) for i, v in enumerate(variables)]
     if len({v["name"] for v in vs}) < len(vs):
         raise ValueError("two variables have the same name")
     return {"description": str(spec.get("description") or "").strip()[:400], "variables": vs,
+            "annotations": [_annotation(a, i) for i, a in enumerate(notes)],
             "panels": [_panel(p, i) for i, p in enumerate(panels)]}
 
 
@@ -210,6 +226,11 @@ def save(conn: sqlite3.Connection, title: str, spec: dict[str, Any], dashboard_i
         except (ValueError, sqlite3.Error) as e:
             failed.append(f"variable {v['name']}: {e}")
     values = {v["name"]: None for v in clean["variables"]}
+    for a in clean["annotations"]:
+        try:
+            marks(q, a, days, values)
+        except (ValueError, sqlite3.Error) as e:
+            failed.append(f"annotation {a['name']}: {e}")
     for i, p in enumerate(clean["panels"]):
         if "sql" not in p:
             continue
@@ -273,9 +294,27 @@ def events(conn: sqlite3.Connection, start: str, end: str) -> list[dict[str, Any
     return sorted(out, key=lambda e: e["at"])
 
 
+def marks(conn: sqlite3.Connection, a: dict[str, Any], days: int, values: dict[str, Any], end: Any = None) -> list[dict]:
+    """An annotation's rows as markers: (time, label), the label defaulting to the annotation's name. A first column
+    that isn't a time is an error, so a wrong query says so when it's saved."""
+    res = run(conn, a["sql"], days, limit=200, values=values, end=end)
+    out = []
+    for r in res["rows"]:
+        try:
+            at = parse_time(r[0]) if r and isinstance(r[0], str) else None
+        except ValueError:
+            at = None
+        if at is None:
+            raise ValueError("the first column is the time (ISO 8601), the second the label")
+        label = str(r[1]) if len(r) > 1 and r[1] not in (None, "") else a["name"]
+        out.append({"at": iso(at), "kind": "annotation", "label": label[:120], "name": a["name"]})
+    return out
+
+
 def render(conn: sqlite3.Connection, dashboard_id: str, days: int = 30, chosen: dict[str, str] | None = None) -> dict[str, Any]:
     """A dashboard with its variables' choices and each panel's rows (or the error its SQL gave, since data can change
-    under a saved query), the period before's rows for panels that compare, and the deploys and merges."""
+    under a saved query), the period before's rows for panels that compare, and the markers: deploys, merges and
+    what its annotations find."""
     d = get(conn, dashboard_id)
     chosen = chosen or {}
     values = {}
@@ -292,6 +331,12 @@ def render(conn: sqlite3.Connection, dashboard_id: str, days: int = 30, chosen: 
         v["value"] = values[v["name"]] = pick
     end = utcnow()
     before = end - timedelta(days=days)
+    found = []
+    for a in d.setdefault("annotations", []):
+        try:
+            found += [m for m in marks(conn, a, days, values, end) if iso(before) <= m["at"] < iso(end)]
+        except (ValueError, sqlite3.Error) as e:
+            a["error"] = str(e)
     for p in d["panels"]:
         if "sql" not in p:
             continue
@@ -301,7 +346,8 @@ def render(conn: sqlite3.Connection, dashboard_id: str, days: int = 30, chosen: 
                 p["previous"] = _shift(run(conn, p["sql"], days, values=values, end=before), days)
         except (ValueError, sqlite3.Error) as e:
             p["error"] = str(e)
-    return d | {"window_days": days, "start": iso(before), "end": iso(end), "events": events(conn, iso(before), iso(end))}
+    return d | {"window_days": days, "start": iso(before), "end": iso(end),
+                "events": sorted(events(conn, iso(before), iso(end)) + found, key=lambda e: e["at"])}
 
 
 def schema() -> dict[str, Any]:

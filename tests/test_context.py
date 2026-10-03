@@ -11,6 +11,8 @@ import pytest
 from greenlight import context, usage
 from greenlight.db import connect
 
+from tests.test_commits import git
+
 T0 = datetime.now(timezone.utc).replace(second=0, microsecond=0) - timedelta(hours=6)
 KB = "x" * 2400  # 1,000 tokens at the default 2.4 chars per token
 
@@ -218,6 +220,47 @@ def test_an_items_re_reads_are_charged_to_the_branch_that_carried_them(tmp_path)
     assert fix["seg_start"] < nxt["seg_start"]
     assert ("git status", "fix") not in by and by[("git status", "next-task")]["rides"] == 1
     assert by[("a.py", "fix")]["rides"] == 3 and ("a.py", "next-task") not in by  # compacted away before the switch
+
+
+def instructions(minutes: float, chars: int, changed: bool = False) -> str:
+    return json.dumps({"type": "attachment", "timestamp": ts(minutes), "gitBranch": "fix",
+                       "attachment": {"type": "instructions", **({"changed": True, "reason": "session_start"} if changed else {}),
+                                      "files": [{"path": "/CLAUDE.md", "type": "Project", "content": "y" * chars}]}})
+
+
+def test_claude_md_is_charged_at_the_size_each_window_started_with(tmp_path):
+    lines = transcript(tmp_path).read_text().splitlines()
+    at = next(i for i, line in enumerate(lines) if "compact_boundary" in line)
+    lines.insert(at + 1, instructions(70.6, 1200))  # read again after the compaction: the trimmed file
+    lines.insert(4, instructions(1.2, 1200, changed=True))  # trimmed on disk mid-window: added next to the old one
+    (tmp_path / "s.jsonl").write_text("\n".join(lines) + "\n")
+    f = context.read_file(tmp_path / "s.jsonl", root="/")
+    assert f["instructions"] == {1: [("CLAUDE.md", 1200)]}  # the session's start isn't in the transcript
+    claude = summed(context.item_rows([f], [("CLAUDE.md", 2400)]))[("CLAUDE.md", "instructions")]
+    # window 0 started at 1,000 tokens (r1 and the rebuild r5 wrote it, r2-r4 read it), the change added 500 (r3
+    # wrote it, r4 read it), and window 1 started at 500 (r6 wrote it, r7-r9 read it)
+    assert (claude["adds"], claude["tokens"], claude["rides"], claude["carried_tokens"]) == (4, 3000, 7, 5000)
+    assert context._loaded([(0, True, {"a": 1}), (2, False, {"a": 3})], 3) == {1: [("a", 1)], 2: [("a", 3)], 3: [("a", 3)]}
+
+
+def test_a_sessions_start_reads_claude_md_from_the_commit_it_was_on(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    (repo / "CLAUDE.md").write_text("x" * 5000)
+    git(repo, "add", "CLAUDE.md")
+    git(repo, "commit", "-q", "-m", "long", when=ts(-60))
+    (repo / "CLAUDE.md").write_text("x" * 1000)
+    git(repo, "commit", "-q", "-am", "trimmed", when=ts(60))
+    (repo / "CLAUDE.md").write_text("x" * 900)  # not committed yet
+    then = lambda at, root=str(repo): dict(usage.instructions_then(root)(at)).get("CLAUDE.md")  # noqa: E731
+    assert then(ts(0)) == 5000 and then(ts(-90)) == 5000  # before the first commit: the oldest one
+    assert then(ts(90)) == 900  # the commit it's on now: from disk, uncommitted edits too
+    assert then(ts(0), str(tmp_path / "not-a-repo")) is None
+    hook = {"transcript_path": str(transcript(tmp_path)), "session_id": "s", "cwd": str(repo)}
+    rows = [i for i in usage.payload_from_hook(hook, {})["items"] if i["label"] == "CLAUDE.md"]
+    # r1 and r5 wrote the long one; r6 started a window after the trim, on the commit it's on now
+    assert sum(r["tokens"] for r in rows) == round(5000 / context.CHARS_PER_TOKEN) * 2 + round(900 / context.CHARS_PER_TOKEN)
 
 
 def test_each_costly_entry_is_kept_with_when_it_came_in(tmp_path):
