@@ -121,6 +121,70 @@ def insights(conn: sqlite3.Connection, days: int = 30) -> list[dict[str, Any]]:
     return out
 
 
+CHANGE_COST = ("u.input_tokens + 5 * u.output_tokens + 0.1 * u.cache_read_tokens + 1.25 * u.cache_write_tokens"
+               " + 0.75 * u.cache_write_1h_tokens")
+
+
+def changes(conn: sqlite3.Connection, days: int = 30) -> list[dict[str, Any]]:
+    """What moved in this period against the one before, for the Overview's insight cards: a few numbers, each with
+    its daily values in both periods and the things that moved it most (the conversations behind the cost, the
+    tests behind the failures, the workflows behind CI going red)."""
+    from datetime import timedelta
+    from .db import day_range, iso, utcnow
+    end = utcnow()
+    mid, start = end - timedelta(days=days), end - timedelta(days=2 * days)
+    cur_days = day_range(days)
+    prev_days = [(end - timedelta(days=2 * days - 1 - i)).date().isoformat() for i in range(days)]
+
+    def series(rows: list, offset: int) -> list[float]:
+        by = {r[0]: r[1] or 0 for r in rows}
+        return [round(by.get(d, 0), 4) for d in (cur_days if offset == 0 else prev_days)]
+
+    def movers(sql: str, panel: str | None, by: str = "delta") -> list[dict[str, Any]]:
+        now = {r[0]: r[1] or 0 for r in conn.execute(sql, (iso(mid), iso(end)))}
+        before = {r[0]: r[1] or 0 for r in conn.execute(sql, (iso(start), iso(mid)))}
+        out = [{"label": k, "value": now.get(k, 0), "previous": before.get(k, 0), "delta": now.get(k, 0) - before.get(k, 0),
+                **({"panel": panel.format(k)} if panel else {})} for k in set(now) | set(before) if k]
+        return sorted(out, key=lambda m: -abs(m[by]))[:5]
+
+    out = []
+    daily = (f"SELECT substr(u.minute, 1, 10), SUM({CHANGE_COST}) FROM agent_usage u WHERE u.minute >= ? AND u.minute < ? "
+             "GROUP BY 1")
+    cost_now, cost_before = conn.execute(daily, (iso(mid), iso(end))).fetchall(), conn.execute(daily, (iso(start), iso(mid))).fetchall()
+    if cost_now or cost_before:
+        names = {r[0]: r[1] for r in conn.execute("SELECT session_id, COALESCE(title, remote_session, substr(session_id, 1, 8)) "
+                                                  "FROM agent_sessions")}
+        top = movers(f"SELECT u.session_id, SUM({CHANGE_COST}) FROM agent_usage u WHERE u.minute >= ? AND u.minute < ? "
+                     "GROUP BY 1", "session:{}", by="value")  # a conversation rarely spans both periods
+        for m in top:
+            m["label"] = names.get(m["label"], m["label"])
+        out.append({"key": "cost", "title": "Claude's cost", "unit": "tokens", "higher_is": "worse",
+                    "value": sum(r[1] or 0 for r in cost_now), "previous": sum(r[1] or 0 for r in cost_before),
+                    "series": series(cost_now, 0), "before": series(cost_before, 1), "movers": top, "mover_kind": "conversation",
+                    "href": "#/usage"})
+    fails = ("SELECT substr(r.started_at, 1, 10), COUNT(*) FROM results x JOIN runs r USING (run_id) WHERE r.started_at >= ? "
+             "AND r.started_at < ? AND x.outcome IN ('fail', 'error') GROUP BY 1")
+    f_now, f_before = conn.execute(fails, (iso(mid), iso(end))).fetchall(), conn.execute(fails, (iso(start), iso(mid))).fetchall()
+    if f_now or f_before:
+        out.append({"key": "failures", "title": "Test failures", "unit": "count", "higher_is": "worse",
+                    "value": sum(r[1] for r in f_now), "previous": sum(r[1] for r in f_before),
+                    "series": series(f_now, 0), "before": series(f_before, 1), "mover_kind": "test", "href": "#/flaky",
+                    "movers": movers("SELECT x.test_id, COUNT(*) FROM results x JOIN runs r USING (run_id) WHERE r.started_at >= ? "
+                                     "AND r.started_at < ? AND x.outcome IN ('fail', 'error') GROUP BY 1", "test:{}")})
+    ci = ("SELECT substr(created_at, 1, 10), AVG(status IN ('failure', 'timed_out', 'startup_failure')) FROM pipelines "
+          "WHERE created_at >= ? AND created_at < ? GROUP BY 1")
+    ci_now, ci_before = conn.execute(ci, (iso(mid), iso(end))).fetchall(), conn.execute(ci, (iso(start), iso(mid))).fetchall()
+    if ci_now or ci_before:
+        rate = lambda a, b: conn.execute("SELECT AVG(status IN ('failure', 'timed_out', 'startup_failure')) FROM pipelines "  # noqa: E731
+                                         "WHERE created_at >= ? AND created_at < ?", (iso(a), iso(b))).fetchone()[0]
+        out.append({"key": "ci", "title": "CI failure rate", "unit": "percent", "higher_is": "worse",
+                    "value": rate(mid, end), "previous": rate(start, mid), "series": series(ci_now, 0), "before": series(ci_before, 1),
+                    "mover_kind": "workflow", "href": "#/pipelines",
+                    "movers": movers("SELECT workflow, SUM(status IN ('failure', 'timed_out', 'startup_failure')) FROM pipelines "
+                                     "WHERE created_at >= ? AND created_at < ? GROUP BY 1", None)})
+    return out
+
+
 def _tk(n: float) -> str:
     return f"{n / 1e9:.1f}B" if n >= 1e9 else f"{n / 1e6:.1f}M" if n >= 1e6 else f"{n / 1e3:.0f}k" if n >= 1e3 else str(int(n))
 
