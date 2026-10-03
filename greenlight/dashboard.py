@@ -199,6 +199,8 @@ def runs_list(conn: sqlite3.Connection, limit: int = 50, window_days: int = 30) 
         r["failing"] = len(t["failures"])
         r["blocking"] = len(t["blocking"])
         r["summary"] = t["summary"]
+    from . import commits
+    commits.for_runs(conn, runs)
     return {"runs": runs}
 
 

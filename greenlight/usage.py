@@ -3,9 +3,10 @@
 Where the numbers come from: every Claude Code session keeps a transcript (JSONL) with the usage of each API
 response: model, input, output, cache reads and writes, a timestamp and the git branch the session was on.
 `greenlight usage record` runs as a Stop hook (after every turn), reads the transcript and its subagents', and
-stores per-minute totals. Only counts, model names, branch names and timestamps leave the machine, never
-prompts or code. The transcript is Claude Code's own file, not a documented interface, so a change to its
-format would need a change here.
+stores per-minute totals. Counts, model names, branch names, timestamps, item labels and commit shas leave the
+machine, and the first line of the session's first prompt as its title ([usage] titles = false keeps it here);
+never code, command output or the rest of the conversation. The transcript is Claude Code's own file, not a
+documented interface, so a change to its format would need a change here.
 
 Attribution:
 - a pull request gets the tokens spent on its head branch until it merged or closed (a branch name reused by
@@ -19,14 +20,17 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
+import subprocess
 from bisect import bisect_left
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from . import context
-from .db import day_range, iso, norm_time, since, utcnow
+from .db import day_range, iso, norm_time, parse_time, since, utcnow
 
 FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cache_write_1h_tokens")
 # What each kind of token costs next to an input token, from Claude's API prices: output 5x, a cache read 0.1x,
@@ -68,6 +72,105 @@ def read_transcript(path: str | Path) -> list[dict[str, Any]]:
     return entries(read_files(path))
 
 
+_COMMAND = re.compile(r"<command-name>\s*([^<]*?)\s*</command-name>(?:.*?<command-args>\s*([^<]*?)\s*</command-args>)?",
+                      re.S)
+# Anything in a title shaped like a key: a known prefix, or a long run mixing letters and digits
+_SECRET = re.compile(r"\b(?:gh[pousr]_|github_pat_|sk-|xox[abprs]-|AKIA)[\w-]{8,}"
+                     r"|(?<![\w+=-])(?=[\w+=-]*\d)(?=[\w+=-]*[A-Za-z])[\w+=-]{32,}")
+TITLE_CHARS = 80
+_MENTION = re.compile(r'@"([^"]+)"|@(\S*[\\/]\S+)')  # a file mentioned by its path
+
+
+def title(text: str) -> str:
+    """A prompt's first line as a session's name: whitespace collapsed, anything shaped like a key redacted, cut at
+    a word near 80 characters."""
+    line = next((s for s in text.splitlines() if s.strip()), "")
+    line = _MENTION.sub(lambda m: "@" + re.split(r"[\\/]", m.group(1) or m.group(2))[-1], line)  # @"a/b/c.zip" -> @c.zip
+    line = _SECRET.sub("[redacted]", " ".join(line.split()))
+    if len(line) > TITLE_CHARS:
+        line = line[:TITLE_CHARS].rsplit(" ", 1)[0].rstrip(",.;:") + "..."
+    return line
+
+
+def first_prompt(path: str | Path) -> str | None:
+    """What the person first asked in a session, as its title. A slash command counts (/review 12); Claude Code's
+    own notes (command output, reminders, a compaction's summary) don't."""
+    try:
+        lines = Path(path).open(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    with lines:
+        for line in lines:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if (not isinstance(e, dict) or e.get("type") != "user" or e.get("isMeta") or e.get("isCompactSummary")
+                    or e.get("isSidechain") or not isinstance(e.get("message"), dict)):
+                continue
+            content = e["message"].get("content")
+            if isinstance(content, list):
+                if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+                    continue
+                content = "\n".join(str(b.get("text") or "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+            text = str(content or "").strip()
+            command = _COMMAND.search(text)
+            if command:
+                text = f"{command.group(1)} {command.group(2) or ''}"
+            elif text.startswith(("<", "Caveat:")):
+                continue
+            name = title(text)
+            if name:
+                return name
+    return None
+
+
+def _made_commit(action: str, subject: str) -> bool:
+    """Whether a reflog entry made a commit: a fast-forward, a checkout or a fetch only moved a ref."""
+    if re.match(r"(commit|cherry-pick|revert|rebase \((pick|reword|squash|fixup)\))", action):
+        return True
+    return action.startswith(("merge", "pull")) and "Merge made" in subject
+
+
+def reflog(root: str) -> list[dict[str, Any]]:
+    """Commits made in a checkout, from the reflogs of every branch and HEAD (so a worktree's count too): sha, when,
+    branch. The reflog keeps each commit's message too, but only the sha and time are used."""
+    from .gitrepo import GitError, run_git
+    try:
+        p = run_git(["-C", root, "reflog", "--all", "-n", "5000", "--date=unix", "--format=%H%x09%gd%x09%gs"],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20)
+    except (GitError, OSError, subprocess.TimeoutExpired):
+        return []
+    out = []
+    for line in p.stdout.splitlines() if p.returncode == 0 else []:
+        parts = line.split("\t", 2)
+        ref = re.match(r"(.+)@\{(\d+)\}$", parts[1]) if len(parts) == 3 else None
+        if not ref or not _made_commit(parts[2].split(":", 1)[0], parts[2]):
+            continue
+        name = ref.group(1)
+        out.append({"sha": parts[0], "at": datetime.fromtimestamp(int(ref.group(2)), timezone.utc),
+                    "branch": "" if name == "HEAD" or name.startswith(("refs/remotes/", "origin/")) else name.removeprefix("refs/heads/")})
+    return out
+
+
+def commits(actions: list[dict[str, Any]], root: str | None) -> list[dict[str, Any]]:
+    """The commits a session made and the pull requests it merged. A commit is whatever the reflog shows made
+    during one of the session's git commands (a second either side for the clocks' rounding), on the branch the
+    reflog names, else the one the session was on."""
+    out = [{k: a.get(k) for k in ("kind", "at", "sha", "pr", "branch")} for a in actions if a["kind"] == "merge"]
+    windows = [(parse_time(a["from"]) - timedelta(seconds=2), parse_time(a["to"]) + timedelta(seconds=2), a["branch"])
+               for a in actions if a["kind"] == "commit"]
+    if not windows or not root:
+        return out
+    seen = set()
+    for c in sorted(reflog(root), key=lambda c: (c["at"], c["branch"] == "")):
+        w = next((w for w in windows if w[0] <= c["at"] <= w[1]), None)
+        if w and c["sha"] not in seen:
+            seen.add(c["sha"])
+            out.append({"kind": "commit", "at": iso(c["at"]), "sha": c["sha"], "pr": None, "branch": c["branch"] or w[2]})
+    return out
+
+
 def weighted(row: dict[str, Any]) -> int:
     """Tokens priced as input tokens: what the row cost, in the unit every model shares."""
     return round(sum(row.get(k, 0) * w for k, w in WEIGHTS.items()))
@@ -92,7 +195,7 @@ def payload_from_hook(hook: dict[str, Any], env: dict[str, str] | None = None) -
     if not transcript:
         return None
     repo = test = None
-    labels = True
+    labels = titles = True
     root = hook.get("cwd")
     if root:
         from . import config
@@ -100,6 +203,7 @@ def payload_from_hook(hook: dict[str, Any], env: dict[str, str] | None = None) -
         try:
             cfg = config.load(start=Path(root))
             test, labels = cfg.get("usage", "test_commands"), cfg.get("usage", "item_labels") is not False
+            titles = cfg.get("usage", "titles") is not False
         except (ValueError, OSError):
             pass
     files = read_files(transcript, test, root)
@@ -107,10 +211,11 @@ def payload_from_hook(hook: dict[str, Any], env: dict[str, str] | None = None) -
     session_id = hook.get("session_id") or me["session_id"] or Path(transcript).stem
     remote = me["remote_session"] if me["session_id"] in (None, session_id) else None  # only for this session
     return {"session": {"session_id": session_id, "remote_session": remote, "repo": repo,
-                        "agent": "claude-code"},
+                        "agent": "claude-code", "title": first_prompt(transcript) if titles else None},
             "rows": minute_rows(entries(files)), "context": context.rows(files),
             "rebuilds": [r | {"agent": f["agent"]} for f in files for r in f["rebuilds"]],
             "switches": [r | {"agent": f["agent"]} for f in files for r in f["switches"]],
+            "commits": commits([a for f in files for a in f["actions"]], root),
             **({"items": context.item_rows(files, context.instruction_files(root)), "adds": context.add_rows(files)}
                if labels else {})}
 
@@ -130,12 +235,12 @@ def store(conn: sqlite3.Connection, payload: dict[str, Any]) -> dict[str, Any]:
     report is the whole story). A payload without context or rebuilds (an older client) leaves those alone."""
     s = payload.get("session") if isinstance(payload, dict) else None
     rows = payload.get("rows") if isinstance(payload, dict) else None
-    extra = ([payload.get(k) for k in ("context", "rebuilds", "switches", "items", "adds")] if isinstance(payload, dict)
-             else [None] * 5)
+    extra = ([payload.get(k) for k in ("context", "rebuilds", "switches", "items", "adds", "commits")]
+             if isinstance(payload, dict) else [None] * 6)
     if (not isinstance(s, dict) or not s.get("session_id") or not isinstance(rows, list) or len(rows) > MAX_ROWS
             or any(not isinstance(x, (list, type(None))) or len(x or ()) > MAX_ROWS for x in extra)):
         raise ValueError("send {\"session\": {\"session_id\": ...}, \"rows\": [...]}")
-    ctx, rebuilds, switches, items, adds = extra
+    ctx, rebuilds, switches, items, adds, made = extra
     sid = s["session_id"]
     clean = [(sid, _minute(r), str(r.get("model") or "unknown"), str(r.get("branch") or ""),
               int(r.get("requests") or 0), *(int(r.get(f) or 0) for f in FIELDS)) for r in rows]
@@ -154,6 +259,10 @@ def store(conn: sqlite3.Connection, payload: dict[str, Any]) -> dict[str, Any]:
     add_rows = [(sid, str(r.get("label") or "")[:300], str(r.get("kind") or "tool")[:32], _minute(r) if r.get("at") else "",
                  str(r.get("branch") or ""), int(r.get("tokens") or 0), int(r.get("rides") or 0),
                  int(r.get("carried_tokens") or 0)) for r in adds or () if r.get("label") and r.get("at")]
+    commit_rows = [(sid, _minute(r), r["kind"], str(r.get("sha") or "").lower(),
+                    int(r["pr"]) if str(r.get("pr") or "").isdigit() else None, str(r.get("branch") or ""))
+                   for r in made or () if isinstance(r, dict) and r.get("kind") in ("commit", "merge")
+                   and re.fullmatch(r"[0-9a-fA-F]{7,40}|", str(r.get("sha") or ""))]
     first = min((c[1] for c in clean), default=None)
     last = max((c[1] for c in clean), default=None)
     with conn:
@@ -181,14 +290,20 @@ def store(conn: sqlite3.Connection, payload: dict[str, Any]) -> dict[str, Any]:
             conn.execute("DELETE FROM agent_task_switches WHERE session_id = ?", (sid,))
             conn.executemany("INSERT OR REPLACE INTO agent_task_switches (session_id, agent, at, from_branch, to_branch, "
                              "context_tokens, carried_tokens) VALUES (?,?,?,?,?,?,?)", switch_rows)
+        if made is not None:
+            conn.execute("DELETE FROM agent_commits WHERE session_id = ?", (sid,))
+            conn.executemany("INSERT OR REPLACE INTO agent_commits (session_id, at, kind, sha, pr, branch) "
+                             "VALUES (?,?,?,?,?,?)", commit_rows)
+        # an older client sends no title: keep what's there. A newer one sends null when titles are off: clear it
+        name = (title(s["title"]) or None) if isinstance(s.get("title"), str) else None
         conn.execute(
-            """INSERT INTO agent_sessions (session_id, remote_session, repo, agent, first_at, last_at, updated_at)
-               VALUES (?,?,?,?,?,?,?)
+            """INSERT INTO agent_sessions (session_id, remote_session, repo, agent, first_at, last_at, updated_at, title)
+               VALUES (?,?,?,?,?,?,?,?)
                ON CONFLICT(session_id) DO UPDATE SET remote_session = COALESCE(excluded.remote_session, remote_session),
                  repo = COALESCE(excluded.repo, repo), first_at = excluded.first_at, last_at = excluded.last_at,
-                 updated_at = excluded.updated_at""",
+                 updated_at = excluded.updated_at, title = CASE WHEN ? THEN excluded.title ELSE title END""",
             (sid, s.get("remote_session"), s.get("repo"), s.get("agent") or "claude-code", first, last,
-             iso(utcnow())))
+             iso(utcnow()), name, "title" in s))
     return {"session_id": sid, "minutes": len(clean)}
 
 
@@ -270,8 +385,8 @@ def _item_totals(rows: list[dict[str, Any]], ww: float) -> list[dict[str, Any]]:
 
 def _meta(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
     out = {}
-    for r in conn.execute("SELECT session_id, remote_session, repo FROM agent_sessions"):
-        out[r[0]] = {"session_id": r[0], "remote_session": r[1], "repo": r[2],
+    for r in conn.execute("SELECT session_id, remote_session, repo, title FROM agent_sessions"):
+        out[r[0]] = {"session_id": r[0], "remote_session": r[1], "repo": r[2], "title": r[3],
                      "url": f"https://claude.ai/code/{r[1]}" if r[1] else None}
     return out
 
@@ -279,6 +394,7 @@ def _meta(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
 def detail(conn: sqlite3.Connection, days: int, kind: str, key: str) -> dict[str, Any]:
     """One thing on the Token usage page, for its side panel: a session, a pull request, a test, a context
     category, or one kind of context that could have been dropped (switches, idle, repeats)."""
+    from . import commits
     start = since(days)
     meta = _meta(conn)
     if kind == "session":
@@ -297,7 +413,8 @@ def detail(conn: sqlite3.Connection, days: int, kind: str, key: str) -> dict[str
                     "WHERE session_id = ? ORDER BY at", (sid,))],
                 "switches": [dict(r) for r in conn.execute(
                     "SELECT agent, at, from_branch, to_branch, context_tokens, carried_tokens FROM agent_task_switches "
-                    "WHERE session_id = ? ORDER BY at", (sid,))]}
+                    "WHERE session_id = ? ORDER BY at", (sid,))],
+                "commits": commits.for_session(conn, sid)}
     if kind == "pr":
         pr = conn.execute("SELECT head FROM pull_requests WHERE number = ?", (int(key),)).fetchone()
         if not pr or not pr[0]:
@@ -318,7 +435,7 @@ def detail(conn: sqlite3.Connection, days: int, kind: str, key: str) -> dict[str
         return {"kind": kind, "pr": {k: p[k] for k in ("number", "title", "state", "head", "created_at", "merged_at", "url")}
                 | {"sessions": len(per)} | _sum(rows),
                 "context": {"categories": _categories(ctx, _write_weight(conn))}, "sessions": sessions,
-                "items": _item_totals(item_rows, _write_weight(conn))[:30]}
+                "items": _item_totals(item_rows, _write_weight(conn))[:30]} | commits.for_pr(conn, int(key), days)
     if kind == "test":
         return {"kind": kind, "test": summary(conn, days, test_id=key)["test"], "items": _test_items(conn, key, start)}
     if kind in ("item", "group"):
@@ -557,7 +674,7 @@ def summary(conn: sqlite3.Connection, days: int = 30, pr: int | None = None,
     for sid, rs in per_session.items():
         m = meta.get(sid, {})
         remote = m.get("remote_session")
-        sessions.append({"session_id": sid, "remote_session": remote, "repo": m.get("repo"),
+        sessions.append({"session_id": sid, "remote_session": remote, "repo": m.get("repo"), "title": m.get("title"),
                          "url": f"https://claude.ai/code/{remote}" if remote else None,
                          "first_at": rs[0]["minute"], "last_at": rs[-1]["minute"],
                          "branches": sorted({r["branch"] for r in rs if r["branch"]}),

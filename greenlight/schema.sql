@@ -264,6 +264,19 @@ CREATE TABLE IF NOT EXISTS agent_task_switches (
     PRIMARY KEY (session_id, agent, at)
 );
 
+-- Commits a session made and pull requests it merged: a git commit matched to the checkout's reflog by time, so
+-- the sha is exact; a merge from the GitHub MCP tool's result, or `gh pr merge` (then only the number is known)
+CREATE TABLE IF NOT EXISTS agent_commits (
+    session_id      TEXT NOT NULL,
+    at              TEXT NOT NULL,             -- when the commit was made, or the merge returned
+    kind            TEXT NOT NULL,             -- commit, merge
+    sha             TEXT NOT NULL DEFAULT '',  -- '' for a merge known only by its pull request
+    pr              INTEGER,
+    branch          TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (session_id, kind, at, sha)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_commits_sha ON agent_commits(sha);
+
 CREATE TABLE IF NOT EXISTS agent_sessions (
     session_id      TEXT PRIMARY KEY,
     remote_session  TEXT,
@@ -271,5 +284,6 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
     agent           TEXT NOT NULL DEFAULT 'claude-code',
     first_at        TEXT,
     last_at         TEXT,
-    updated_at      TEXT NOT NULL
+    updated_at      TEXT NOT NULL,
+    title           TEXT                       -- the first prompt's first line, unless [usage] titles = false
 );
