@@ -28,7 +28,7 @@ DISPLAYS = ("bars", "line", "area")
 UNITS = ("auto", "count", "tokens", "usd", "ms", "percent")
 CALCS = ("total", "last", "mean", "max")
 WIDTHS = (3, 4, 6, 8, 12)
-RESERVED = {"start", "end", "days", "today"}
+RESERVED = {"start", "end", "days", "hours", "today"}
 MAX_PANELS = 40
 MAX_VARIABLES = 6
 MAX_ANNOTATIONS = 10
@@ -36,10 +36,11 @@ ROWS = 1000  # per panel
 
 CONVENTIONS = [
     "One SELECT (or WITH ... SELECT) per panel, run read-only, stopped after 5 seconds, at most 1,000 rows.",
-    "Time range: :start and :end (ISO 8601 UTC), :days, :today (YYYY-MM-DD). Filter with x >= :start AND x < :end: "
-    "comparing with the period before runs the same SQL with both moved back.",
-    "bucket(time) groups a timestamp by hour when the range is two days or less, else by day. Times are ISO 8601 UTC "
-    "text (2026-10-02T14:03:00+00:00), so substr(x, 1, 10) is the day.",
+    "Time range: :start and :end (ISO 8601 UTC), its length as :days and :hours, :today (YYYY-MM-DD). Filter with "
+    "x >= :start AND x < :end: comparing with the period before runs the same SQL with both moved back.",
+    "bucket(time) groups a timestamp by the minute for the last hour, 5 minutes up to 6 hours, 10 minutes up to 12, "
+    "the hour up to two days, else the day. Times are ISO 8601 UTC text (2026-10-02T14:03:00+00:00), so "
+    "substr(x, 1, 10) is the day.",
     "timeseries: the first column is the time (from bucket()), the rest are series; or three columns (time, group, "
     "value), one series per group, the six biggest and the rest as Other. display is bars (stacked), line or area. "
     "The legend shows each series' total (the mean for ms and percent); set calc to mean for a ratio like tokens "
@@ -82,24 +83,47 @@ EXAMPLES = [
 ]
 
 
-def params(days: int, end: Any = None) -> dict[str, Any]:
+BUCKETS = ((1, 1), (6, 5), (12, 10), (48, 60))  # (a range up to this many hours, minutes per bucket); longer: a day
+
+
+def hours_of(days: float) -> int:
+    """A range is whole hours: the last hour is days=1/24."""
+    return max(1, round(days * 24))
+
+
+def params(days: float, end: Any = None) -> dict[str, Any]:
     end = end or utcnow()
-    return {"start": iso(end - timedelta(days=days)), "end": iso(end), "days": days, "today": end.date().isoformat()}
+    hours = hours_of(days)
+    return {"start": iso(end - timedelta(hours=hours)), "end": iso(end), "hours": hours, "today": end.date().isoformat(),
+            "days": hours // 24 if hours % 24 == 0 else round(hours / 24, 4)}
 
 
-def bucket_fn(days: int):
-    """bucket(time): the hour for a range of two days or less, else the day."""
+def bucket_minutes(days: float) -> int:
+    hours = hours_of(days)
+    return next((m for h, m in BUCKETS if hours <= h), 1440)
+
+
+def bucket_fn(days: float):
+    """bucket(time): the minute for the last hour, 5 minutes up to 6 hours, 10 up to 12, the hour up to two days,
+    else the day. A sub-day bucket reads YYYY-MM-DDTHH:MM."""
+    size = bucket_minutes(days)
+
     def bucket(ts: Any) -> str | None:
         t = str(ts or "")
         if len(t) < 10:
             return None
-        return f"{t[:10]}T{t[11:13] or '00'}:00" if days <= 2 and len(t) >= 13 else t[:10]
+        if size >= 1440 or len(t) < 13:
+            return t[:10]
+        minute = int(t[14:16]) if t[14:16].isdigit() else 0
+        return f"{t[:10]}T{t[11:13]}:{minute - minute % size:02d}"
     return bucket
 
 
-def run(conn: sqlite3.Connection, sql: str, days: int = 30, limit: int = ROWS, values: dict[str, Any] | None = None,
+def run(conn: sqlite3.Connection, sql: str, days: float = 30, limit: int = ROWS, values: dict[str, Any] | None = None,
         end: Any = None) -> dict[str, Any]:
-    return analysis.run_query(conn, sql, limit, params(days, end) | (values or {}), functions={"bucket": bucket_fn(days)})
+    """A query over the range: days, or a fraction of a day for hours. The result says how bucket() grouped time."""
+    out = analysis.run_query(conn, sql, limit, params(days, end) | (values or {}), functions={"bucket": bucket_fn(days)})
+    return out | {"bucket_minutes": bucket_minutes(days)}
 
 
 def slug(title: str) -> str:
@@ -172,7 +196,7 @@ def _variable(v: Any, i: int) -> dict[str, Any]:
         raise ValueError(f"variable {i + 1}: send {{name, label, sql}} or {{name, label, values}}")
     name = str(v.get("name") or "")
     if not re.fullmatch(r"[a-z][a-z0-9_]{0,30}", name) or name in RESERVED:
-        raise ValueError(f"variable {i + 1}: name it in lower case letters, digits and _, not start, end, days or today")
+        raise ValueError(f"variable {i + 1}: name it in lower case letters, digits and _, not start, end, days, hours or today")
     out = {"name": name, "label": str(v.get("label") or name.replace("_", " ").capitalize())[:40],
            "all": v.get("all") is not False, "default": None if v.get("default") in (None, "") else str(v["default"])}
     if v.get("sql"):
@@ -208,7 +232,7 @@ def _spec(spec: Any) -> dict[str, Any]:
             "panels": [_panel(p, i) for i, p in enumerate(panels)]}
 
 
-def options(conn: sqlite3.Connection, v: dict[str, Any], days: int) -> list[list[str]]:
+def options(conn: sqlite3.Connection, v: dict[str, Any], days: float) -> list[list[str]]:
     """A variable's choices: [value, label]."""
     if "values" in v:
         return [[x, x] for x in v["values"]]
@@ -217,7 +241,7 @@ def options(conn: sqlite3.Connection, v: dict[str, Any], days: int) -> list[list
 
 
 def save(conn: sqlite3.Connection, title: str, spec: dict[str, Any], dashboard_id: str | None = None,
-         check: sqlite3.Connection | None = None, days: int = 30) -> dict[str, Any]:
+         check: sqlite3.Connection | None = None, days: float = 30) -> dict[str, Any]:
     """Create or replace a dashboard. Each variable's and panel's SQL runs first (with every variable on All), and
     nothing is saved while one fails, so a saved dashboard always draws."""
     title = str(title or "").strip()[:120]
@@ -278,14 +302,16 @@ def get(conn: sqlite3.Connection, dashboard_id: str) -> dict[str, Any]:
     return {"id": r[0], "title": r[1], "updated_at": r[3], **json.loads(r[2] or "{}")}
 
 
-def _shift(result: dict[str, Any], days: int) -> dict[str, Any]:
+def _shift(result: dict[str, Any], days: float) -> dict[str, Any]:
     """The period before's rows with their times moved forward a period, so they line up with this one's."""
+    period = timedelta(hours=hours_of(days))
+
     def move(x: Any) -> Any:
         t = parse_time(x) if isinstance(x, str) and re.match(r"\d{4}-\d{2}-\d{2}", x) else None
         if t is None:
             return x
-        moved = (t + timedelta(days=days)).isoformat()
-        return moved[:len(x)] if len(x) <= 16 else iso(t + timedelta(days=days))
+        moved = (t + period).isoformat()
+        return moved[:len(x)] if len(x) <= 16 else iso(t + period)
     return result | {"rows": [[move(r[0]), *r[1:]] for r in result["rows"]]}
 
 
@@ -300,7 +326,7 @@ def events(conn: sqlite3.Connection, start: str, end: str) -> list[dict[str, Any
     return sorted(out, key=lambda e: e["at"])
 
 
-def marks(conn: sqlite3.Connection, a: dict[str, Any], days: int, values: dict[str, Any], end: Any = None) -> list[dict]:
+def marks(conn: sqlite3.Connection, a: dict[str, Any], days: float, values: dict[str, Any], end: Any = None) -> list[dict]:
     """An annotation's rows as markers: (time, label), the label defaulting to the annotation's name. A first column
     that isn't a time is an error, so a wrong query says so when it's saved."""
     res = run(conn, a["sql"], days, limit=200, values=values, end=end)
@@ -317,7 +343,7 @@ def marks(conn: sqlite3.Connection, a: dict[str, Any], days: int, values: dict[s
     return out
 
 
-def render(conn: sqlite3.Connection, dashboard_id: str, days: int = 30, chosen: dict[str, str] | None = None) -> dict[str, Any]:
+def render(conn: sqlite3.Connection, dashboard_id: str, days: float = 30, chosen: dict[str, str] | None = None) -> dict[str, Any]:
     """A dashboard with its variables' choices and each panel's rows (or the error its SQL gave, since data can change
     under a saved query), the period before's rows for panels that compare, and the markers: deploys, merges and
     what its annotations find."""
@@ -336,7 +362,7 @@ def render(conn: sqlite3.Connection, dashboard_id: str, days: int = 30, chosen: 
             pick = v["options"][0][0] if v["options"] else None
         v["value"] = values[v["name"]] = pick
     end = utcnow()
-    before = end - timedelta(days=days)
+    before = end - timedelta(hours=hours_of(days))
     found = []
     for a in d.setdefault("annotations", []):
         try:
@@ -352,8 +378,8 @@ def render(conn: sqlite3.Connection, dashboard_id: str, days: int = 30, chosen: 
                 p["previous"] = _shift(run(conn, p["sql"], days, values=values, end=before), days)
         except (ValueError, sqlite3.Error) as e:
             p["error"] = str(e)
-    return d | {"window_days": days, "start": iso(before), "end": iso(end),
-                "events": sorted(events(conn, iso(before), iso(end)) + found, key=lambda e: e["at"])}
+    return d | {"window_days": params(days, end)["days"], "window_hours": hours_of(days), "start": iso(before),
+                "end": iso(end), "events": sorted(events(conn, iso(before), iso(end)) + found, key=lambda e: e["at"])}
 
 
 def schema() -> dict[str, Any]:

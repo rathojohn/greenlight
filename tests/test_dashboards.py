@@ -54,10 +54,32 @@ def test_queries_only_read_and_stop_in_time(db):
         assert analysis.run_query(conn, "SELECT cost(10, 2, 100, 4, 4)")["rows"] == [[38.0]]  # 10 + 10 + 10 + 5 + 3
 
 
-def test_bucket_is_hourly_for_two_days_or_less():
-    assert dashboards.bucket_fn(1)("2026-10-02T14:03:09+00:00") == "2026-10-02T14:00"
-    assert dashboards.bucket_fn(7)("2026-10-02T14:03:09+00:00") == "2026-10-02"
+def test_bucket_gets_finer_as_the_range_gets_shorter():
+    t, late = "2026-10-02T14:03:09+00:00", "2026-10-02T14:59:30+00:00"
+    assert dashboards.bucket_fn(1 / 24)(t) == "2026-10-02T14:03"  # the last hour: by the minute
+    assert dashboards.bucket_fn(6 / 24)(late) == "2026-10-02T14:55" and dashboards.bucket_fn(12 / 24)(late) == "2026-10-02T14:50"
+    assert dashboards.bucket_fn(1)(t) == "2026-10-02T14:00" and dashboards.bucket_fn(2)(late) == "2026-10-02T14:00"
+    assert dashboards.bucket_fn(7)(t) == "2026-10-02"
     assert dashboards.bucket_fn(7)(None) is None
+    assert dashboards.params(6 / 24)["hours"] == 6 and dashboards.params(6 / 24)["days"] == 0.25
+    assert dashboards.params(7)["days"] == 7 and dashboards.params(7)["hours"] == 168
+
+
+def test_the_last_hour_goes_by_the_minute(db):
+    with closing(connect(db)) as conn:
+        for minutes, sha in ((20, "h1"), (80, "h2")):
+            record_run(conn, [Result("t::login", None, "fail", 10)], commit_sha=sha, branch="main",
+                       started_at=NOW - timedelta(minutes=minutes), source="ci")
+        dashboards.save(conn, "Login", SPEC)
+        d = dashboards.render(conn, "login", 1 / 24)
+        ts, minute = d["panels"][2], (NOW - timedelta(minutes=20)).isoformat()[:16]
+        assert d["window_hours"] == 1 and ts["result"]["bucket_minutes"] == 1
+        assert [r[0] for r in ts["result"]["rows"]] == [minute]
+        assert [r[0] for r in ts["previous"]["rows"]] == [minute]  # 80 minutes ago, moved up an hour
+        q = web.GET_ROUTES["/api/sql"](conn, {"q": FAILS, "hours": "6", "var-branch": ""})
+        assert q["bucket_minutes"] == 5 and sum(r[1] for r in q["rows"]) == 2
+        assert web.GET_ROUTES["/api/sql"](conn, {"q": FAILS, "days": "7", "var-branch": ""})["bucket_minutes"] == 1440
+        assert web.GET_ROUTES["/api/dashboard"](conn, {"id": "login", "hours": "12"})["window_hours"] == 12
 
 
 def test_a_dashboard_saves_only_when_every_query_runs(db):
