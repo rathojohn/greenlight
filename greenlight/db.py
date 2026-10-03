@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 SCHEMA = Path(__file__).with_name("schema.sql").read_text(encoding="utf-8")
-SCHEMA_VERSION = 6  # 4: agent usage. 5: context, rebuilds, task switches, 1h writes. 6: agent_context_items
+SCHEMA_VERSION = 7  # 4: agent usage. 5: context, rebuilds, switches, 1h writes. 6: items. 7: items by branch run, adds
 
 # Columns added after their table first shipped: (table, column, declaration). schema.sql has them
 # for new databases; these bring older ones up to date.
@@ -37,7 +37,16 @@ def default_db_path() -> str:
     return os.environ.get("GREENLIGHT_DB") or _config_db or str(home / "greenlight.db")
 
 
+# Tables whose key changed: what they hold is derived (a session's hook sends it whole again), so an old one is
+# dropped and made again rather than copied. (table, a column only the new shape has)
+REBUILT = [("agent_context_items", "seg_start")]
+
+
 def migrate(conn: sqlite3.Connection) -> None:
+    for table, column in REBUILT:
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if have and column not in have:
+            conn.execute(f"DROP TABLE {table}")
     conn.executescript(SCHEMA)
     if conn.execute("PRAGMA user_version").fetchone()[0] >= SCHEMA_VERSION:
         return

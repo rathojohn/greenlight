@@ -1483,12 +1483,25 @@ PANELS.run = async id => {
       + (t.passed_on_retry.length ? section("Passed only on retry", `<ul class="ids">${t.passed_on_retry.map(x => `<li>${panelLink(`test:${x}`, esc(x))}</li>`).join("")}</ul>`) : ""),
   };
 };
+/* items inside a PR's or a test's panel: what, times added, requests that carried it, cost */
+function itemList(id, rows, ridesHead, ridesTip) {
+  return boxed(table(id, [
+    { h: "What", cell: r => `<span class="mono">${esc(r.label)}</span><div class="sub">${esc(kindName(r.kind))}</div>`, sort: r => r.label, dir: 1, cls: "wrap" },
+    { h: "Added", cell: r => r.adds, sort: r => r.adds, cls: "num hide-sm" },
+    { h: ridesHead, cell: r => tk(r.rides), sort: r => r.rides, cls: "num", tip: ridesTip },
+    { h: "Cost", cell: r => tk(r.weighted), sort: r => r.weighted, cls: "num", tip: COST_TIP },
+  ], rows, { sort: 3, limit: 8, panel: r => `item:${r.kind}:${r.label}`, empty: "Nothing recorded." }));
+}
+
 PANELS.pr = async id => {
   const d = await api("/api/usage/detail", { days: DAYS, kind: "pr", key: id }), p = d.pr;
   const ctxTotal = d.context.categories.reduce((a, c) => a + c.weighted, 0);
   return {
     title: `#${p.number} ${esc(p.title || "")}`, sub: `${esc(p.head)} ${prState(p.state)}`, actions: ext(p.url, "GitHub"),
     body: tokenFacts(p) + section("Where its context went", ctxTable("d-prctx", d.context.categories, ctxTotal))
+      + ((d.items || []).length ? section("What rode along during it", itemList("d-pritems", d.items, "Carried",
+          "Requests on this pull request's branch that read it again. Added 0 means it came in earlier, on other work, and rode along into this one."),
+          "Each thing in context while the work was on this branch, charged for the requests here that carried it") : "")
       + section(`Sessions (${d.sessions.length})`, boxed(table("d-prsess", sessionCols, d.sessions, { sort: 2, limit: 8, panel: x => `session:${x.session_id}` }))),
   };
 };
@@ -1531,7 +1544,10 @@ PANELS.utest = async id => {
     title: `<span class="mono">${esc(name)}</span>`, sub: `<span class="mono">${esc(cls)}</span>`,
     actions: goto(testHref(id), "Test history"),
     body: facts([["Cost while red", tk(t.weighted), COST_TIP], ["Times red", `${t.times_red}`], ["Still red", `${t.still_red}`, "Failed in a session, with no later run in that session passing it"], ["Sessions", `${t.sessions}`]])
-      + `<p class="advice">Tokens a session spent from a run that failed this test to the next run in that session that passed it. Two tests red at once both count the same tokens.</p>`,
+      + `<p class="advice">Tokens a session spent from a run that failed this test to the next run in that session that passed it. Two tests red at once both count the same tokens.</p>`
+      + ((d.items || []).length ? section("What came in while it was red", itemList("d-titems", d.items, "Carried after",
+          "Requests that read it again after it came in, until the session compacted")
+          + `<p class="dim" style="margin:6px 0 0">Came in while the test was red: a time window, not proof it was for this test.</p>`) : ""),
   };
 };
 PANELS.cat = async id => {
@@ -1558,6 +1574,12 @@ async function itemPanel(kind, id) {
                  ["Rode along", `${tk(r.avg_rides)} <small class="dim">requests</small>`, `On average each time it entered; ${tk(r.max_rides)} at most`],
                  ["Times added", tk(r.adds), `In ${plural(r.sessions, "session")}`]])
       + `<p class="advice">${esc(KIND_ADVICE[k] || "")}</p>`
+      + ((d.prs || []).length ? section("By pull request", boxed(table("d-itemprs", [
+          { h: "#", cell: p => p.number, sort: p => p.number, cls: "num" },
+          { h: "Pull request", cell: p => esc(p.title || ""), sort: p => p.title, dir: 1, cls: "wrap" },
+          { h: "Carried", cell: p => tk(p.rides), sort: p => p.rides, cls: "num", tip: "Requests on that pull request's branch that read it again" },
+          { h: "Re-read", cell: p => tk(p.carried_tokens), sort: p => p.carried_tokens, cls: "num" },
+        ], d.prs, { sort: 3, limit: 6, panel: p => `pr:${p.number}` }))) : "")
       + section(kind === "group" ? "Items" : "Sessions", boxed(table("d-item", [
           kind === "group" ? { h: "Item", cell: x => `<span class="mono">${esc(x.label)}</span>`, sort: x => x.label, dir: 1, cls: "wrap" }
                            : { h: "Session", cell: x => esc(sessionName(x)), sort: x => sessionName(x), dir: 1, cls: "mono" },

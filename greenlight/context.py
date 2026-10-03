@@ -142,14 +142,21 @@ def _group(rel: str) -> str:
     return f"{head + '/' if head else ''}*{'.' + ext if ext else ''}"
 
 
-def identity(tool: str, args: dict[str, Any], images: int, root: str | None) -> tuple[str, str, str] | None:
-    """(label, kind, group) for a tool result, or None for one too small to follow (an edit's confirmation)."""
+# A command's group is what it does, so npm run build and npm run test land apart
+COMMAND_GROUPS = {"test": "test runs", "build": "builds", "git": "git and gh", "read": "file reads in a shell",
+                  "search": "searches in a shell", "web": "web requests in a shell", "shell": "other commands"}
+
+
+def identity(tool: str, args: dict[str, Any], images: int, root: str | None,
+             cat: str | None = None) -> tuple[str, str, str] | None:
+    """(label, kind, group) for a tool result, or None for one too small to follow (an edit's confirmation).
+    cat: the result's category, which groups a command by what it does."""
     if tool == "Read" and args.get("file_path"):
         rel = _rel(args["file_path"], root)
         return rel, "image" if images else "file", _group(rel)
     if tool == "Bash":
         label = command_label(str(args.get("command") or ""))
-        return label, "command", label.split(" ")[0]
+        return label, "command", COMMAND_GROUPS.get(cat or "shell", "other commands")
     if tool in EDITS or tool in ("Skill", "TodoWrite", "TaskCreate", "TaskUpdate"):
         return None
     if tool == "WebFetch":
@@ -285,7 +292,7 @@ def read_file(path: Path, agent: str = "", test: str | None = None, root: str | 
                     chars, images = _text_size(block.get("content"))
                     cat = "image" if images else category(name, args, test_re, build_re)
                     item = {"category": cat, "chars": chars, "images": images, "at": e.get("timestamp"),
-                            "branch": e.get("gitBranch") or "", "repeat": False, "who": identity(name, args, images, root)}
+                            "branch": e.get("gitBranch") or "", "repeat": False, "who": identity(name, args, images, root, cat)}
                     target = str(args.get("file_path") or args.get("notebook_path") or "")
                     if name == "Read" and target:
                         span = (args.get("offset"), args.get("limit"), args.get("pages"))
@@ -452,46 +459,93 @@ def rows(files: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
 ITEM_FIELDS = ("adds", "tokens", "rides", "max_rides", "carried_tokens")
 
 
-def item_rows(files: list[dict[str, Any]], instructions: Iterable[tuple[str, int]] = (), limit: int = 300) -> list[dict]:
-    """Per (label, kind): how many times it entered the context (adds), its tokens over all of them, the requests
-    that read it from the cache after (rides, and the most for one add), and the cache reads that cost. The
-    largest `limit` by cost, CLAUDE.md always."""
-    out: dict[tuple, dict[str, Any]] = {}
+def _segments(requests: list[dict[str, Any]]) -> list[tuple[int, int, str, str]]:
+    """Runs of consecutive requests on one branch: (first index, end index, branch, minute it started). A pull
+    request owns the runs on its branch, so an item's re-reads split by run split exactly by pull request."""
+    out: list[list] = []
+    for i, r in enumerate(requests):
+        if out and r["branch"] == out[-1][2]:
+            out[-1][1] = i + 1
+        else:
+            out.append([i, i + 1, r["branch"], r["at"][:16] + ":00+00:00"])
+    return [tuple(x) for x in out]
 
-    def add(label: str, kind: str, group: str, at: str | None, branch: str, adds: int, tokens: int, rides: int,
-            longest: int, carried_tokens: int) -> None:
-        r = out.setdefault((label, kind), {"label": label, "kind": kind, "group": group, "first_at": at, "branch": branch,
-                                           **{f: 0 for f in ITEM_FIELDS}})
+
+def item_rows(files: list[dict[str, Any]], instructions: Iterable[tuple[str, int]] = (), limit: int = 300) -> list[dict]:
+    """Per item (label, kind) and branch run: times it entered the context there (adds, tokens), the requests in
+    that run that read it from the cache (rides), and what those reads cost. A screenshot read on one branch and
+    carried on into the next task is charged to each run for the requests that carried it there. The `limit`
+    costliest items, and CLAUDE.md always, which every request carries: each run gets its requests' reads, and
+    the requests that wrote it (a window's first, a rebuild, a subagent's first) as adds."""
+    out: dict[tuple, dict[str, Any]] = {}
+    totals: dict[tuple, int] = defaultdict(int)
+
+    def add(label: str, kind: str, group: str, seg: tuple, adds: int = 0, tokens: int = 0, rides: int = 0,
+            longest: int = 0, carried_tokens: int = 0) -> None:
+        r = out.setdefault((label, kind, seg[2], seg[3]), {"label": label, "kind": kind, "group": group, "branch": seg[2],
+                                                           "seg_start": seg[3], **{f: 0 for f in ITEM_FIELDS}})
         r["adds"] += adds
         r["tokens"] += tokens
         r["rides"] += rides
         r["max_rides"] = max(r["max_rides"], longest)
         r["carried_tokens"] += carried_tokens
+        totals[(label, kind)] += carried_tokens
 
+    ratio = (files[0].get("chars_per_token") if files else None) or CHARS_PER_TOKEN
+    for f in files:
+        reqs = f["requests"]
+        if not reqs:
+            continue
+        carried(reqs, f["items"])
+        segs = _segments(reqs)
+        seg_of: list[tuple] = [None] * len(reqs)  # type: ignore[list-item]
+        for seg in segs:
+            for i in range(seg[0], seg[1]):
+                seg_of[i] = seg
+        reads = [0]
+        win_end = [len(reqs)] * len(reqs)
+        for i in range(len(reqs)):
+            reads.append(reads[-1] + _reads_cache(reqs, i))
+        for i in range(len(reqs) - 2, -1, -1):
+            win_end[i] = win_end[i + 1] if reqs[i + 1]["window"] == reqs[i]["window"] else i + 1
+        for item in f["items"]:
+            if not item.get("who") or "request" not in item:
+                continue
+            label, kind, group = item["who"]
+            j = item["request"]
+            add(label, kind, group, seg_of[j], adds=1, tokens=item["tokens"], longest=item["rides"])
+            for seg in segs:  # the requests after it in its window that read it, by the run they're in
+                lo, hi = max(seg[0], j + 1), min(seg[1], win_end[j])
+                if lo < hi and reads[hi] - reads[lo]:
+                    n = reads[hi] - reads[lo]
+                    add(label, kind, group, seg, rides=n, carried_tokens=n * item["tokens"])
+        longest = max(sum(_reads_cache(reqs, i) for i in range(len(reqs)) if reqs[i]["window"] == w)
+                      for w in {r["window"] for r in reqs})
+        for label, chars in instructions:
+            t = round(chars / ratio)
+            for seg in segs:
+                n = reads[seg[1]] - reads[seg[0]]
+                writes = (seg[1] - seg[0]) - n
+                add(label, "instructions", "instructions", seg, adds=writes, tokens=t * writes, rides=n, longest=longest,
+                    carried_tokens=t * n)
+    keep = {k for k, _ in sorted(totals.items(), key=lambda kv: -kv[1])[:limit]}
+    return [r for r in out.values() if (r["label"], r["kind"]) in keep or r["kind"] == "instructions"]
+
+
+def add_rows(files: list[dict[str, Any]], limit: int = 500) -> list[dict[str, Any]]:
+    """Each time a costly item entered the context: when, on which branch, its tokens, and the requests that
+    carried it after. What lets a test's panel show what came in while the test was red."""
+    out: dict[tuple, dict[str, Any]] = {}
     for f in files:
         carried(f["requests"], f["items"])
         for item in f["items"]:
-            if item.get("who") and "request" in item:
-                label, kind, group = item["who"]
-                add(label, kind, group, norm_time(item.get("at")), item["branch"], 1, item["tokens"], item["rides"],
-                    item["rides"], item["carried_tokens"])
-    rows = sorted(out.values(), key=lambda r: -r["carried_tokens"])[:limit]
-    started = [f["requests"][0] for f in files if f["requests"]]
-    if started:
-        reads = writes = longest = 0
-        for f in files:
-            per_window: dict[int, int] = defaultdict(int)
-            for i, r in enumerate(f["requests"]):
-                if _reads_cache(f["requests"], i):
-                    reads += 1
-                    per_window[r["window"]] += 1
-                else:
-                    writes += 1
-            longest = max([longest, *per_window.values()])
-        ratio = files[0].get("chars_per_token") or CHARS_PER_TOKEN
-        for label, chars in instructions:
-            t = round(chars / ratio)
-            rows.append({"label": label, "kind": "instructions", "group": "instructions", "first_at": started[0]["at"],
-                         "branch": started[0]["branch"], "adds": writes, "tokens": t * writes, "rides": reads,
-                         "max_rides": longest, "carried_tokens": t * reads})
-    return rows
+            at = norm_time(item.get("at"))
+            if not item.get("who") or "request" not in item or not at or not item["carried_tokens"]:
+                continue
+            label, kind, _ = item["who"]
+            r = out.setdefault((label, kind, at), {"label": label, "kind": kind, "at": at, "branch": item["branch"],
+                                                   "tokens": 0, "rides": 0, "carried_tokens": 0})
+            r["tokens"] += item["tokens"]
+            r["rides"] = max(r["rides"], item["rides"])
+            r["carried_tokens"] += item["carried_tokens"]
+    return sorted(out.values(), key=lambda r: -r["carried_tokens"])[:limit]

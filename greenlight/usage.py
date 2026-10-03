@@ -111,7 +111,8 @@ def payload_from_hook(hook: dict[str, Any], env: dict[str, str] | None = None) -
             "rows": minute_rows(entries(files)), "context": context.rows(files),
             "rebuilds": [r | {"agent": f["agent"]} for f in files for r in f["rebuilds"]],
             "switches": [r | {"agent": f["agent"]} for f in files for r in f["switches"]],
-            **({"items": context.item_rows(files, context.instruction_files(root))} if labels else {})}
+            **({"items": context.item_rows(files, context.instruction_files(root)), "adds": context.add_rows(files)}
+               if labels else {})}
 
 
 CONTEXT_FIELDS = ("calls", "tokens", "carried_tokens", "repeat_reads", "repeat_tokens")
@@ -129,11 +130,12 @@ def store(conn: sqlite3.Connection, payload: dict[str, Any]) -> dict[str, Any]:
     report is the whole story). A payload without context or rebuilds (an older client) leaves those alone."""
     s = payload.get("session") if isinstance(payload, dict) else None
     rows = payload.get("rows") if isinstance(payload, dict) else None
-    extra = [payload.get(k) for k in ("context", "rebuilds", "switches", "items")] if isinstance(payload, dict) else [None] * 4
+    extra = ([payload.get(k) for k in ("context", "rebuilds", "switches", "items", "adds")] if isinstance(payload, dict)
+             else [None] * 5)
     if (not isinstance(s, dict) or not s.get("session_id") or not isinstance(rows, list) or len(rows) > MAX_ROWS
             or any(not isinstance(x, (list, type(None))) or len(x or ()) > MAX_ROWS for x in extra)):
         raise ValueError("send {\"session\": {\"session_id\": ...}, \"rows\": [...]}")
-    ctx, rebuilds, switches, items = extra
+    ctx, rebuilds, switches, items, adds = extra
     sid = s["session_id"]
     clean = [(sid, _minute(r), str(r.get("model") or "unknown"), str(r.get("branch") or ""),
               int(r.get("requests") or 0), *(int(r.get(f) or 0) for f in FIELDS)) for r in rows]
@@ -147,8 +149,11 @@ def store(conn: sqlite3.Connection, payload: dict[str, Any]) -> dict[str, Any]:
                     str(r.get("to_branch") or ""), int(r.get("context_tokens") or 0), int(r.get("carried_tokens") or 0))
                    for r in switches or ()]
     item_rows = [(sid, str(r.get("label") or "")[:300], str(r.get("kind") or "tool")[:32], str(r.get("group") or "")[:300],
-                  norm_time(str(r.get("first_at") or "")), str(r.get("branch") or ""),
+                  norm_time(str(r.get("seg_start") or r.get("first_at") or "")) or "", str(r.get("branch") or ""),
                   *(int(r.get(f) or 0) for f in context.ITEM_FIELDS)) for r in items or () if r.get("label")]
+    add_rows = [(sid, str(r.get("label") or "")[:300], str(r.get("kind") or "tool")[:32], _minute(r) if r.get("at") else "",
+                 str(r.get("branch") or ""), int(r.get("tokens") or 0), int(r.get("rides") or 0),
+                 int(r.get("carried_tokens") or 0)) for r in adds or () if r.get("label") and r.get("at")]
     first = min((c[1] for c in clean), default=None)
     last = max((c[1] for c in clean), default=None)
     with conn:
@@ -165,9 +170,13 @@ def store(conn: sqlite3.Connection, payload: dict[str, Any]) -> dict[str, Any]:
                              "idle_seconds, cause) VALUES (?,?,?,?,?,?,?,?)", rebuild_rows)
         if items is not None:
             conn.execute("DELETE FROM agent_context_items WHERE session_id = ?", (sid,))
-            conn.executemany(f"INSERT OR REPLACE INTO agent_context_items (session_id, label, kind, grp, first_at, branch, "
+            conn.executemany(f"INSERT OR REPLACE INTO agent_context_items (session_id, label, kind, grp, seg_start, branch, "
                              f"{', '.join(context.ITEM_FIELDS)}) VALUES (?,?,?,?,?,?{',?' * len(context.ITEM_FIELDS)})",
                              item_rows)
+        if adds is not None:
+            conn.execute("DELETE FROM agent_context_adds WHERE session_id = ?", (sid,))
+            conn.executemany("INSERT OR REPLACE INTO agent_context_adds (session_id, label, kind, at, branch, tokens, rides, "
+                             "carried_tokens) VALUES (?,?,?,?,?,?,?,?)", add_rows)
         if switches is not None:
             conn.execute("DELETE FROM agent_task_switches WHERE session_id = ?", (sid,))
             conn.executemany("INSERT OR REPLACE INTO agent_task_switches (session_id, agent, at, from_branch, to_branch, "
@@ -220,11 +229,11 @@ def items_summary(conn: sqlite3.Connection, start: str, sessions: set[str] | Non
     """The things that rode along in context longest, by label, and by group (a folder and extension, a program):
     times added, tokens, requests that re-read them, and their cost (added at the cache write price, re-read at
     the cache read price)."""
-    where, args = "first_at >= ?", [start]
+    where, args = "seg_start >= ?", [start]
     if sessions is not None:
         where += f" AND session_id IN ({','.join('?' * len(sessions))})"
         args += sorted(sessions)
-    ww = _write_weight(conn, where.replace("first_at", "minute"), args)  # before the filter on items' own columns
+    ww = _write_weight(conn, where.replace("seg_start", "minute"), args)  # before the filter on items' own columns
     if where_extra:
         where += f" AND {where_extra}"
         args += list(args_extra)
@@ -241,6 +250,22 @@ def items_summary(conn: sqlite3.Connection, start: str, sessions: set[str] | Non
             out.append(d)
         return sorted(out, key=lambda d: -d["weighted"])
     return {"items": rows("label")[:50], "groups": [g for g in rows("grp") if g["labels"] > 1][:20]}
+
+
+def _item_totals(rows: list[dict[str, Any]], ww: float) -> list[dict[str, Any]]:
+    """Item rows summed per (label, kind), priced like items_summary."""
+    out: dict[tuple, dict[str, Any]] = {}
+    for r in rows:
+        t = out.setdefault((r["label"], r["kind"]), {"label": r["label"], "kind": r["kind"], "sessions": set(), "adds": 0,
+                                                     "tokens": 0, "rides": 0, "carried_tokens": 0, "max_rides": 0})
+        t["sessions"].add(r["session_id"])
+        for f in ("adds", "tokens", "rides", "carried_tokens"):
+            t[f] += r.get(f) or 0
+        t["max_rides"] = max(t["max_rides"], r.get("max_rides") or r.get("rides") or 0)
+    return sorted(({**t, "sessions": len(t["sessions"]),
+                    "weighted": round(t["tokens"] * ww + t["carried_tokens"] * WEIGHTS["cache_read_tokens"]),
+                    "avg_rides": round(t["rides"] / t["adds"], 1) if t["adds"] else 0} for t in out.values()),
+                  key=lambda t: -t["weighted"])
 
 
 def _meta(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
@@ -283,6 +308,8 @@ def detail(conn: sqlite3.Connection, days: int, kind: str, key: str) -> dict[str
                 if mine(r)]
         ctx = [r for r in map(dict, conn.execute("SELECT * FROM agent_context WHERE branch = ?", pr)) if mine(r)]
         p = next(x for x in by_head[pr[0]] if x["number"] == int(key))
+        item_rows = [r for r in map(dict, conn.execute("SELECT * FROM agent_context_items WHERE branch = ?", pr))
+                     if (_pr_for(by_head, r["branch"], r["seg_start"]) or {}).get("number") == int(key)]
         per: dict[str, list] = defaultdict(list)
         for r in rows:
             per[r["session_id"]].append(r)
@@ -290,20 +317,38 @@ def detail(conn: sqlite3.Connection, days: int, kind: str, key: str) -> dict[str
                            | _sum(rs) for sid, rs in per.items()), key=lambda x: -x["weighted"])
         return {"kind": kind, "pr": {k: p[k] for k in ("number", "title", "state", "head", "created_at", "merged_at", "url")}
                 | {"sessions": len(per)} | _sum(rows),
-                "context": {"categories": _categories(ctx, _write_weight(conn))}, "sessions": sessions}
+                "context": {"categories": _categories(ctx, _write_weight(conn))}, "sessions": sessions,
+                "items": _item_totals(item_rows, _write_weight(conn))[:30]}
     if kind == "test":
-        return {"kind": kind, "test": summary(conn, days, test_id=key)["test"]}
+        return {"kind": kind, "test": summary(conn, days, test_id=key)["test"], "items": _test_items(conn, key, start)}
     if kind in ("item", "group"):
         item_kind, _, label = key.partition(":")
         col = "label" if kind == "item" else "grp"
         found = items_summary(conn, start, where_extra=f"{col} = ? AND kind = ?", args_extra=(label, item_kind))
         rows = [dict(r) | {k: v for k, v in meta.get(r["session_id"], {}).items() if k != "session_id"}
-                for r in conn.execute(f"SELECT * FROM agent_context_items WHERE {col} = ? AND kind = ? AND first_at >= ? "
-                                      "ORDER BY carried_tokens DESC LIMIT 50", (label, item_kind, start))]
+                for r in conn.execute(f"SELECT * FROM agent_context_items WHERE {col} = ? AND kind = ? AND seg_start >= ? "
+                                      "ORDER BY carried_tokens DESC", (label, item_kind, start))]
         if not rows:
             raise LookupError(f"Nothing called {label} rode along in the last {days} days")
         head = (found["items"] if kind == "item" else found["groups"] or rows)[0]
-        return {"kind": kind, "item": head, "rows": rows}
+        by_session: dict[tuple, dict[str, Any]] = {}
+        for r in rows:  # one row per session (or item, for a group) however many branch runs it spans
+            k = (r["session_id"], r["label"]) if kind == "group" else (r["session_id"],)
+            t = by_session.setdefault(k, {**r, "adds": 0, "tokens": 0, "rides": 0, "carried_tokens": 0})
+            for f in ("adds", "tokens", "rides", "carried_tokens"):
+                t[f] += r[f]
+        _, by_head = _prs(conn)
+        prs: dict[int, dict[str, Any]] = {}
+        for r in rows:
+            p = _pr_for(by_head, r["branch"], r["seg_start"])
+            if p:
+                t = prs.setdefault(p["number"], {k: p[k] for k in ("number", "title", "state", "url")}
+                                   | {"adds": 0, "rides": 0, "carried_tokens": 0})
+                for f in ("adds", "rides", "carried_tokens"):
+                    t[f] += r[f]
+        return {"kind": kind, "item": head,
+                "rows": sorted(by_session.values(), key=lambda r: -r["carried_tokens"])[:50],
+                "prs": sorted(prs.values(), key=lambda p: -p["carried_tokens"])[:20]}
     ww = _write_weight(conn, "minute >= ?", (start,))
     if kind == "category":
         rows = [dict(r) for r in conn.execute("SELECT * FROM agent_context WHERE category = ? AND minute >= ?",
@@ -418,8 +463,9 @@ def _by_pr(conn: sqlite3.Connection, rows: list) -> tuple[list[dict[str, Any]], 
     return out, _sum(loose)
 
 
-def _by_test(conn: sqlite3.Connection, rows: list, start: str) -> list[dict[str, Any]]:
-    """Tokens a session spent while each test was red (see the module docstring)."""
+def _red_windows(conn: sqlite3.Connection, start: str) -> list[tuple[str, str, str, str | None]]:
+    """(session, test, from, to) for each time a test was red in a session: from a run there that failed it to the
+    next run there that passed it (to is None when none did)."""
     ids: dict[str, str] = {}
     for sid, remote in conn.execute("SELECT session_id, remote_session FROM agent_sessions"):
         ids[sid] = sid
@@ -427,11 +473,6 @@ def _by_test(conn: sqlite3.Connection, rows: list, start: str) -> list[dict[str,
             ids[remote] = sid
     if not ids:
         return []
-    usage: dict[str, tuple[list, list]] = {}
-    for r in sorted(rows, key=lambda r: r["minute"]):
-        minutes, totals = usage.setdefault(r["session_id"], ([], []))
-        minutes.append(r["minute"])
-        totals.append(r)
     marks = ",".join("?" * len(ids))
     runs = conn.execute(f"SELECT run_id, session, started_at FROM runs WHERE session IN ({marks}) AND started_at >= ? "
                         "ORDER BY started_at", (*ids, start)).fetchall()
@@ -445,22 +486,7 @@ def _by_test(conn: sqlite3.Connection, rows: list, start: str) -> list[dict[str,
     per_session: dict[str, list] = defaultdict(list)
     for run_id, session, started in runs:
         per_session[ids[session]].append((started, finals.get(run_id, {})))
-    out: dict[str, dict[str, Any]] = {}
-
-    def charge(sid: str, test: str, a: str, b: str | None, still: bool) -> None:
-        minutes, totals = usage.get(sid, ([], []))
-        lo = bisect_left(minutes, a[:16] + ":00+00:00")
-        hi = bisect_left(minutes, b[:16] + ":00+00:00") if b else len(minutes)
-        t = out.setdefault(test, {"test_id": test, "times_red": 0, "still_red": 0, "sessions": set(),
-                                  "requests": 0, **{f: 0 for f in FIELDS}})
-        t["times_red"] += 1
-        t["still_red"] += still
-        t["sessions"].add(sid)
-        for r in totals[lo:hi]:
-            t["requests"] += r["requests"]
-            for f in FIELDS:
-                t[f] += r[f]
-
+    out = []
     for sid, session_runs in per_session.items():
         red: dict[str, str] = {}
         for started, outcomes in session_runs:
@@ -468,11 +494,46 @@ def _by_test(conn: sqlite3.Connection, rows: list, start: str) -> list[dict[str,
                 if outcome in ("fail", "error") and test not in red:
                     red[test] = started
                 elif outcome == "pass" and test in red:
-                    charge(sid, test, red.pop(test), started, False)
-        for test, began in red.items():
-            charge(sid, test, began, None, True)
+                    out.append((sid, test, red.pop(test), started))
+        out += [(sid, test, began, None) for test, began in red.items()]
+    return out
+
+
+def _by_test(conn: sqlite3.Connection, rows: list, start: str) -> list[dict[str, Any]]:
+    """Tokens a session spent while each test was red (see the module docstring)."""
+    usage: dict[str, tuple[list, list]] = {}
+    for r in sorted(rows, key=lambda r: r["minute"]):
+        minutes, totals = usage.setdefault(r["session_id"], ([], []))
+        minutes.append(r["minute"])
+        totals.append(r)
+    out: dict[str, dict[str, Any]] = {}
+    for sid, test, a, b in _red_windows(conn, start):
+        minutes, totals = usage.get(sid, ([], []))
+        lo = bisect_left(minutes, a[:16] + ":00+00:00")
+        hi = bisect_left(minutes, b[:16] + ":00+00:00") if b else len(minutes)
+        t = out.setdefault(test, {"test_id": test, "times_red": 0, "still_red": 0, "sessions": set(),
+                                  "requests": 0, **{f: 0 for f in FIELDS}})
+        t["times_red"] += 1
+        t["still_red"] += b is None
+        t["sessions"].add(sid)
+        for r in totals[lo:hi]:
+            t["requests"] += r["requests"]
+            for f in FIELDS:
+                t[f] += r[f]
     tests = [t | {"sessions": len(t["sessions"]), "weighted": weighted(t)} for t in out.values()]
     return sorted(tests, key=lambda t: -t["output_tokens"])
+
+
+def _test_items(conn: sqlite3.Connection, test_id: str, start: str) -> list[dict[str, Any]]:
+    """What entered a session's context while this test was red there, with what it cost from then on. Arriving
+    while the test was red doesn't mean it came because of the test: this is a time window, not a cause."""
+    rows = []
+    for sid, test, a, b in _red_windows(conn, start):
+        if test != test_id:
+            continue
+        q = "SELECT * FROM agent_context_adds WHERE session_id = ? AND at >= ?" + (" AND at < ?" if b else "")
+        rows += [dict(r) | {"adds": 1} for r in conn.execute(q, (sid, a, b) if b else (sid, a))]
+    return _item_totals(rows, _write_weight(conn, "minute >= ?", (start,)))[:30]
 
 
 def summary(conn: sqlite3.Connection, days: int = 30, pr: int | None = None,
