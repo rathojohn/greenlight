@@ -155,6 +155,17 @@ def test_side_panel_details_for_a_session_a_pr_a_category_and_waste(tmp_path):
         assert s["prs"][0]["number"] == 7
         pr = usage.detail(conn, 3, "pr", "7")
         assert pr["pr"]["sessions"] == 1 and pr["sessions"][0]["session_id"] == "s"
+        items = {i["label"]: i for i in pr["items"]}
+        assert items["/a.py"]["rides"] == 3 and "git status" not in items  # git status rode along on next-task
+        assert usage.detail(conn, 3, "item", "command:git status")["prs"] == []
+        assert usage.detail(conn, 3, "item", "file:/a.py")["prs"][0]["number"] == 7
+        # a test red from minute 1 to 3 of that session: the read of /a.py at 1.1 came in then, and stayed for r4
+        from greenlight.ingest import TestResult, record_run
+        for minute, outcome in ((1, "fail"), (3, "pass")):
+            record_run(conn, [TestResult("t::checkout", None, outcome, 5)], commit_sha="c1", source="ci",
+                       started_at=T0 + timedelta(minutes=minute), session="session_01X")
+        red = usage.detail(conn, 3, "test", "t::checkout")["items"]
+        assert [(i["label"], i["adds"], i["carried_tokens"]) for i in red] == [("/a.py", 1, 1000)]
         cats = {c["category"] for c in pr["context"]["categories"]}
         assert {"test", "read", "image"} <= cats and "git" not in cats  # git ran on next-task, after the merge
         c = usage.detail(conn, 3, "category", "test")
@@ -168,21 +179,52 @@ def test_side_panel_details_for_a_session_a_pr_a_category_and_waste(tmp_path):
                 usage.detail(conn, 3, kind, key)
 
 
+def summed(rows):
+    out = {}
+    for r in rows:
+        t = out.setdefault((r["label"], r["kind"]), {**r, "adds": 0, "tokens": 0, "rides": 0, "carried_tokens": 0})
+        for f in ("adds", "tokens", "rides", "carried_tokens"):
+            t[f] += r[f]
+    return out
+
+
 def test_each_item_and_how_many_requests_it_rode_along_with(tmp_path):
     root = tmp_path / "repo"
     root.mkdir()
     (root / "CLAUDE.md").write_text("x" * 2400)  # 1,000 tokens
     f = context.read_file(transcript(tmp_path), root="/")
-    rows = {(r["label"], r["kind"]): r for r in context.item_rows([f], context.instruction_files(str(root)))}
+    raw = context.item_rows([f], context.instruction_files(str(root)))
+    rows = summed(raw)
     a = rows[("a.py", "file")]
     assert (a["adds"], a["tokens"], a["rides"], a["max_rides"]) == (3, 3000, 3, 2)  # read by r2 (2 more), r3 (1), r4 (0)
     assert rows[("npm test", "command")]["rides"] == 2 and rows[("cat", "command")]["kind"] == "command"
+    assert rows[("npm test", "command")]["group"] == "test runs" and rows[("cat", "command")]["group"] == "file reads in a shell"
     assert rows[("shot.png", "image")]["tokens"] == 100
     assert rows[("github: get_pr", "mcp")]["adds"] == 1 and rows[("git status", "command")]["carried_tokens"] == 1000
     assert not any(k == "edit" or label.startswith("Edit") for label, k in rows)  # an edit's confirmation isn't followed
     claude = rows[("CLAUDE.md", "instructions")]
     # every request that read the cache carried it (r2-r4, r7-r9); the window starts and the rebuild wrote it
     assert (claude["adds"], claude["rides"], claude["max_rides"], claude["carried_tokens"]) == (3, 6, 3, 6000)
+
+
+def test_an_items_re_reads_are_charged_to_the_branch_that_carried_them(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "CLAUDE.md").write_text("x" * 2400)
+    raw = context.item_rows([context.read_file(transcript(tmp_path), root="/")], context.instruction_files(str(root)))
+    by = {(r["label"], r["branch"]): r for r in raw}
+    fix, nxt = by[("CLAUDE.md", "fix")], by[("CLAUDE.md", "next-task")]
+    assert (fix["adds"], fix["rides"]) == (3, 3) and (nxt["adds"], nxt["rides"]) == (0, 3)  # r1-r6 on fix, r7-r9 on the next
+    assert fix["seg_start"] < nxt["seg_start"]
+    assert ("git status", "fix") not in by and by[("git status", "next-task")]["rides"] == 1
+    assert by[("a.py", "fix")]["rides"] == 3 and ("a.py", "next-task") not in by  # compacted away before the switch
+
+
+def test_each_costly_entry_is_kept_with_when_it_came_in(tmp_path):
+    adds = context.add_rows([context.read_file(transcript(tmp_path), root="/")])
+    a = [r for r in adds if r["label"] == "a.py"]
+    assert len(a) == 2 and all(r["at"] and r["branch"] == "fix" for r in a)  # the third read was never re-read
+    assert sum(r["carried_tokens"] for r in a) == 3000 and adds == sorted(adds, key=lambda r: -r["carried_tokens"])
 
 
 def test_labels_never_carry_a_commands_arguments():
@@ -210,7 +252,24 @@ def test_items_are_stored_summed_by_label_and_group_and_can_be_turned_off(tmp_pa
         d = usage.detail(conn, 3, "item", "instructions:CLAUDE.md")
         assert d["item"]["label"] == "CLAUDE.md" and d["rows"][0]["session_id"] == "s"
         assert usage.detail(conn, 3, "session", "s")["items"]
+        assert conn.execute("SELECT COUNT(*) FROM agent_context_adds").fetchone()[0] == len(payload["adds"])
         with pytest.raises(LookupError):
             usage.detail(conn, 3, "item", "file:nothing.py")
     (root / "greenlight.toml").write_text("[usage]\nitem_labels = false\n")
     assert "items" not in usage.payload_from_hook(hook, {})  # categories and counts only
+
+
+def test_items_from_before_branch_runs_are_dropped_and_made_again(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.execute("CREATE TABLE agent_context_items (session_id TEXT, label TEXT, kind TEXT, grp TEXT, first_at TEXT, "
+                "branch TEXT, adds INTEGER, tokens INTEGER, rides INTEGER, max_rides INTEGER, carried_tokens INTEGER, "
+                "PRIMARY KEY (session_id, label, kind))")
+    old.execute("INSERT INTO agent_context_items VALUES ('s', 'a.py', 'file', '*.py', '2026-01-01', 'x', 1, 1, 1, 1, 1)")
+    old.execute("PRAGMA user_version = 6")
+    old.commit()
+    old.close()
+    with closing(connect(str(path))) as conn:  # the next hook run sends every live session's items again
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(agent_context_items)")}
+        assert "seg_start" in cols and conn.execute("SELECT COUNT(*) FROM agent_context_items").fetchone()[0] == 0

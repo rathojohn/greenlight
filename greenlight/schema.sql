@@ -221,20 +221,35 @@ CREATE TABLE IF NOT EXISTS agent_cache_rebuilds (
 );
 
 -- Each thing that entered a session's context (a file, a screenshot, a command's output, a skill, CLAUDE.md) and
--- how long it rode along: labels only, never contents
+-- how long it rode along, per run of requests on one branch, so a pull request gets exactly what its requests
+-- carried. Labels only, never contents
 CREATE TABLE IF NOT EXISTS agent_context_items (
     session_id      TEXT NOT NULL,
     label           TEXT NOT NULL,             -- a path from the repo root, a skill, a command's program and subcommand
     kind            TEXT NOT NULL,             -- file, image, command, instructions, skill, mcp, web, subagent, tool, reminder
-    grp             TEXT NOT NULL DEFAULT '',  -- what it belongs with: a folder and extension, a program, an MCP server
-    first_at        TEXT,
+    grp             TEXT NOT NULL DEFAULT '',  -- what it belongs with: a folder and extension, test runs, an MCP server
+    seg_start       TEXT NOT NULL,             -- when this run of requests on the branch started
     branch          TEXT NOT NULL DEFAULT '',
-    adds            INTEGER NOT NULL DEFAULT 0,  -- times it entered the context
+    adds            INTEGER NOT NULL DEFAULT 0,  -- times it entered the context in this run
     tokens          INTEGER NOT NULL DEFAULT 0,  -- over all of them
-    rides           INTEGER NOT NULL DEFAULT 0,  -- requests that read it from the cache after it entered
-    max_rides       INTEGER NOT NULL DEFAULT 0,  -- the most for one of them
+    rides           INTEGER NOT NULL DEFAULT 0,  -- requests in this run that read it from the cache
+    max_rides       INTEGER NOT NULL DEFAULT 0,  -- the most requests that carried one of its adds here
     carried_tokens  INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (session_id, label, kind)
+    PRIMARY KEY (session_id, label, kind, branch, seg_start)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_context_items_branch ON agent_context_items(branch);
+
+-- When each costly item entered a session's context: what came in while a test was red
+CREATE TABLE IF NOT EXISTS agent_context_adds (
+    session_id      TEXT NOT NULL,
+    label           TEXT NOT NULL,
+    kind            TEXT NOT NULL,
+    at              TEXT NOT NULL,
+    branch          TEXT NOT NULL DEFAULT '',
+    tokens          INTEGER NOT NULL DEFAULT 0,
+    rides           INTEGER NOT NULL DEFAULT 0,  -- requests that read it from the cache after
+    carried_tokens  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (session_id, label, kind, at)
 );
 
 -- Requests that started work on a new branch while the earlier work was still in context
