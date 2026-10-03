@@ -73,9 +73,13 @@ def test_a_dashboard_saves_only_when_every_query_runs(db):
                          ({"panels": [{"type": "stat", "title": "x", "sql": "SELECT 1", "width": 5}]}, "width"),
                          ({"variables": [{"name": "start", "values": ["a"]}]}, "not start"),
                          ({"variables": [{"name": "b", "values": ["a"]}, {"name": "b", "values": ["c"]}]}, "same name"),
-                         ({"panels": [{"type": "stat", "title": "x", "sql": "SELECT :nope"}]}, "nope")):
+                         ({"panels": [{"type": "stat", "title": "x", "sql": "SELECT :nope"}]}, "nope"),
+                         ({"panels": [{"title": "x", "sql": "SELECT 1", "calc": "median"}]}, "calc is one of")):
             with pytest.raises(ValueError, match=msg):
                 dashboards.save(conn, "Bad", bad)
+        line = {"title": "Tokens per request", "sql": "SELECT 1", "display": "line"}
+        assert dashboards._panel({**line, "calc": "mean"}, 0)["calc"] == "mean"  # the legend averages a ratio
+        assert "calc" not in dashboards._panel(line, 0)  # unset: total, or mean for durations and percents
         assert [d["id"] for d in dashboards.all_dashboards(conn)] == ["login"]
         assert dashboards.slug("What's trending") == "whats-trending"
         assert dashboards.delete(conn, "login") and not dashboards.all_dashboards(conn)

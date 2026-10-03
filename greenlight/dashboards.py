@@ -41,7 +41,9 @@ CONVENTIONS = [
     "bucket(time) groups a timestamp by hour when the range is two days or less, else by day. Times are ISO 8601 UTC "
     "text (2026-10-02T14:03:00+00:00), so substr(x, 1, 10) is the day.",
     "timeseries: the first column is the time (from bucket()), the rest are series; or three columns (time, group, "
-    "value), one series per group, the six biggest and the rest as Other. display is bars (stacked), line or area.",
+    "value), one series per group, the six biggest and the rest as Other. display is bars (stacked), line or area. "
+    "The legend shows each series' total (the mean for ms and percent); set calc to mean for a ratio like tokens "
+    "per request.",
     "stat: one row, or (time, value) rows for a sparkline, folded by calc (total, last, mean, max). compare (on by "
     "default) shows the change from the period before.",
     "toplist: (label, value) rows in the order to show them. table: any rows; a column named test_id, session_id, "
@@ -147,6 +149,10 @@ def _panel(p: Any, i: int) -> dict[str, Any]:
         if display not in DISPLAYS:
             raise ValueError(f"{where}: display is one of {', '.join(DISPLAYS)}")
         out |= {"display": display, "events": p.get("events") is not False, "compare": bool(p.get("compare"))}
+        if p.get("calc"):  # the legend's figure; unset is the total, or the mean for durations and percents
+            if p["calc"] not in CALCS:
+                raise ValueError(f"{where}: calc is one of {', '.join(CALCS)}")
+            out["calc"] = p["calc"]
     if kind == "stat":
         calc = p.get("calc") or "total"
         if calc not in CALCS:

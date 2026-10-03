@@ -402,7 +402,9 @@ class Panel(BaseModel):
                                                                                "lines or area.")
     unit: Literal["auto", "count", "tokens", "usd", "ms", "percent"] = "auto"
     calc: Literal["total", "last", "mean", "max"] | None = Field(None, description="stat: how rows fold into one "
-                                                                                    "number. Default total.")
+                                                                                    "number. Default total. timeseries: "
+                                                                                    "the legend's figure; mean for a "
+                                                                                    "ratio like tokens per request.")
     compare: bool | None = Field(None, description="Also show the period before. Default on for a stat.")
     thresholds: Thresholds | None = None
     events: bool | None = Field(None, description="timeseries: mark deploys, merges and annotations. Default on.")
