@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
-from . import analysis, commits, dashboard, delivery, insights, usage
+from . import analysis, commits, dashboard, dashboards, delivery, insights, usage
 from .db import connect, iso, utcnow
 
 UI_FILE = Path(__file__).with_name("ui") / "index.html"
@@ -74,6 +74,13 @@ GET_ROUTES: dict[str, Callable[[sqlite3.Connection, Params], Any]] = {
     "/api/runs": lambda c, p: dashboard.runs_list(c, _int(p, "limit", 50, hi=500)),
     "/api/commits": lambda c, p: commits.commit_list(c, _int(p, "days", 30)),
     "/api/commit": lambda c, p: commits.commit_detail(c, _require(p, "sha")),
+    "/api/dashboards": lambda c, p: {"dashboards": dashboards.all_dashboards(c)},
+    "/api/dashboard": lambda c, p: dashboards.render(c, _require(p, "id"), _int(p, "days", 30),
+                                                     {k[4:]: v for k, v in p.items() if k.startswith("var-")}),
+    "/api/sql": lambda c, p: dashboards.run(c, _require(p, "q"), _int(p, "days", 30),
+                                            values={k[4:]: None if v in ("", "__all") else v for k, v in p.items()
+                                                    if k.startswith("var-")}),
+    "/api/schema": lambda c, p: dashboards.schema(),
     "/api/run": lambda c, p: analysis.triage_run(c, run_id=_int(p, "id", 0, lo=0, hi=10**12)),
     "/api/quarantine": lambda c, p: dashboard.quarantine_view(c, _int(p, "days", 30)),
     "/api/pipelines": lambda c, p: _pipelines(c, _int(p, "days", 30)),
@@ -98,6 +105,9 @@ POST_ROUTES: dict[str, Callable[[sqlite3.Connection, dict], Any]] = {
     "/api/sweep": lambda c, b: analysis.sweep(c, apply=bool(b.get("apply"))),
     "/api/usage": lambda c, b: usage.store(c, b),
     "/api/forget": lambda c, b: {"forgotten": analysis.forget_runs(c, _require(b, "runs"), bool(b.get("dry_run")))},
+    "/api/dashboards": lambda c, b: dashboards.add_starter(c) if b.get("starter") else dashboards.save(
+        c, b.get("title"), b, b.get("id"), days=_int(b, "days", 30)),
+    "/api/dashboards/delete": lambda c, b: {"deleted": dashboards.delete(c, _require(b, "id"))},
 }
 
 ERRORS = [(LookupError, 404), (ValueError, 400), (FileNotFoundError, 503), (RuntimeError, 501)]
@@ -265,6 +275,8 @@ def export_snapshot(db: str | None, out: str, days: int = 30, with_forecasts: bo
     flaky = grab("/api/flaky", {"days": d}) or {}
     runs = grab("/api/runs", {"limit": "500"}) or {}
     grab("/api/commits", {"days": d})
+    for b in (grab("/api/dashboards", {}) or {}).get("dashboards", []):
+        grab("/api/dashboard", {"id": b["id"], "days": d})
     quar = grab("/api/quarantine", {"days": d}) or {}
     pipes = grab("/api/pipelines", {"days": d}) or {}
     deliv = grab("/api/delivery", {"days": d}) or {}

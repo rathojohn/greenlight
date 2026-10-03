@@ -266,6 +266,8 @@ def seed(db: str, days: int = 60, seed_value: int = 7) -> None:
                               iso(closed) if closed else None, iso(closed or created), key))
             conn.execute("INSERT OR REPLACE INTO quarantine VALUES (?, 'labeled quarantined on issue #903', ?, 'github#903')",
                          ("tests.test_e2e::test_search_autocomplete", iso(now - timedelta(days=19))))
+            from .dashboards import add_starter
+            add_starter(conn)
             for source in ("pulls", "issues", "actions", "deployments"):
                 conn.execute("INSERT OR REPLACE INTO sync_state VALUES (?, NULL, ?)", (source, iso(now - timedelta(minutes=12))))
     print(f"seeded {runs} runs, {len(commits)} commits and their pipelines, releases, PRs and issues into {a.db}")

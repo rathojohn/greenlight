@@ -28,7 +28,7 @@ SERVER_NAME = "greenlight"
 # that change something (quarantine, sweep with apply, issues, sync, gating a run) still ask.
 READ_TOOLS = ("greenlight_overview", "greenlight_insights", "greenlight_list_flaky", "greenlight_test_history", "greenlight_triage_run",
               "greenlight_pipelines", "greenlight_delivery", "greenlight_query", "greenlight_duration_regressions",
-              "greenlight_suite_forecast", "greenlight_token_usage")
+              "greenlight_suite_forecast", "greenlight_token_usage", "greenlight_schema", "greenlight_dashboards")
 RULES_MARKER = "## Test failures (greenlight)"
 AGENT_RULES = f"""{RULES_MARKER}
 Record every test run with greenlight, passing or not (passes are the history that tells a flaky test
