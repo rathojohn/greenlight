@@ -307,6 +307,9 @@ a.panel:hover { box-shadow: var(--shadow-raised); transform: translateY(-1px); }
 .chart .thr { stroke-width: 1.5; stroke-dasharray: 3 3; opacity: .8; }
 .chart .mark { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 2 4; opacity: .45; }
 .chart .mark-m { fill: var(--ink-2); stroke: var(--panel); stroke-width: 1.5; }
+.chart .ann { stroke: var(--ink-2); stroke-width: 1.5; }
+.chart text.ann-t { fill: var(--ink); font-weight: 600; paint-order: stroke; stroke: var(--panel); stroke-width: 4px; stroke-linejoin: round; }
+.tr.ev .sw.ann { width: 2px; height: 12px; border-radius: 1px; background: var(--ink-2); }
 .pmenu { position: fixed; right: auto; top: 0; }
 .pmenu button .ic { visibility: visible; color: var(--ink-3); stroke-width: 1.5; }
 .dcard { padding: 14px 14px 12px; gap: 6px; text-decoration: none; color: inherit; min-height: 96px; }
@@ -332,7 +335,7 @@ a.panel:hover { box-shadow: var(--shadow-raised); transform: translateY(-1px); }
 .ed textarea.json, textarea.json { width: 100%; min-height: 220px; padding: 8px 9px; font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: 12px; line-height: 1.5; resize: vertical; }
 .ed fieldset { margin: 0; padding: 10px; border: 1px solid var(--line-2); border-radius: 6px; display: grid; gap: 8px; }
 .ed fieldset + fieldset { margin-top: 8px; }
-#vrows { display: grid; gap: 8px; margin-bottom: 8px; }
+#vrows, #arows { display: grid; gap: 8px; margin-bottom: 8px; }
 body.tv .side, body.tv .top { display: none; }
 body.tv .app { grid-template-columns: minmax(0, 1fr); }
 .tvx { position: fixed; right: 12px; bottom: 12px; z-index: 30; box-shadow: var(--shadow); }
@@ -1070,6 +1073,10 @@ function drawChart(el) {
     if (es.some(e => e.kind === "deploy")) g += `<line class="mark" x1="${x(i)}" x2="${x(i)}" y1="${m.t}" y2="${m.t + ph}"/>`;
     if (es.some(e => e.kind === "merge")) g += `<circle class="mark-m" cx="${x(i)}" cy="${m.t + ph}" r="2.5"/>`;
   }
+  marks.filter(e => e.kind === "annotation").forEach((e, k) => {  /* an annotation: a solid line where it happened in its hour or day, labeled */
+    const ax = m.l + slot * (e.i + (e.f || 0)), right = ax > m.l + pw * .65, ty = m.t + 11 + (k % 3) * 13;
+    g += `<line class="ann" x1="${ax}" x2="${ax}" y1="${m.t}" y2="${m.t + ph}"/><text class="ann-t" x="${right ? ax - 5 : ax + 5}" y="${ty}" text-anchor="${right ? "end" : "start"}">${esc(cut(e.label, 32))}</text>`;
+  });
   const count = Math.max(2, Math.min(n, Math.floor(pw / 86)));
   const xl = [...new Set(Array.from({ length: count }, (_, k) => Math.round(k * (n - 1) / (count - 1))))];
   for (const i of xl) g += `<text x="${x(i)}" y="${H - 5}" text-anchor="${i === 0 ? "start" : i === n - 1 ? "end" : "middle"}">${esc(xlab(labels[i]))}</text>`;
@@ -1090,7 +1097,8 @@ function drawChart(el) {
       for (const b of [...bars].reverse()) html += row(b.color, b.label, fmt(b.values[i] || 0));
       for (const l of lines) html += row(l.color, l.label, l.values[i] == null ? "no data" : fmt(l.values[i]), true);
     }
-    for (const e of (markAt.get(i) || []).slice(0, 4)) html += `<div class="tr ev"><i class="sw ${e.kind === "deploy" ? "ln dash" : "dot"}"></i><span>${esc(e.label)}</span></div>`;
+    const here = [...(markAt.get(i) || [])].sort((a, b) => (b.kind === "annotation") - (a.kind === "annotation"));  /* annotations first: someone chose to mark them */
+    for (const e of here.slice(0, 4)) html += `<div class="tr ev"><i class="sw ${e.kind === "deploy" ? "ln dash" : e.kind === "annotation" ? "ann" : "dot"}"></i><span>${esc(e.label)}${e.kind === "annotation" ? ` <span class="dim">${esc(full(e.at))}</span>` : ""}</span></div>`;
     if ((markAt.get(i) || []).length > 4) html += `<div class="tr ev"><span class="dim">and ${markAt.get(i).length - 4} more</span></div>`;
     if (s.band && i >= s.band.from && i < s.band.from + s.band.p50.length) {
       const j = i - s.band.from;
@@ -1918,6 +1926,7 @@ const PTYPES = [["timeseries", "Time series"], ["stat", "Stat"], ["toplist", "To
 const DISPLAYS = [["bars", "Stacked bars"], ["line", "Lines"], ["area", "Area"]];
 const UNITS = [["auto", "From the column's name"], ["count", "Count"], ["tokens", "Tokens"], ["usd", "Dollars"], ["ms", "Duration"], ["percent", "Percent"]];
 const CALCS = [["total", "Total"], ["last", "Last"], ["mean", "Mean"], ["max", "Max"]];
+const LEGEND_CALCS = [["", "Total, or mean for durations and percents"], ["mean", "Mean, for a ratio like tokens per request"], ["max", "Max"], ["last", "Last"], ["total", "Total"]];
 const WIDTHS = [[3, "A quarter"], [4, "A third"], [6, "Half"], [8, "Two thirds"], [12, "Full width"]];
 const REFRESHES = [["", "Off"], ["60", "Every minute"], ["300", "Every 5 minutes"], ["900", "Every 15 minutes"]];
 const isDay = v => typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v);
@@ -2040,12 +2049,16 @@ function drawPanel(el, p, res, prev, id, events, sync) {
     lines.push({ label: "The period before", color: "var(--ink-3)", values: before, dash: true });
   }
   spec.lines = lines;
-  if (events && s.timed && p.events !== false) spec.marks = events.map(e => ({ ...e, i: s.at.get(s.hourly ? e.at.slice(0, 13) + ":00" : e.at.slice(0, 10)) })).filter(e => e.i != null);
+  if (events && s.timed && p.events !== false) spec.marks = events.map(e => ({ ...e, i: s.at.get(s.hourly ? e.at.slice(0, 13) + ":00" : e.at.slice(0, 10)),
+    f: s.hourly ? Number(e.at.slice(14, 16)) / 60 : (Number(e.at.slice(11, 13)) * 60 + Number(e.at.slice(14, 16))) / 1440 })).filter(e => e.i != null);
   const t = p.thresholds;
   if (t) spec.thresholds = [[t.warn, "var(--flip)"], [t.bad, "var(--fail)"]].filter(([v]) => v != null).map(([v, color]) => ({ v, color }));
   el.innerHTML = `<div class="chart"></div>`;
   chart(el.firstChild, spec);
-  const avg = fkey === "ms" || fkey === "pct", figure = x => { const vs = x.values.filter(v => v != null); return avg ? `avg ${fmtBy(fkey, vs.length ? vs.reduce((a, v) => a + v, 0) / vs.length : 0)}` : fmtBy(fkey, x.total); };
+  /* the legend's figure: the panel's calc, else the total (the mean for durations and percents, which don't add up) */
+  const calc = p.calc || (fkey === "ms" || fkey === "pct" ? "mean" : "total");
+  const figure = x => { const vs = x.values.filter(v => v != null); if (!vs.length) return "n/a";
+    return calc === "mean" ? `avg ${fmtBy(fkey, vs.reduce((a, v) => a + v, 0) / vs.length)}` : calc === "last" ? `last ${fmtBy(fkey, vs.at(-1))}` : calc === "max" ? `max ${fmtBy(fkey, Math.max(...vs))}` : fmtBy(fkey, x.total); };
   const items = s.sers.length > 1 ? s.sers.map(x => `<button type="button" class="lg${hide.has(x.label) ? " off" : ""}" data-act="lgd" data-id="${esc(id)}" data-s="${esc(x.label)}" aria-pressed="${!hide.has(x.label)}"><span class="sw${p.display !== "bars" ? " ln" : ""}" style="background:${x.color}"></span><span class="ll">${esc(x.label)}</span><b>${figure(x)}</b></button>`) : [];
   if (prev && s.timed) items.push(`<span class="lg static"><span class="sw ln dash"></span><span class="ll">The period before</span></span>`);
   return items.length ? `<div class="legend lgs">${items.join("")}</div>` : "";
@@ -2069,6 +2082,7 @@ const csvOf = res => [res.columns, ...res.rows].map(r => r.map(v => v == null ? 
 function specOf(d) {
   const keep = (o, ks) => Object.fromEntries(ks.filter(k => o[k] !== undefined && o[k] !== null && o[k] !== "").map(k => [k, o[k]]));
   return { title: d.title, description: d.description || "", variables: (d.variables || []).map(v => keep(v, ["name", "label", "sql", "values", "default", "all"])),
+           annotations: (d.annotations || []).map(a => keep(a, ["name", "sql"])),
            panels: (d.panels || []).map(p => keep(p, ["type", "title", "sql", "width", "display", "unit", "calc", "compare", "thresholds", "events", "note", "text", "collapsed"])) };
 }
 async function saveDash(id, spec) { CACHE.clear(); return post("/api/dashboards", { ...spec, ...(id ? { id } : {}), days: DAYS }); }
@@ -2108,7 +2122,8 @@ async function dashboardView(tok, id) {
     + `<a class="tb" href="${esc(filterHref("tv", q.get("tv") === "1" ? "" : "1"))}">${q.get("tv") === "1" ? "Leave TV mode" : "TV mode"}</a>`
     + (LIVE ? `<a class="tb" href="${esc(panelHref(`dpanel:${d.id}:new`))}">${icon("plus")}Add panel</a>` : "")
     + `<button class="tb icon" type="button" data-act="dmenu" aria-label="Dashboard menu">${icon("more")}</button>`;
-  const head = `<div class="dhead">${d.description ? `<p class="lede">${esc(d.description)}</p>` : ""}<div class="dbar"><div class="vars">${varBar}</div><div class="vars right">${tools}</div></div></div>`;
+  const broken = (d.annotations || []).filter(a => a.error).map(a => `<p class="perr">Annotation ${esc(a.name)}: ${esc(a.error)}</p>`).join("");
+  const head = `<div class="dhead">${d.description ? `<p class="lede">${esc(d.description)}</p>` : ""}${broken}<div class="dbar"><div class="vars">${varBar}</div><div class="vars right">${tools}</div></div></div>`;
   let hidden = false;
   const body = d.panels.map((p, i) => {
     if (p.type === "row") {
@@ -2162,9 +2177,9 @@ function editorForm(p, o = {}) {
     ${field("Title", `<input class="inp" name="title" value="${esc(p.title || "")}" placeholder="Failed tests">`)}
     ${f("timeseries stat toplist table", field("SQL", `<textarea class="inp" name="sql" spellcheck="false" autocapitalize="off">${esc(p.sql || "")}</textarea>`))}
     ${f("text", field("Text", `<textarea class="inp" name="text" placeholder="Markdown: **bold**, \`code\`, [links](https://...), - lists">${esc(p.text || "")}</textarea>`))}
-    <div class="two">${f("timeseries", field("Display", sel("display", DISPLAYS, p.display || "bars")))}${f("stat", field("Number", sel("calc", CALCS, p.calc || "total")))}${f("timeseries stat toplist table", field("Unit", sel("unit", UNITS, p.unit || "auto")))}</div>
+    <div class="two">${f("timeseries", field("Display", sel("display", DISPLAYS, p.display || "bars")))}${f("stat", field("Number", sel("calc", CALCS, p.calc || "total")))}${f("timeseries", field("Legend shows", sel("lcalc", LEGEND_CALCS, p.type === "timeseries" ? p.calc || "" : "")))}${f("timeseries stat toplist table", field("Unit", sel("unit", UNITS, p.unit || "auto")))}</div>
     ${f("timeseries stat toplist", `<div class="three">${field("Warn at", `<input class="inp" name="warn" inputmode="decimal" value="${esc(t.warn ?? "")}">`)}${field("Bad at", `<input class="inp" name="bad" inputmode="decimal" value="${esc(t.bad ?? "")}">`)}${field("Higher is", sel("higher_is", [["worse", "Worse"], ["better", "Better"]], t.higher_is || "worse"))}</div>`)}
-    <div class="checks">${f("timeseries stat", `<label class="chk"><input type="checkbox" name="compare"${(p.compare ?? p.type === "stat") ? " checked" : ""}>Compare with the period before</label>`)}${f("timeseries", `<label class="chk"><input type="checkbox" name="events"${p.events !== false ? " checked" : ""}>Mark deploys and merges</label>`)}</div>
+    <div class="checks">${f("timeseries stat", `<label class="chk"><input type="checkbox" name="compare"${(p.compare ?? p.type === "stat") ? " checked" : ""}>Compare with the period before</label>`)}${f("timeseries", `<label class="chk"><input type="checkbox" name="events"${p.events !== false ? " checked" : ""}>Mark deploys, merges and annotations</label>`)}</div>
     ${f("timeseries stat toplist table text", field("Note", `<input class="inp" name="note" value="${esc(p.note || "")}" placeholder="What it shows, in a sentence">`))}
     <p class="perr" id="ed-err" hidden></p>
     <div class="btns">${f("timeseries stat toplist table", `<button class="tb" type="button" data-ed="run">Run</button>`)}<button class="tb primary" type="submit">Save</button>${o.remove ? `<button class="tb danger" type="button" data-ed="remove">Remove panel</button>` : ""}${f("timeseries stat toplist table", `<span class="dim">Ctrl+Enter runs it</span>`)}</div>
@@ -2183,7 +2198,7 @@ function bindEditor(ctx) {
     Object.assign(p, { width: Number(F("width").value), note: F("note").value.trim() });
     if (ty === "text") return { ...p, text: F("text").value.trim() };
     Object.assign(p, { sql: F("sql").value.trim(), unit: F("unit").value });
-    if (ty === "timeseries") Object.assign(p, { display: F("display").value, compare: F("compare").checked, events: F("events").checked });
+    if (ty === "timeseries") Object.assign(p, { display: F("display").value, compare: F("compare").checked, events: F("events").checked }, F("lcalc").value ? { calc: F("lcalc").value } : {});
     if (ty === "stat") Object.assign(p, { calc: F("calc").value, compare: F("compare").checked });
     if (ty !== "table" && (num("warn") != null || num("bad") != null || F("higher_is").value === "better")) p.thresholds = { warn: num("warn"), bad: num("bad"), higher_is: F("higher_is").value };
     return p;
@@ -2246,21 +2261,24 @@ PANELS.dview = async key => {
 };
 PANELS.dsettings = async did => {
   const spec = await freshSpec(did);
+  const annRow = a => `<fieldset class="arow">${field("Name", `<input class="inp" name="aname" value="${esc(a.name || "")}" placeholder="Changes">`)}${field("Times and labels (SQL)", `<textarea class="inp short" name="asql" spellcheck="false">${esc(a.sql || "")}</textarea>`)}<button class="tb danger" type="button" data-ed="adel">Remove annotation</button></fieldset>`;
   const varRow = (v, j) => `<fieldset class="vrow" data-j="${j}"><div class="two">${field("Name", `<input class="inp" name="vname" value="${esc(v.name || "")}" placeholder="branch">`)}${field("Label", `<input class="inp" name="vlabel" value="${esc(v.label || "")}" placeholder="Branch">`)}</div>${field("Choices (SQL)", `<textarea class="inp short" name="vsql" spellcheck="false">${esc(v.sql || "")}</textarea>`)}<button class="tb danger" type="button" data-ed="vdel">Remove variable</button></fieldset>`;
   return { title: "Dashboard settings", sub: esc(spec.title),
     body: `<form class="ed" id="ds">${field("Title", `<input class="inp" name="title" value="${esc(spec.title)}">`)}${field("Description", `<input class="inp" name="description" value="${esc(spec.description)}">`)}
       ${section("Variables", `<p class="dim" style="margin:0 0 8px">Each is a dropdown above the panels. Its value binds to every panel's SQL as <code>:name</code>, NULL for All: <code>WHERE (:branch IS NULL OR branch = :branch)</code>.</p><div id="vrows">${spec.variables.map(varRow).join("")}</div><button class="tb" type="button" data-ed="vadd">${icon("plus")}Add a variable</button>`)}
+      ${section("Annotations", `<p class="dim" style="margin:0 0 8px">A labeled line on every time series, to see what followed a change. The SQL gives (time, label) rows: <code>SELECT '2026-10-03T00:15:00+00:00', 'Trimmed CLAUDE.md'</code> for one moment, or a query that finds them.</p><div id="arows">${spec.annotations.map(annRow).join("")}</div><button class="tb" type="button" data-ed="aadd">${icon("plus")}Add an annotation</button>`)}
       <p class="perr" id="ds-err" hidden></p><div class="btns"><button class="tb primary" type="submit">Save</button></div></form>`
       + section("As JSON", `<p class="dim" style="margin:0 0 8px">The whole dashboard. Copy it to keep or share; paste one in to replace this dashboard.</p><textarea class="inp json" id="ds-json" spellcheck="false">${esc(JSON.stringify(spec, null, 2))}</textarea><div class="btns" style="margin-top:8px"><button class="tb" type="button" data-act="copy" data-copy="${esc(JSON.stringify(spec, null, 2))}">${icon("copy")}Copy</button><button class="tb" type="button" id="ds-apply">Replace with this JSON</button></div>`),
     after: () => {
-      const f = document.getElementById("ds"), err = document.getElementById("ds-err"), rows = document.getElementById("vrows");
+      const f = document.getElementById("ds"), err = document.getElementById("ds-err"), rows = document.getElementById("vrows"), arows = document.getElementById("arows");
       const fail = m => { err.textContent = m; err.hidden = false; };
       const done = async next => { try { await saveDash(did, next); toast("Saved"); drawerKey = null; setPanel(null, true); render(); } catch (e) { fail(e.message); } };
-      f.addEventListener("click", ev => { const b = ev.target.closest("[data-ed]"); if (!b) return; if (b.dataset.ed === "vadd") rows.insertAdjacentHTML("beforeend", varRow({}, rows.children.length)); if (b.dataset.ed === "vdel") b.closest("fieldset").remove(); });
+      f.addEventListener("click", ev => { const b = ev.target.closest("[data-ed]"); if (!b) return; if (b.dataset.ed === "vadd") rows.insertAdjacentHTML("beforeend", varRow({}, rows.children.length)); if (b.dataset.ed === "aadd") arows.insertAdjacentHTML("beforeend", annRow({})); if (b.dataset.ed === "vdel" || b.dataset.ed === "adel") b.closest("fieldset").remove(); });
       f.addEventListener("submit", ev => {
         ev.preventDefault(); err.hidden = true;
         const variables = [...rows.querySelectorAll("fieldset")].map(fs => ({ name: fs.querySelector('[name="vname"]').value.trim(), label: fs.querySelector('[name="vlabel"]').value.trim(), sql: fs.querySelector('[name="vsql"]').value.trim() })).filter(v => v.name || v.sql);
-        done({ ...spec, title: f.elements.namedItem("title").value.trim(), description: f.elements.namedItem("description").value.trim(), variables });
+        const annotations = [...arows.querySelectorAll("fieldset")].map(fs => ({ name: fs.querySelector('[name="aname"]').value.trim(), sql: fs.querySelector('[name="asql"]').value.trim() })).filter(a => a.name || a.sql);
+        done({ ...spec, title: f.elements.namedItem("title").value.trim(), description: f.elements.namedItem("description").value.trim(), variables, annotations });
       });
       document.getElementById("ds-apply").addEventListener("click", () => { err.hidden = true; let next; try { next = JSON.parse(document.getElementById("ds-json").value); } catch (e) { fail(`That isn't JSON: ${e.message}`); return; } done(next); });
     } };

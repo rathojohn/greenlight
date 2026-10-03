@@ -27,7 +27,7 @@ from bisect import bisect_left
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from . import context
 from .db import day_range, iso, norm_time, parse_time, since, utcnow
@@ -185,6 +185,60 @@ def commits(actions: list[dict[str, Any]], root: str | None) -> list[dict[str, A
     return out
 
 
+def instructions_then(root: str | None) -> Callable[[str], list[tuple[str, int]]]:
+    """CLAUDE.md files as the checkout had them at a time: the ones git tracks from the commit HEAD was on then (its
+    reflog), or from disk when that's the commit it's on now, so an edit not yet committed counts; the rest from disk.
+    For what a transcript doesn't say: the size a session started with."""
+    now = context.instruction_files(root)
+    if not root:
+        return lambda at: now
+    from .gitrepo import GitError, run_git
+
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return run_git(["-C", root, *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20)
+    try:
+        log = [(int(m.group(2)), m.group(1)) for line in git("reflog", "HEAD", "-n", "5000", "--date=unix",
+                                                             "--format=%H%x09%gd").stdout.splitlines()
+               if (m := re.match(r"([0-9a-f]{40})\tHEAD@\{(\d+)\}$", line))]
+        tracked = set(git("ls-files", "--", *context.INSTRUCTION_FILES).stdout.split())
+    except (GitError, OSError, subprocess.TimeoutExpired):
+        return lambda at: now
+    seen: dict[str, list[tuple[str, int]]] = {}
+
+    def then(at: str) -> list[tuple[str, int]]:
+        t = parse_time(at)
+        sha = next((h for ts, h in log if t and ts <= t.timestamp()), log[-1][1] if log else None)  # newest first
+        if not sha or sha == log[0][1]:
+            return now
+        if sha not in seen:
+            out = []
+            for rel in context.INSTRUCTION_FILES:
+                if rel not in tracked:
+                    out += [f for f in now if f[0] == rel]
+                    continue
+                try:
+                    p = git("cat-file", "-p", f"{sha}:{rel}")
+                except (GitError, OSError, subprocess.TimeoutExpired):
+                    return now
+                if p.returncode == 0:
+                    out.append((rel, len(p.stdout)))
+            seen[sha] = out + [f for f in now if f[0] not in context.INSTRUCTION_FILES]
+        return seen[sha]
+    return then
+
+
+def _instructions(files: list[dict[str, Any]], root: str | None) -> list[dict[str, Any]]:
+    """Every window's CLAUDE.md sizes: what its transcript says, else what the checkout had when it started."""
+    then = None
+    for f in files:
+        known = f.setdefault("instructions", {})
+        for r in f["requests"]:
+            if r["window"] not in known:
+                then = then or instructions_then(root)
+                known[r["window"]] = then(r["at"])
+    return files
+
+
 def price(model: str | None) -> tuple[float, ...] | None:
     """A model's API prices per million tokens (input, 5-minute write, 1-hour write, cache read, output), or None."""
     m = (model or "").lower()
@@ -264,7 +318,7 @@ def payload_from_hook(hook: dict[str, Any], env: dict[str, str] | None = None) -
             "rebuilds": [r | {"agent": f["agent"]} for f in files for r in f["rebuilds"]],
             "switches": [r | {"agent": f["agent"]} for f in files for r in f["switches"]],
             "commits": commits([a for f in files for a in f["actions"]], root),
-            **({"items": context.item_rows(files, context.instruction_files(root)), "adds": context.add_rows(files)}
+            **({"items": context.item_rows(_instructions(files, root)), "adds": context.add_rows(files)}
                if labels else {})}
 
 

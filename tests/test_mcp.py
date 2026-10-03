@@ -73,6 +73,7 @@ def test_an_agent_builds_a_dashboard_over_mcp(demo):
             saved = json.loads(text(await s.call_tool("greenlight_dashboard_save", {
                 "title": "Flaky watch", "description": "Which tests fail, by day",
                 "variables": [{"name": "branch", "label": "Branch", "sql": "SELECT DISTINCT branch FROM runs"}],
+                "annotations": [{"name": "Newest run", "sql": "SELECT MAX(started_at), 'Newest run' FROM runs"}],
                 "panels": [{"type": "stat", "title": "Failures", "sql": sql},
                            {"type": "timeseries", "title": "By test", "sql": sql, "display": "bars", "width": 12}]})))
             listed = json.loads(text(await s.call_tool("greenlight_dashboards", {})))
@@ -86,3 +87,4 @@ def test_an_agent_builds_a_dashboard_over_mcp(demo):
     assert saved["route"] == "#/dashboards/flaky-watch" and saved["panels"][0]["rows"] > 0
     assert listed["dashboards"][0]["title"] == "Flaky watch"
     assert one["variables"][0]["options"] and one["panels"][0]["type"] == "stat" and "previous" in one["panels"][0]
+    assert one["annotations"] == [{"name": "Newest run", "sql": "SELECT MAX(started_at), 'Newest run' FROM runs"}]

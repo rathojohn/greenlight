@@ -18,8 +18,10 @@ It also finds cache rebuilds: requests that wrote most of the context to the cac
 And it follows each thing that entered the context on its own (item_rows): a file, a screenshot, a command's
 output, a skill, CLAUDE.md. For each, how many requests it rode along with and what that cost: a screenshot read
 early in a session can be re-read by the next 85 requests. CLAUDE.md is in every request of every session and
-subagent, so it's measured from disk and charged to all of them. Items are named by a label only: a path from
-the repo root, a skill's name, or a command's program and subcommand (never its arguments or output).
+subagent, so it's charged to all of them, at the size each window started with: the transcript has it after a
+compaction (and the new file whenever it changes on disk, which is an add of its own), and the checkout's history
+has it for a session's start. Items are named by a label only: a path from the repo root, a skill's name, or a
+command's program and subcommand (never its arguments or output).
 
 Last, the git work a session did (actions): when it ran a command that can make a commit, so the hook can find the
 commit in the checkout's reflog, and the pull requests it merged.
@@ -248,12 +250,13 @@ def read_file(path: Path, agent: str = "", test: str | None = None, root: str | 
     started: dict[str, Any] = {}          # tool call -> when it was asked for
     actions: list[dict[str, Any]] = []
     seen: set[str] = set()
+    loads: list[tuple[int, bool, dict[str, int]]] = []  # CLAUDE.md attachments: window, changed, label -> chars
     window, compacted = 0, False
     in_context: dict[str, set] = defaultdict(set)  # path -> read ranges still in context, unedited
     try:
         lines = path.open(encoding="utf-8", errors="replace")
     except OSError:
-        return {"requests": [], "items": [], "rebuilds": [], "switches": [], "actions": [],
+        return {"requests": [], "items": [], "rebuilds": [], "switches": [], "actions": [], "instructions": {},
                 "chars_per_token": CHARS_PER_TOKEN}
     with lines:
         for line in lines:
@@ -317,13 +320,37 @@ def read_file(path: Path, agent: str = "", test: str | None = None, root: str | 
                     pending.append(item)
             elif kind == "attachment":
                 a = e.get("attachment") if isinstance(e.get("attachment"), dict) else {}
+                if a.get("type") == "instructions":
+                    loads.append((window, bool(a.get("changed")), {
+                        _rel(str(x.get("path") or ""), root): len(str(x.get("content") or ""))
+                        for x in a.get("files") or [] if isinstance(x, dict)}))
                 if a.get("type") not in _SKIP_ATTACHMENTS and not str(a.get("type") or "").endswith("_record"):
                     pending.extend(_attachment(a, e, root))
     ratio = _chars_per_token(requests)
     for item in items:
         item["tokens"] = round(item["chars"] / ratio) + item["images"]
     return {"requests": requests, "items": items, "rebuilds": _rebuilds(requests), "switches": task_switches(requests),
-            "actions": actions, "chars_per_token": ratio}
+            "actions": actions, "instructions": _loaded(loads, window), "chars_per_token": ratio}
+
+
+def _loaded(loads: list[tuple[int, bool, dict[str, int]]], last: int) -> dict[int, list[tuple[str, int]]]:
+    """The CLAUDE.md files each window started with, where the transcript says. Claude Code attaches them after a
+    compaction, and the new file when one changes on disk (changed, while the old one stays in context). A
+    session's start isn't attached, but it's the first attachment when that isn't a change."""
+    out: dict[int, list[tuple[str, int]]] = {}
+    latest: dict[str, int] = {}
+    for w in range(last + 1):
+        here = [(changed, files) for lw, changed, files in loads if lw == w]
+        start = next((files for changed, files in here if not changed), None)
+        if start is None and w and latest:
+            start = latest  # a compaction reads them from disk again: the newest the transcript has seen
+        elif start is None and not w and loads and not loads[0][1]:
+            start = loads[0][2]
+        if start is not None:
+            out[w] = sorted(start.items())
+        for changed, files in here:
+            latest = {**latest, **files} if changed else dict(files)
+    return out
 
 
 def _result_text(content: Any) -> str:
@@ -363,7 +390,7 @@ def _action(name: str, args: Any, block: dict[str, Any], asked: Any, e: dict[str
 
 def _attachment(a: dict[str, Any], e: dict[str, Any], root: str | None) -> list[dict[str, Any]]:
     """What an attachment put into the context, as items. CLAUDE.md re-read after a compaction is left to
-    item_rows, which charges it to every request from the file on disk."""
+    item_rows, which charges it to every request in the window."""
     base = {"category": None, "images": 0, "at": e.get("timestamp"), "branch": e.get("gitBranch") or ""}
     kind = a.get("type")
     if kind == "invoked_skills":
@@ -377,7 +404,11 @@ def _attachment(a: dict[str, Any], e: dict[str, Any], root: str | None) -> list[
     if kind == "mcp_instructions_delta":
         return [base | {"chars": len(json.dumps(a.get("addedBlocks") or [])), "who": ("MCP server instructions",
                                                                                      "instructions", "instructions")}]
-    if kind == "instructions":
+    if kind == "instructions" and a.get("changed"):  # a CLAUDE.md that changed on disk, added next to the old one
+        return [base | {"chars": len(str(x.get("content") or "")),
+                        "who": (_rel(str(x.get("path") or ""), root), "instructions", "instructions")}
+                for x in a.get("files") or [] if isinstance(x, dict)]
+    if kind == "instructions":  # what a window starts with: item_rows charges it to every request in the window
         return [base | {"chars": len(json.dumps(a))}]
     label = REMINDERS.get(kind) or str(kind or "notice").replace("_", " ")
     return [base | {"chars": len(json.dumps(a)), "who": (label, "reminder", "reminders")}]
@@ -525,7 +556,9 @@ def item_rows(files: list[dict[str, Any]], instructions: Iterable[tuple[str, int
     that run that read it from the cache (rides), and what those reads cost. A screenshot read on one branch and
     carried on into the next task is charged to each run for the requests that carried it there. The `limit`
     costliest items, and CLAUDE.md always, which every request carries: each run gets its requests' reads, and
-    the requests that wrote it (a window's first, a rebuild, a subagent's first) as adds."""
+    the requests that wrote it (a window's first, a rebuild, a subagent's first) as adds, at the size its window
+    started with (a file's `instructions`, else these)."""
+    instructions = list(instructions)
     out: dict[tuple, dict[str, Any]] = {}
     totals: dict[tuple, int] = defaultdict(int)
 
@@ -570,13 +603,14 @@ def item_rows(files: list[dict[str, Any]], instructions: Iterable[tuple[str, int
                     add(label, kind, group, seg, rides=n, carried_tokens=n * item["tokens"])
         longest = max(sum(_reads_cache(reqs, i) for i in range(len(reqs)) if reqs[i]["window"] == w)
                       for w in {r["window"] for r in reqs})
-        for label, chars in instructions:
-            t = round(chars / ratio)
-            for seg in segs:
-                n = reads[seg[1]] - reads[seg[0]]
-                writes = (seg[1] - seg[0]) - n
-                add(label, "instructions", "instructions", seg, adds=writes, tokens=t * writes, rides=n, longest=longest,
-                    carried_tokens=t * n)
+        started = f.get("instructions") or {}
+        for seg in segs:
+            for i in range(seg[0], seg[1]):
+                read = _reads_cache(reqs, i)
+                for label, chars in started.get(reqs[i]["window"], instructions):
+                    t = round(chars / ratio)
+                    add(label, "instructions", "instructions", seg, adds=0 if read else 1, tokens=0 if read else t,
+                        rides=int(read), longest=longest, carried_tokens=t if read else 0)
     keep = {k for k, _ in sorted(totals.items(), key=lambda kv: -kv[1])[:limit]}
     return [r for r in out.values() if (r["label"], r["kind"]) in keep or r["kind"] == "instructions"]
 

@@ -400,15 +400,23 @@ class Panel(BaseModel):
     width: Literal[3, 4, 6, 8, 12] | None = Field(None, description="Of 12 columns. Default 3 for a stat, else 6.")
     display: Literal["bars", "line", "area"] | None = Field(None, description="timeseries: stacked bars (default), "
                                                                                "lines or area.")
-    unit: Literal["auto", "count", "tokens", "ms", "percent"] = "auto"
+    unit: Literal["auto", "count", "tokens", "usd", "ms", "percent"] = "auto"
     calc: Literal["total", "last", "mean", "max"] | None = Field(None, description="stat: how rows fold into one "
-                                                                                    "number. Default total.")
+                                                                                    "number. Default total. timeseries: "
+                                                                                    "the legend's figure; mean for a "
+                                                                                    "ratio like tokens per request.")
     compare: bool | None = Field(None, description="Also show the period before. Default on for a stat.")
     thresholds: Thresholds | None = None
-    events: bool | None = Field(None, description="timeseries: mark deploys and merges. Default on.")
+    events: bool | None = Field(None, description="timeseries: mark deploys, merges and annotations. Default on.")
     note: Annotated[str, Field(max_length=400, description="What it shows, in a sentence: the (i) tip.")] = ""
     text: Annotated[str, Field(max_length=4000, description="text: markdown.")] = ""
     collapsed: bool | None = None
+
+
+class Annotation(BaseModel):
+    name: Annotated[str, Field(min_length=1, max_length=60)]
+    sql: Annotated[str, Field(min_length=1, description="Rows of (time, label): SELECT '2026-10-03T00:15:00+00:00', "
+                                                        "'Trimmed CLAUDE.md' for one moment, or a query that finds them.")]
 
 
 class Variable(BaseModel):
@@ -452,6 +460,8 @@ def dashboard_save(
     description: Annotated[str, Field(max_length=400)] = "",
     dashboard_id: Annotated[str | None, Field(description="The dashboard to replace. Default: one named from the "
                                                           "title, replaced if it exists.")] = None,
+    annotations: Annotated[list[Annotation] | None, Field(max_length=10, description="Labeled vertical lines on every "
+                                                          "time series, to see what followed a change.")] = None,
 ) -> str:
     """Create a dashboard, or replace one: SQL panels like Grafana's (greenlight_schema says how rows are drawn).
     Every query runs first, and nothing is saved while one fails; the result has each panel's columns and first rows
@@ -460,6 +470,7 @@ def dashboard_save(
 
     def go(c: sqlite3.Connection) -> Any:
         spec = {"description": description, "variables": [v.model_dump(exclude_none=True) for v in variables or []],
+                "annotations": [a.model_dump() for a in annotations or []],
                 "panels": [p.model_dump(exclude_none=True) for p in panels]}
         with closing(connect(readonly=True)) as ro:
             return dashboards.save(c, title, spec, dashboard_id, check=ro)

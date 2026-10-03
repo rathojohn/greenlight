@@ -73,9 +73,13 @@ def test_a_dashboard_saves_only_when_every_query_runs(db):
                          ({"panels": [{"type": "stat", "title": "x", "sql": "SELECT 1", "width": 5}]}, "width"),
                          ({"variables": [{"name": "start", "values": ["a"]}]}, "not start"),
                          ({"variables": [{"name": "b", "values": ["a"]}, {"name": "b", "values": ["c"]}]}, "same name"),
-                         ({"panels": [{"type": "stat", "title": "x", "sql": "SELECT :nope"}]}, "nope")):
+                         ({"panels": [{"type": "stat", "title": "x", "sql": "SELECT :nope"}]}, "nope"),
+                         ({"panels": [{"title": "x", "sql": "SELECT 1", "calc": "median"}]}, "calc is one of")):
             with pytest.raises(ValueError, match=msg):
                 dashboards.save(conn, "Bad", bad)
+        line = {"title": "Tokens per request", "sql": "SELECT 1", "display": "line"}
+        assert dashboards._panel({**line, "calc": "mean"}, 0)["calc"] == "mean"  # the legend averages a ratio
+        assert "calc" not in dashboards._panel(line, 0)  # unset: total, or mean for durations and percents
         assert [d["id"] for d in dashboards.all_dashboards(conn)] == ["login"]
         assert dashboards.slug("What's trending") == "whats-trending"
         assert dashboards.delete(conn, "login") and not dashboards.all_dashboards(conn)
@@ -94,6 +98,27 @@ def test_a_dashboard_renders_with_its_variables_the_period_before_and_events(db)
         main = dashboards.render(conn, "login", 30, {"branch": "main"})
         assert main["variables"][0]["value"] == "main" and sum(r[1] for r in main["panels"][0]["result"]["rows"]) == 1
         assert dashboards.render(conn, "login", 2)["panels"][0]["result"]["rows"][0][0].endswith(":00")  # hourly
+
+
+def test_annotations_mark_a_change_on_every_time_series(db):
+    notes = [{"name": "Trimmed CLAUDE.md", "sql": f"SELECT '{ago(10)}', NULL"},
+             {"name": "Merges", "sql": "SELECT merged_at, 'Merged ' || title FROM pull_requests WHERE number = 4"},
+             {"name": "Long ago", "sql": f"SELECT '{ago(40)}', 'Before the window'"}]
+    with closing(connect(db)) as conn:
+        for bad, msg in (([{"name": "x", "sql": "SELECT 1, 'not a time'"}], "Nothing saved.*annotation x.*first column is the time"),
+                         ([{"name": "x"}], "annotation 1: send"), ([{"name": "x", "sql": "SELECT 'a'"}] * 11, "at most 10")):
+            with pytest.raises(ValueError, match=msg):
+                dashboards.save(conn, "Login", {**SPEC, "annotations": bad})
+        dashboards.save(conn, "Login", {**SPEC, "annotations": notes})
+        d = dashboards.render(conn, "login", 30)
+        assert [(e["kind"], e.get("label")) for e in d["events"]] == [
+            ("annotation", "Trimmed CLAUDE.md"), ("merge", "Merged #4 Fix login"), ("annotation", "Merged Fix login"),
+            ("deploy", "Deployed v1 to production")]
+        assert [a["name"] for a in d["annotations"]] == ["Trimmed CLAUDE.md", "Merges", "Long ago"]
+        conn.execute("UPDATE pull_requests SET merged_at = 'soon'")  # data changed under a saved query
+        d = dashboards.render(conn, "login", 30)
+        assert "first column" in d["annotations"][1]["error"] and [e["kind"] for e in d["events"]] == ["annotation", "deploy"]
+        assert web.GET_ROUTES["/api/dashboard"](conn, {"id": "login", "days": "30"})["annotations"][0]["sql"] == notes[0]["sql"]
 
 
 def test_the_starter_dashboard_runs_on_an_empty_database(tmp_path):
