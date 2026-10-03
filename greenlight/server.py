@@ -372,8 +372,9 @@ def query(
     window_days: WindowDays = 30,
 ) -> str:
     """Read-only SQL for questions the other tools don't cover, and to try a dashboard panel's query before saving
-    it. Reads only, stopped after 5 seconds. bucket(time) groups by hour or day; cost(input, output, cache_read,
-    cache_write, cache_write_1h) prices tokens as input tokens."""
+    it. Reads only, stopped after 5 seconds. bucket(time) groups by hour or day; usd(input, output, cache_read,
+    cache_write, cache_write_1h, model) prices agent_usage tokens in dollars at API list prices, and cost(the same)
+    as input tokens of that model."""
     from . import dashboards
     return _run(lambda c: dashboards.run(c, sql, window_days, limit))
 
