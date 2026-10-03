@@ -41,6 +41,11 @@ def _int(p: Params, key: str, default: int, lo: int = 1, hi: int = 365) -> int:
         raise ValueError(f"'{key}' must be a whole number")
 
 
+def _range(p: Params) -> float:
+    """A dashboard's range in days: hours when given (the last hour is hours=1), else days."""
+    return _int(p, "hours", 24, hi=365 * 24) / 24 if p.get("hours") not in (None, "") else _int(p, "days", 30)
+
+
 def _require(p: Params, key: str) -> str:
     if not p.get(key):
         raise ValueError(f"missing '{key}'")
@@ -75,9 +80,9 @@ GET_ROUTES: dict[str, Callable[[sqlite3.Connection, Params], Any]] = {
     "/api/commits": lambda c, p: commits.commit_list(c, _int(p, "days", 30)),
     "/api/commit": lambda c, p: commits.commit_detail(c, _require(p, "sha")),
     "/api/dashboards": lambda c, p: {"dashboards": dashboards.all_dashboards(c)},
-    "/api/dashboard": lambda c, p: dashboards.render(c, _require(p, "id"), _int(p, "days", 30),
+    "/api/dashboard": lambda c, p: dashboards.render(c, _require(p, "id"), _range(p),
                                                      {k[4:]: v for k, v in p.items() if k.startswith("var-")}),
-    "/api/sql": lambda c, p: dashboards.run(c, _require(p, "q"), _int(p, "days", 30),
+    "/api/sql": lambda c, p: dashboards.run(c, _require(p, "q"), _range(p),
                                             values={k[4:]: None if v in ("", "__all") else v for k, v in p.items()
                                                     if k.startswith("var-")}),
     "/api/schema": lambda c, p: dashboards.schema(),
@@ -106,7 +111,7 @@ POST_ROUTES: dict[str, Callable[[sqlite3.Connection, dict], Any]] = {
     "/api/usage": lambda c, b: usage.store(c, b),
     "/api/forget": lambda c, b: {"forgotten": analysis.forget_runs(c, _require(b, "runs"), bool(b.get("dry_run")))},
     "/api/dashboards": lambda c, b: dashboards.add_starter(c) if b.get("starter") else dashboards.save(
-        c, b.get("title"), b, b.get("id"), days=_int(b, "days", 30)),
+        c, b.get("title"), b, b.get("id"), days=_range(b)),
     "/api/dashboards/delete": lambda c, b: {"deleted": dashboards.delete(c, _require(b, "id"))},
 }
 

@@ -177,6 +177,9 @@ READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=
 WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 
 WindowDays = Annotated[int, Field(ge=1, le=365, description="Lookback window in days.")]
+WindowHours = Annotated[int | None, Field(ge=1, le=48, description="A range in hours instead of days, like the last "
+                                                                    "hour or 6: bucket() then goes by the minute, 5 "
+                                                                    "or 10 minutes, or the hour.")]
 
 
 def not_ready() -> str | None:
@@ -365,18 +368,19 @@ def suite_forecast(
 
 @mcp.tool(name="greenlight_query", annotations=READ)
 def query(
-    sql: Annotated[str, Field(min_length=6, description="One SELECT (or WITH ... SELECT). :start, :end, :days and "
-                                                        ":today follow window_days. greenlight_schema lists every "
-                                                        "table and column.")],
+    sql: Annotated[str, Field(min_length=6, description="One SELECT (or WITH ... SELECT). :start, :end, :days, "
+                                                        ":hours and :today follow the range. greenlight_schema lists "
+                                                        "every table and column.")],
     limit: Annotated[int, Field(ge=1, le=1000)] = 200,
     window_days: WindowDays = 30,
+    window_hours: WindowHours = None,
 ) -> str:
     """Read-only SQL for questions the other tools don't cover, and to try a dashboard panel's query before saving
-    it. Reads only, stopped after 5 seconds. bucket(time) groups by hour or day; usd(input, output, cache_read,
-    cache_write, cache_write_1h, model) prices agent_usage tokens in dollars at API list prices, and cost(the same)
-    as input tokens of that model."""
+    it. Reads only, stopped after 5 seconds. bucket(time) groups by minutes, the hour or the day; usd(input, output,
+    cache_read, cache_write, cache_write_1h, model) prices agent_usage tokens in dollars at API list prices, and
+    cost(the same) as input tokens of that model."""
     from . import dashboards
-    return _run(lambda c: dashboards.run(c, sql, window_days, limit))
+    return _run(lambda c: dashboards.run(c, sql, window_hours / 24 if window_hours else window_days, limit))
 
 
 @mcp.tool(name="greenlight_schema", annotations=READ)
@@ -433,6 +437,7 @@ def dashboards_tool(
     dashboard_id: Annotated[str | None, Field(description="One dashboard, with its spec and each panel's first rows. "
                                                           "Default: the list.")] = None,
     window_days: WindowDays = 30,
+    window_hours: WindowHours = None,
 ) -> str:
     """The dashboards people and agents have made, or one of them with its variables, panels and first rows, to change
     it with greenlight_dashboard_save."""
@@ -441,7 +446,7 @@ def dashboards_tool(
     def go(c: sqlite3.Connection) -> Any:
         if not dashboard_id:
             return {"dashboards": dashboards.all_dashboards(c)}
-        d = dashboards.render(c, dashboard_id, window_days)
+        d = dashboards.render(c, dashboard_id, window_hours / 24 if window_hours else window_days)
         d.pop("events", None)
         for p in d["panels"]:
             for k in ("result", "previous"):

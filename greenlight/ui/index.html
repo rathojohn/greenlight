@@ -654,9 +654,18 @@ const SNAP = JSON.parse(document.getElementById("snapshot").textContent || "null
 const LIVE = !SNAP;
 const NOW = SNAP ? new Date(SNAP.generated_at) : new Date();
 const view = document.getElementById("view");
-const RANGES = [1, 7, 14, 30, 90];
-const rangeName = n => n === 1 ? "Last 24 hours" : `Last ${n} days`;
-let DAYS = SNAP ? SNAP.days : (() => { try { return Number(localStorage.getItem("greenlight-days")) || 30; } catch { return 30; } })();
+/* the time range in hours. Dashboards and SQL go down to the last hour; every other page reads whole days (DAYS) */
+const RANGES = [1, 6, 12, 24, 48, 168, 336, 720, 2160];
+const rangeName = h => h === 1 ? "Last hour" : h <= 24 || h % 24 ? `Last ${h} hours` : `Last ${h / 24} days`;
+const periodName = h => h === 1 ? "hour" : h === 24 ? "day" : h < 24 || h % 24 ? `${h} hours` : `${h / 24} days`;
+let HOURS = SNAP ? SNAP.days * 24 : (() => {
+  const ok = h => h >= 1 && h <= 8760 ? h : 0;
+  try { return ok(Number(localStorage.getItem("greenlight-hours"))) || ok(Number(localStorage.getItem("greenlight-days")) * 24) || 720; } catch { return 720; }
+})();
+let DAYS = Math.max(1, Math.ceil(HOURS / 24));
+/* a dashboard's range as the API takes it: whole days stay days, so snapshot keys and caches match */
+const rangeQ = () => HOURS % 24 ? { hours: HOURS } : { days: HOURS / 24 };
+const fineRange = () => /^#\/(dashboards\/|sql$)/.test(hashParts()[0]);
 let renderToken = 0;
 
 /* ---------- data ---------- */
@@ -1044,24 +1053,27 @@ function drawChart(el) {
   }
   for (const t of s.thresholds || []) if (t.v >= 0 && t.v <= top) g += `<line class="thr" x1="${m.l}" x2="${W - m.r}" y1="${y(t.v)}" y2="${y(t.v)}" style="stroke:${t.color}"/>`;
   for (const l of lines) {
-    let d = "", pen = false, start = null, last = null;
+    /* runs of points the pen draws through: a missing value lifts it, unless the line connects past slots with no row */
     const runs = [];
+    let run = null;
     l.values.forEach((v, i) => {
-      if (v == null) { if (pen) runs.push([start, last]); pen = false; return; }
-      d += `${pen ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)} `;
-      if (!pen) start = i; last = i; pen = true;
-      const lone = (i === 0 || l.values[i - 1] == null) && (i === l.values.length - 1 || l.values[i + 1] == null);
-      if (lone || l.dots) g += `<circle cx="${x(i)}" cy="${y(v)}" r="3.5" style="fill:${l.color};stroke:var(--panel);stroke-width:2"/>`;
+      if (v == null) { if (!l.connect || (l.breaks && l.breaks.has(i))) run = null; return; }
+      if (!run) runs.push(run = []);
+      run.push(i);
     });
-    if (pen) runs.push([start, last]);
+    let d = "";
+    for (const r of runs) r.forEach((i, k) => {
+      d += `${k ? "L" : "M"}${x(i).toFixed(1)},${y(l.values[i]).toFixed(1)} `;
+      if (r.length === 1 || l.dots) g += `<circle cx="${x(i)}" cy="${y(l.values[i])}" r="3.5" style="fill:${l.color};stroke:var(--panel);stroke-width:2"/>`;
+    });
     if (l.area) {
       const id = `ga${++GID}`;
       g += `<defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:${l.color};stop-opacity:.28"/><stop offset="1" style="stop-color:${l.color};stop-opacity:0"/></linearGradient></defs>`;
-      for (const [a, b] of runs) {
-        if (a === b) continue;
-        let p = `M${x(a).toFixed(1)},${y(0)} `;
-        for (let i = a; i <= b; i++) p += `L${x(i).toFixed(1)},${y(l.values[i]).toFixed(1)} `;
-        g += `<path d="${p}L${x(b).toFixed(1)},${y(0)} Z" fill="url(#${id})"/>`;
+      for (const r of runs) {
+        if (r.length < 2) continue;
+        let p = `M${x(r[0]).toFixed(1)},${y(0)} `;
+        for (const i of r) p += `L${x(i).toFixed(1)},${y(l.values[i]).toFixed(1)} `;
+        g += `<path d="${p}L${x(r[r.length - 1]).toFixed(1)},${y(0)} Z" fill="url(#${id})"/>`;
       }
     }
     g += `<path class="line" d="${d}" style="stroke:${l.color}${l.dash ? ";stroke-dasharray:5 4" : ""}"/>`;
@@ -1193,7 +1205,7 @@ async function overviewView(tok) {
   const share = d.days.map((_, i) => { const all = d.runs_first[i] + d.runs_rerun[i]; return all ? d.runs_rerun[i] / all : null; });
   const field = f.tests.length ? `<div class="hm">${f.tests.map(r => `<a class="hmr" href="${esc(panelHref(`test:${r.test_id}`))}"><span class="n" data-tip="${esc(r.test_id)}">${esc(splitId(r.test_id)[1])}${r.quarantined ? ' <span class="q">quarantined</span>' : ""}</span>${cells(r.cells, f.commits)}</a>`).join("")}
       <div class="hmx"><span></span><span><span>${f.commits.length ? esc(ago(f.commits[0].first_at)) : ""}</span><span>Latest commit</span></span></div></div>`
-    : `<p class="empty">No test failed in the last ${DAYS} days.</p>`;
+    : `<p class="empty">No test failed in the last ${periodName(DAYS * 24)}.</p>`;
   view.innerHTML = `
     <div class="grid">
       ${panel({ cls: "s6", title: "Latest gate decision", tip: "What the gate decided for the newest run: block on a real failure, rerun only known flaky tests, or pass.", actions: d.latest ? `<a class="lnk" href="#/run/${d.latest.run.run_id}">Open run</a>` : "", body: gate(d.latest) })}
@@ -1236,9 +1248,9 @@ async function flakyView(tok) {
   const rows = d.tests.filter(r => !st || (st === "quarantined" ? r.quarantined : r.classification === st && !r.quarantined));
   const chips = chipBar("status", [...[...by].map(([v, n]) => [v, CLS[v] || v.replace(/_/g, " "), n, tone[ST[v]] || "var(--neutral)"]),
     ...(nq ? [["quarantined", "Quarantined", nq, "var(--quar)"]] : [])], "All tests", d.tests.length);
-  view.innerHTML = `<div class="fbar">${chips}</div><div class="grid">${panel({ title: "Flaky tests", tip: `Tests that passed and failed on the same code in the last ${DAYS} days.`, flush: true,
+  view.innerHTML = `<div class="fbar">${chips}</div><div class="grid">${panel({ title: "Flaky tests", tip: `Tests that passed and failed on the same code in the last ${periodName(DAYS * 24)}.`, flush: true,
     actions: `<input type="search" class="inp" id="q" placeholder="Filter tests" aria-label="Filter tests"><span class="dim" id="count"></span>`,
-    body: table("t-flaky", cols, rows, { sort: 3, limit: 20, panel: r => `test:${r.test_id}`, empty: d.tests.length ? "No test matches." : `No test flipped in the last ${DAYS} days. Flips need a commit tested more than once.` }) })}</div>`;
+    body: table("t-flaky", cols, rows, { sort: 3, limit: 20, panel: r => `test:${r.test_id}`, empty: d.tests.length ? "No test matches." : `No test flipped in the last ${periodName(DAYS * 24)}. Flips need a commit tested more than once.` }) })}</div>`;
   const q = document.getElementById("q");
   const draw = () => {
     const term = q.value.trim().toLowerCase();
@@ -1305,7 +1317,7 @@ async function testView(tok, id) {
       ${perf ? panel({ cls: "s6", title: "Measured", tip: `This check's number on each run${m.names.includes("base_ms") ? ", next to the base build it was measured against" : ""}.${budget != null ? ` Budget ${budget} ms.` : ""}`, body: `<div class="chart" id="c-perf"></div>`, foot: m.names.includes("base_ms") ? legend([["var(--series)", "This build", true], ["var(--ink-3)", "Base build", true]]) : "" }) : ""}
     </div>
     <div class="grid">
-      ${panel({ cls: "s5", title: "Failure messages", flush: true, body: d.signatures.length ? `<div class="sigs">${d.signatures.map(g => `<div class="sig"><div class="kv"><span><b>${plural(g.count, "failure")}</b></span><span>last ${when(g.last_at)}</span></div><div class="msg">${esc(g.sample || "(no message)")}</div></div>`).join("")}</div>` : `<p class="empty">No failures in the last ${DAYS} days.</p>` })}
+      ${panel({ cls: "s5", title: "Failure messages", flush: true, body: d.signatures.length ? `<div class="sigs">${d.signatures.map(g => `<div class="sig"><div class="kv"><span><b>${plural(g.count, "failure")}</b></span><span>last ${when(g.last_at)}</span></div><div class="msg">${esc(g.sample || "(no message)")}</div></div>`).join("")}</div>` : `<p class="empty">No failures in the last ${periodName(DAYS * 24)}.</p>` })}
       ${panel({ cls: "s7", title: "Executions", flush: true, actions: `<span class="dim">${d.executions.length}</span>`, body: table("t-exec", execCols, d.executions, { limit: 15, panel: e => `run:${e.run_id}` }) })}
     </div>`;
   const el = document.getElementById("c-dur");
@@ -1483,10 +1495,10 @@ async function quarantineView(tok) {
       ${stat({ cls: "s4", k: "Ready to release", v: d.release_candidates.length, s: "clean for 14 days" })}
     </div>
     ${LIVE && d.suggested.length ? `<div class="grid"><article class="panel s12 ask"><div class="pb"><p class="q">Quarantine ${d.suggested.length === 1 ? "this flaky test" : `these ${d.suggested.length} flaky tests`}?</p>
-      <p class="dim">${d.suggested.slice(0, 3).map(r => esc(splitId(r.test_id)[1])).join(", ")}${d.suggested.length > 3 ? ` and ${d.suggested.length - 3} more` : ""} flipped on 2 or more commits in the last ${DAYS} days. Quarantined tests keep running and being recorded; they stop blocking, and you can release them any time.</p>
+      <p class="dim">${d.suggested.slice(0, 3).map(r => esc(splitId(r.test_id)[1])).join(", ")}${d.suggested.length > 3 ? ` and ${d.suggested.length - 3} more` : ""} flipped on 2 or more commits in the last ${periodName(DAYS * 24)}. Quarantined tests keep running and being recorded; they stop blocking, and you can release them any time.</p>
       <div class="btns"><button class="btn" type="button" data-act="qall">Quarantine ${d.suggested.length === 1 ? "it" : `all ${d.suggested.length}`}</button><button class="btn ghost" type="button" data-act="scroll" data-to="sug">Pick them one by one</button></div></div></article></div>` : ""}
     <div class="grid">
-      ${panel({ title: "Suggested", tip: `Flipped on 2 or more commits in the last ${DAYS} days and not quarantined yet.`, flush: true, id: "sug",
+      ${panel({ title: "Suggested", tip: `Flipped on 2 or more commits in the last ${periodName(DAYS * 24)} and not quarantined yet.`, flush: true, id: "sug",
         body: table("t-sug", sugCols, d.suggested, { sort: 1, limit: 15, panel: r => `test:${r.test_id}`, empty: "Nothing to suggest." }) })}
     </div>
     <div class="grid">
@@ -1501,7 +1513,7 @@ async function pipelinesView(tok) {
   const d = await api("/api/pipelines", { days: DAYS });
   if (tok !== renderToken) return;
   if (!d.recent.length) {
-    view.innerHTML = `<div class="grid">${noData(`No GitHub Actions runs in the last ${DAYS} days.`, "Set <code>[github] repo</code> in <code>greenlight.toml</code> and run <code>greenlight sync</code>.")}</div>`;
+    view.innerHTML = `<div class="grid">${noData(`No GitHub Actions runs in the last ${periodName(DAYS * 24)}.`, "Set <code>[github] repo</code> in <code>greenlight.toml</code> and run <code>greenlight sync</code>.")}</div>`;
     return;
   }
   const t = d.totals;
@@ -1661,7 +1673,7 @@ async function deliveryView(tok) {
       ${panel({ cls: "s6", title: "Lead time", tip: "Median per day, from each shipped commit to its deployment.", body: `<div class="chart" id="c-lead"></div>` })}
     </div>
     <div class="grid">
-      ${panel({ title: `Deployments to ${o.environment}`, flush: true, actions: `<span class="dim">${o.deployments.length}</span>`, body: table("t-dep", depCols, o.deployments, { limit: 15, empty: `No deployments to ${esc(o.environment)} in the last ${DAYS} days.` }) })}
+      ${panel({ title: `Deployments to ${o.environment}`, flush: true, actions: `<span class="dim">${o.deployments.length}</span>`, body: table("t-dep", depCols, o.deployments, { limit: 15, empty: `No deployments to ${esc(o.environment)} in the last ${periodName(DAYS * 24)}.` }) })}
     </div>`;
   const prs = pr.metrics.merged + pr.metrics.open + pr.metrics.opened ? `
     <div class="grid">
@@ -1677,7 +1689,7 @@ async function deliveryView(tok) {
   const issues = is.metrics.open + is.metrics.opened + is.managed.length ? `
     <div class="grid">
       ${stat({ cls: "s3", k: "Open", v: is.metrics.open, s: `median age ${hrs(is.metrics.open_age_p50_h)}`, spark: is.open_per_day })}
-      ${stat({ cls: "s3", k: "Opened", v: is.metrics.opened, s: `in ${DAYS} days`, spark: is.opened_per_day })}
+      ${stat({ cls: "s3", k: "Opened", v: is.metrics.opened, s: `in the last ${periodName(DAYS * 24)}`, spark: is.opened_per_day })}
       ${stat({ cls: "s3", k: "Closed", v: is.metrics.closed, s: `median ${hrs(is.metrics.time_to_close_p50_h)} to close`, spark: is.closed_per_day })}
       ${stat({ cls: "s3", k: "Opened by greenlight", v: is.managed.filter(i => i.state === "open").length, s: "flaky tests and perf, open" })}
     </div>
@@ -1718,7 +1730,7 @@ async function commitsView(tok, tab) {
   const d = await api("/api/commits", { days: DAYS });
   if (tok !== renderToken) return;
   if (!d.commits.length && !d.merges.length) {
-    view.innerHTML = `<div class="grid">${noData(`No commits in the last ${DAYS} days.`, "Commits come from test runs, CI, synced pull requests and the usage hook, which records the commits each Claude Code session makes.")}</div>`;
+    view.innerHTML = `<div class="grid">${noData(`No commits in the last ${periodName(DAYS * 24)}.`, "Commits come from test runs, CI, synced pull requests and the usage hook, which records the commits each Claude Code session makes.")}</div>`;
     return;
   }
   const tabs = `<nav class="tabs" aria-label="Commits">${COMMIT_TABS.map(([k, label]) => `<a href="#/commits${k ? "/" + k : ""}"${k === tab ? ` aria-current="page"` : ""}>${label} <span class="n">${(k ? d.merges : d.commits).length}</span></a>`).join("")}</nav>`;
@@ -1824,7 +1836,7 @@ function changeCard(list) {
   const f = v => v == null ? "n/a" : fmtBy(fkey, v), up = (c.value || 0) >= (c.previous || 0);
   const worse = up === (c.higher_is === "worse");
   const sentence = c.previous == null || c.value === c.previous ? `<b>${esc(c.title)}</b> held at ${f(c.value)}.`
-    : `<b>${esc(c.title)}</b> went ${up ? "up" : "down"} to <span class="${worse ? "bad" : "good"}">${f(c.value)}</span> from ${f(c.previous)} the ${DAYS === 1 ? "day" : `${DAYS} days`} before.`;
+    : `<b>${esc(c.title)}</b> went ${up ? "up" : "down"} to <span class="${worse ? "bad" : "good"}">${f(c.value)}</span> from ${f(c.previous)} the ${periodName(DAYS * 24)} before.`;
   const movers = (c.movers || []).slice(0, 3).map(m => `<div class="mv">${entity(c.mover_kind === "test" ? splitId(m.label)[1] : m.label, m.panel)}<span class="${(m.delta > 0) === (c.higher_is === "worse") ? "bad" : "good"} mono">${m.delta > 0 ? "+" : m.delta < 0 ? "-" : ""}${fmtBy(fkey === "pct" ? "count" : fkey, Math.abs(m.delta))}</span></div>`).join("");
   return `<section class="panel insight s8" id="insight">
     <header class="ph"><h2>What changed</h2><span class="cnt">${list.length}</span>${info("Each number this period against the period before, and what moved it most.")}
@@ -1931,7 +1943,7 @@ const WIDTHS = [[3, "A quarter"], [4, "A third"], [6, "Half"], [8, "Two thirds"]
 const REFRESHES = [["", "Off"], ["60", "Every minute"], ["300", "Every 5 minutes"], ["900", "Every 15 minutes"]];
 const isDay = v => typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v);
 const isHour = v => typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}/.test(v);
-const fmtHour = v => v.slice(11, 13) === "00" ? fmtDay(v) : v.slice(11, 16);
+const fmtHour = v => v.slice(11, 16) === "00:00" ? fmtDay(v) : v.slice(11, 16);
 /* how a column's numbers read: the panel's unit, else its name (_ms a duration, _rate or _share a percent, dollars or _usd in dollars, tokens or cost in k and M) */
 const colFmt = name => /(^|_)(dollars|usd)$/i.test(name) ? "usd" : /_ms$/i.test(name) ? "ms" : /(_rate|_share|_pct)$/i.test(name) ? "pct" : /token|cost/i.test(name) ? "tok" : "count";
 const unitFmt = (unit, name) => ({ tokens: "tok", usd: "usd", ms: "ms", percent: "pct", count: "count" })[unit] || colFmt(name || "");
@@ -1945,23 +1957,27 @@ function entityLink(name, v, inner) {
   if (kind) return panelLink(`${kind}:${v}`, inner);
   return n === "pipeline_id" ? `<a class="tl" href="${esc(pipeHref(String(v)))}">${inner}</a>` : inner;
 }
-/* every bucket of the time range (and any row outside it), by hour or by day */
-function timeAxis(keys, hourly) {
-  const step = hourly ? 3600000 : 86400000, n = hourly ? DAYS * 24 : DAYS, now = Math.floor(Date.now() / step) * step;
-  const key = t => hourly ? new Date(t).toISOString().slice(0, 13) + ":00" : new Date(t).toISOString().slice(0, 10);
-  const ms = k => Date.parse(hourly ? `${k.slice(0, 13)}:00:00Z` : `${k.slice(0, 10)}T00:00:00Z`);
-  const ts = keys.map(ms).filter(t => !isNaN(t));
-  const out = [];
-  for (let t = Math.min(now - (n - 1) * step, ...ts), end = Math.max(now, ...ts); t <= end && out.length < 2400; t += step) out.push(key(t));
+/* a time key's start in ms (minutes and below dropped), and the key of the bucket of `size` minutes a time falls in */
+const keyMs = v => Date.parse(`${v.slice(0, 10)}T${v.slice(11, 13) || "00"}:${v.slice(14, 16) || "00"}:00Z`);
+const slotKey = (t, size) => { const step = size * 60000; return new Date(Math.floor(t / step) * step).toISOString().slice(0, size < 1440 ? 16 : 10); };
+/* every bucket of the time range (and rows outside it, up to 2,400 buckets back from the latest), size in minutes */
+function timeAxis(keys, size) {
+  const step = size * 60000, n = Math.max(1, Math.ceil(HOURS * 60 / size)), now = Math.floor(Date.now() / step) * step;
+  const ts = keys.map(keyMs).filter(t => !isNaN(t));
+  const end = Math.max(now, ...ts), out = [];
+  for (let t = Math.max(Math.min(now - (n - 1) * step, ...ts), end - 2399 * step); t <= end; t += step) out.push(slotKey(t, size));
   return out;
 }
-/* rows as series: (time, value, value...) or (time, group, value), the six biggest groups and the rest as Other */
-function toSeries(cols, rows, filled) {
+/* rows as series: (time, value, value...) or (time, group, value), the six biggest groups and the rest as Other.
+   bucket: the minutes bucket() grouped by (the result says); times of day without one go by the hour.
+   breaks: the slots a row gave NULL, where a line stops; a slot with no row at all is bridged, as in Grafana */
+function toSeries(cols, rows, filled, bucket) {
   if (cols.length < 2) return null;
   const long = cols.length === 3 && rows.some(r => typeof r[1] === "string") && rows.every(r => r[2] == null || typeof r[2] === "number");
-  const timed = rows.length > 0 && rows.every(r => isDay(r[0])), hourly = timed && rows.every(r => isHour(r[0]));
-  const key = r => timed ? (hourly ? String(r[0]).slice(0, 13) + ":00" : String(r[0]).slice(0, 10)) : String(r[0] ?? "");
-  const xs = timed ? timeAxis([...new Set(rows.map(key))], hourly) : [...new Set(rows.map(key))];
+  const timed = rows.length > 0 && rows.every(r => isDay(r[0]));
+  const size = !timed ? 0 : rows.every(r => isHour(r[0])) ? Math.min(bucket || 60, 60) : 1440;
+  const key = r => { const v = String(r[0] ?? ""), t = timed ? keyMs(v) : NaN; return isNaN(t) ? v : slotKey(t, size); };
+  const xs = timed ? timeAxis([...new Set(rows.map(key))], size) : [...new Set(rows.map(key))];
   const at = new Map(xs.map((x, i) => [x, i]));
   const blank = () => xs.map(() => filled ? 0 : null);
   let sers, valueCol;
@@ -1972,17 +1988,18 @@ function toSeries(cols, rows, filled) {
     sers = keep.map((x, k) => ({ label: x, color: ranked.length > 1 ? SERIES[k] : "var(--series)", values: blank() }));
     const other = ranked.length > 6 ? { label: `Other (${ranked.length - 6})`, color: "var(--neutral)", values: blank() } : null;
     if (other) sers.push(other);
-    for (const r of rows) { const i = at.get(key(r)), s = sers[keep.indexOf(g(r))] || other; if (i != null && s && r[2] != null) s.values[i] = (s.values[i] || 0) + r[2]; }
+    for (const s of sers) s.breaks = new Set();
+    for (const r of rows) { const i = at.get(key(r)), s = sers[keep.indexOf(g(r))] || other; if (i == null || !s) continue; if (r[2] != null) s.values[i] = (s.values[i] || 0) + r[2]; else s.breaks.add(i); }
     valueCol = cols[2];
   } else {
     const num = cols.map((_, k) => k).filter(k => k > 0 && rows.some(r => typeof r[k] === "number")).slice(0, 6);
     if (!num.length) return null;
-    sers = num.map((k, j) => ({ label: cols[k], color: num.length > 1 ? SERIES[j] : "var(--series)", values: blank(), k }));
-    for (const r of rows) { const i = at.get(key(r)); if (i != null) for (const s of sers) if (typeof r[s.k] === "number") s.values[i] = (s.values[i] || 0) + r[s.k]; }
+    sers = num.map((k, j) => ({ label: cols[k], color: num.length > 1 ? SERIES[j] : "var(--series)", values: blank(), k, breaks: new Set() }));
+    for (const r of rows) { const i = at.get(key(r)); if (i != null) for (const s of sers) if (typeof r[s.k] === "number") s.values[i] = (s.values[i] || 0) + r[s.k]; else if (r[s.k] == null) s.breaks.add(i); }
     valueCol = cols[num[0]];
   }
   for (const s of sers) s.total = s.values.reduce((a, v) => a + (v || 0), 0);
-  return { xs, at, key, timed, hourly, sers, valueCol };
+  return { xs, at, key, timed, size, sers, valueCol };
 }
 function resultTable(id, res, limit = 10, unit) {
   return table(id, res.columns.map((c, k) => ({ h: c, cell: r => entityLink(c, r[k], fmtCell(c, r[k], unit)), sort: r => r[k],
@@ -2019,10 +2036,10 @@ function drawPanel(el, p, res, prev, id, events, sync) {
     const s = statOf(res, p.calc), fkey = unitFmt(p.unit, s.col);
     const pv = prev ? statOf(prev, p.calc).value : null, lv = level(p.thresholds, s.value);
     let spk = "";
-    if (s.timed) { const ser = toSeries(cols.slice(0, 2), rows, true); if (ser) spk = spark(ser.sers[0].values, lv === "bad" ? "var(--fail)" : lv === "warn" ? "var(--flip)" : "var(--series)"); }
+    if (s.timed) { const ser = toSeries(cols.slice(0, 2), rows, true, res.bucket_minutes); if (ser) spk = spark(ser.sers[0].values, lv === "bad" ? "var(--fail)" : lv === "warn" ? "var(--flip)" : "var(--series)"); }
     const t = p.thresholds, limit = lv && t ? `${t.higher_is === "better" ? "under" : "over"} ${fmtBy(fkey, lv === "bad" ? t.bad : t.warn)}` : "";
     el.innerHTML = `<div class="sv"><span class="bignum">${s.value == null ? "n/a" : fmtBy(fkey, s.value)}</span>${lv ? tag(lv === "bad" ? "failure" : "flaky", limit) : ""}</div>`
-      + `<div class="sd">${p.compare ? `${deltaChip(s.value, pv, fkey, t)}<span class="dim">${pv == null ? "nothing in the period before" : `vs ${fmtBy(fkey, pv)} the ${DAYS === 1 ? "day" : `${DAYS} days`} before`}</span>` : s.caption != null ? `<span class="dim">${fmtCell(s.captionCol, s.caption)}</span>` : ""}</div>`
+      + `<div class="sd">${p.compare ? `${deltaChip(s.value, pv, fkey, t)}<span class="dim">${pv == null ? "nothing in the period before" : `vs ${fmtBy(fkey, pv)} the ${periodName(HOURS)} before`}</span>` : s.caption != null ? `<span class="dim">${fmtCell(s.captionCol, s.caption)}</span>` : ""}</div>`
       + (spk ? `<div class="ssp">${spk}</div>` : "");
     return "";
   }
@@ -2035,22 +2052,22 @@ function drawPanel(el, p, res, prev, id, events, sync) {
       return `<div><span class="lbl" data-tip="${esc(r[0])}">${entityLink(cols[0], r[0], esc(r[0]))}</span><span class="val">${typeof r[v] === "number" ? fmtBy(fkey, r[v]) : esc(r[v])}</span><span class="rb"><i class="${lv}" style="width:${(100 * Math.abs(r[v] || 0) / max).toFixed(1)}%"></i></span></div>`; }).join("")}</div>`;
     return "";
   }
-  const s = toSeries(cols, rows, p.display === "bars");
+  const s = toSeries(cols, rows, p.display === "bars", res.bucket_minutes);
   if (!s) { el.innerHTML = `<div class="box">${resultTable(id, res, 10, p.unit)}</div>`; return ""; }
   const fkey0 = unitFmt(p.unit, s.valueCol), big = s.sers.some(x => x.values.some(v => Math.abs(v || 0) >= 10000));
   const fkey = fkey0 === "count" && big ? "tok" : fkey0;
   const hide = LEGEND_HIDE.get(id) || new Set();
   const shown = s.sers.filter(x => !hide.has(x.label));
-  const lines = [], spec = { days: s.xs, labels: s.xs, xfmt: s.timed ? (s.hourly ? fmtHour : fmtDay) : (x => cut(x, 14)), format: fkey, label: p.title, height: 210, sync };
-  if (p.display === "bars") spec.bars = shown; else lines.push(...shown.map(x => ({ ...x, area: p.display === "area" && shown.length === 1, dots: s.xs.length < 16 })));
-  if (prev && s.timed) {  /* the period before, all series together, dashed */
-    const before = s.xs.map(() => 0);
-    for (const r of prev.rows) { const i = s.at.get(s.key(r)); const v = cols.length === 3 && typeof r[1] === "string" ? r[2] : r[1]; if (i != null && typeof v === "number") before[i] += v; }
-    lines.push({ label: "The period before", color: "var(--ink-3)", values: before, dash: true });
+  const lines = [], spec = { days: s.xs, labels: s.xs, xfmt: s.timed ? (s.size < 1440 ? fmtHour : fmtDay) : (x => cut(x, 14)), format: fkey, label: p.title, height: 210, sync };
+  if (p.display === "bars") spec.bars = shown; else lines.push(...shown.map(x => ({ ...x, area: p.display === "area" && shown.length === 1, dots: s.xs.length < 16, connect: true })));
+  if (prev && s.timed) {  /* the period before, all series together, dashed; over lines it bridges empty buckets too */
+    const filled = p.display === "bars", before = s.xs.map(() => filled ? 0 : null);
+    for (const r of prev.rows) { const i = s.at.get(s.key(r)); const v = cols.length === 3 && typeof r[1] === "string" ? r[2] : r[1]; if (i != null && typeof v === "number") before[i] = (before[i] || 0) + v; }
+    lines.push({ label: "The period before", color: "var(--ink-3)", values: before, dash: true, connect: !filled });
   }
   spec.lines = lines;
-  if (events && s.timed && p.events !== false) spec.marks = events.map(e => ({ ...e, i: s.at.get(s.hourly ? e.at.slice(0, 13) + ":00" : e.at.slice(0, 10)),
-    f: s.hourly ? Number(e.at.slice(14, 16)) / 60 : (Number(e.at.slice(11, 13)) * 60 + Number(e.at.slice(14, 16))) / 1440 })).filter(e => e.i != null);
+  if (events && s.timed && p.events !== false) spec.marks = events.map(e => { const t = keyMs(e.at), step = s.size * 60000;  /* f: how far into its bucket */
+    return { ...e, i: isNaN(t) ? null : s.at.get(slotKey(t, s.size)), f: (t - Math.floor(t / step) * step) / step }; }).filter(e => e.i != null);
   const t = p.thresholds;
   if (t) spec.thresholds = [[t.warn, "var(--flip)"], [t.bad, "var(--fail)"]].filter(([v]) => v != null).map(([v, color]) => ({ v, color }));
   el.innerHTML = `<div class="chart"></div>`;
@@ -2085,8 +2102,8 @@ function specOf(d) {
            annotations: (d.annotations || []).map(a => keep(a, ["name", "sql"])),
            panels: (d.panels || []).map(p => keep(p, ["type", "title", "sql", "width", "display", "unit", "calc", "compare", "thresholds", "events", "note", "text", "collapsed"])) };
 }
-async function saveDash(id, spec) { CACHE.clear(); return post("/api/dashboards", { ...spec, ...(id ? { id } : {}), days: DAYS }); }
-async function freshSpec(id) { CACHE.clear(); return specOf(await api("/api/dashboard", { id, days: DAYS })); }
+async function saveDash(id, spec) { CACHE.clear(); return post("/api/dashboards", { ...spec, ...(id ? { id } : {}), ...rangeQ() }); }
+async function freshSpec(id) { CACHE.clear(); return specOf(await api("/api/dashboard", { id, ...rangeQ() })); }
 
 let DASH = null, SCHEMA_CACHE = null, REFRESH_TIMER = null;
 const dashVars = () => Object.fromEntries([...hashParts()[1]].filter(([k]) => k.startsWith("var-")));
@@ -2111,7 +2128,7 @@ async function dashboardsView(tok) {
 }
 async function dashboardView(tok, id) {
   const q = hashParts()[1], vars = dashVars();
-  const d = await api("/api/dashboard", { id, days: DAYS, ...vars });
+  const d = await api("/api/dashboard", { id, ...rangeQ(), ...vars });
   if (tok !== renderToken) return;
   DASH = d;
   setCrumbs([["Explore"], ["Dashboards", "#/dashboards"]], d.title);
@@ -2212,7 +2229,7 @@ function bindEditor(ctx) {
     out.innerHTML = `<div class="panel skel"></div>`;
     try {
       const vars = ctx.dash ? Object.fromEntries((ctx.dash.variables || []).map(v => [`var-${v.name}`, v.value ?? "__all"])) : {};
-      const res = await api("/api/sql", { q: p.sql, days: DAYS, ...vars, ...dashVars() });
+      const res = await api("/api/sql", { q: p.sql, ...rangeQ(), ...vars, ...dashVars() });
       out.innerHTML = `<div class="dim" style="margin-bottom:8px">${plural(res.rows.length, "row")}${res.truncated ? ", more not shown" : ""}</div><div id="ed-chart" class="dpb ${p.type === "stat" ? "dstat" : ""}"></div><div class="dpl" id="ed-leg"></div>`
         + (p.type !== "table" && res.rows.length ? `<div class="box" style="margin-top:10px">${resultTable("ed-rows", res, 8, p.unit)}</div>` : "");
       document.getElementById("ed-leg").innerHTML = drawPanel(document.getElementById("ed-chart"), p, res, null, "ed-t", null, null);
@@ -2240,7 +2257,7 @@ function bindEditor(ctx) {
 }
 PANELS.dpanel = async key => {
   const k = key.lastIndexOf(":"), did = key.slice(0, k), idx = key.slice(k + 1);
-  const [d, schema] = await Promise.all([DASH && DASH.id === did ? DASH : api("/api/dashboard", { id: did, days: DAYS }), api("/api/schema")]);
+  const [d, schema] = await Promise.all([DASH && DASH.id === did ? DASH : api("/api/dashboard", { id: did, ...rangeQ() }), api("/api/schema")]);
   SCHEMA_CACHE = schema;
   const p = idx === "new" ? { type: "timeseries", title: "", sql: "", display: "bars", width: 6 } : d.panels[Number(idx)];
   if (!p) throw new Error("That panel isn't on this dashboard any more.");
@@ -2250,7 +2267,7 @@ PANELS.dpanel = async key => {
 };
 PANELS.dview = async key => {
   const k = key.lastIndexOf(":"), did = key.slice(0, k), i = Number(key.slice(k + 1));
-  const d = DASH && DASH.id === did ? DASH : await api("/api/dashboard", { id: did, days: DAYS, ...dashVars() });
+  const d = DASH && DASH.id === did ? DASH : await api("/api/dashboard", { id: did, ...rangeQ(), ...dashVars() });
   const p = d.panels[i];
   if (!p || !p.result) throw new Error(p && p.error ? p.error : "That panel has no rows to show.");
   return { title: esc(p.title), sub: `${esc(d.title)}${p.note ? `<br>${esc(p.note)}` : ""}`,
@@ -2291,7 +2308,7 @@ async function sqlView(tok) {
   let last = "";
   try { last = localStorage.getItem("greenlight-sql") || ""; } catch { /* a convenience */ }
   const ex = schema.examples[0], p = last ? { type: "timeseries", display: "bars", title: "", sql: last, width: 6 } : { ...ex, width: 6 };
-  view.innerHTML = `<div class="grid">${panel({ cls: "s12", title: "Query", tip: "One read-only SELECT. :start and :end follow the time range, bucket(time) groups by hour or day. Save it as a panel on a dashboard.",
+  view.innerHTML = `<div class="grid">${panel({ cls: "s12", title: "Query", tip: "One read-only SELECT. :start and :end follow the time range; bucket(time) groups by the minute up to an hour, then 5 and 10 minutes, the hour up to two days, else the day. Save it as a panel on a dashboard.",
       actions: schema.examples.map((e, i) => `<button class="tb" type="button" data-act="example" data-i="${i}">${esc(e.title)}</button>`).join(""),
       body: editorForm(p, { saveTo: list.dashboards }) })}</div>
     <div class="grid">${panel({ cls: "s12", title: "Result", body: `<div id="ed-out"><p class="empty">Run the query to see it.</p></div>` })}</div>
@@ -2468,7 +2485,7 @@ PANELS.session = async id => {
 PANELS.utest = async id => {
   const d = await api("/api/usage/detail", { days: DAYS, kind: "test", key: id }), t = d.test;
   const [cls, name] = splitId(id);
-  if (!t) return { title: esc(name), sub: esc(cls), body: `<p class="empty">No session spent tokens while this test was red in the last ${DAYS} days.</p>` };
+  if (!t) return { title: esc(name), sub: esc(cls), body: `<p class="empty">No session spent tokens while this test was red in the last ${periodName(DAYS * 24)}.</p>` };
   return {
     title: `<span class="mono">${esc(name)}</span>`, sub: `<span class="mono">${esc(cls)}</span>`,
     actions: goto(testHref(id), "Test history"),
@@ -2537,7 +2554,7 @@ PANELS.waste = async id => {
     : [who, { h: "Reads", cell: r => r.repeat_reads, sort: r => r.repeat_reads, cls: "num" },
       { h: "Tokens", cell: r => tk(r.repeat_tokens), sort: r => r.repeat_tokens, cls: "num" }];
   return {
-    title: esc(w.title), sub: `The largest in the last ${DAYS} days`,
+    title: esc(w.title), sub: `The largest in the last ${periodName(DAYS * 24)}`,
     body: `<p class="advice">${esc(w.advice)}</p>` + boxed(table("d-waste", cols, d.rows, { sort: id === "repeats" ? 2 : 3, limit: 10, panel: r => `session:${r.session_id}`, empty: "None in this window." })),
   };
 };
@@ -2570,7 +2587,7 @@ async function usageView(tok, tab = "") {
   if (tok !== renderToken) return;
   const t = d.totals;
   if (!t.requests) {
-    view.innerHTML = `<div class="grid">${noData(`No token usage in the last ${DAYS} days.`, "<code>greenlight setup --project</code> adds a hook that records each Claude Code session's token counts after every turn: counts, branches, times and commits, never code or the conversation.")}</div>`;
+    view.innerHTML = `<div class="grid">${noData(`No token usage in the last ${periodName(DAYS * 24)}.`, "<code>greenlight setup --project</code> adds a hook that records each Claude Code session's token counts after every turn: counts, branches, times and commits, never code or the conversation.")}</div>`;
     return;
   }
   const cx = d.context || { categories: [], rebuilds: { by_cause: [] }, task_switches: {} };
@@ -2749,8 +2766,9 @@ function setSynced(synced) {
 const range = document.getElementById("range"), rangeMenu = document.getElementById("range-menu");
 let windowed = true;
 function syncRange() {
-  document.getElementById("range-label").textContent = rangeName(DAYS);
-  rangeMenu.innerHTML = RANGES.map(n => `<button type="button" role="menuitemradio" aria-checked="${n === DAYS}" data-days="${n}">${icon("check")}${rangeName(n)}</button>`).join("");
+  const fine = fineRange(), now = fine ? HOURS : DAYS * 24;
+  document.getElementById("range-label").textContent = rangeName(now);
+  rangeMenu.innerHTML = RANGES.filter(h => fine || h >= 24).map(h => `<button type="button" role="menuitemradio" aria-checked="${h === now}" data-hours="${h}">${icon("check")}${rangeName(h)}</button>`).join("");
 }
 function closeMenu() { rangeMenu.hidden = true; range.setAttribute("aria-expanded", "false"); }
 range.addEventListener("click", () => {
@@ -2760,9 +2778,9 @@ range.addEventListener("click", () => {
   if (open) rangeMenu.querySelector('[aria-checked="true"]').focus();
 });
 rangeMenu.addEventListener("click", ev => {
-  const b = ev.target.closest("button[data-days]"); if (!b) return;
-  DAYS = Number(b.dataset.days);
-  try { localStorage.setItem("greenlight-days", String(DAYS)); } catch { /* storage unavailable */ }
+  const b = ev.target.closest("button[data-hours]"); if (!b) return;
+  HOURS = Number(b.dataset.hours); DAYS = Math.max(1, Math.ceil(HOURS / 24));
+  try { localStorage.setItem("greenlight-hours", String(HOURS)); } catch { /* storage unavailable */ }
   closeMenu(); syncRange(); drawerKey = null; render();  /* an open side panel reloads for the new range too */
 });
 document.addEventListener("pointerdown", ev => { if (!ev.target.closest("#picker")) closeMenu(); if (!ev.target.closest("#pmenu, [data-act=pmenu], [data-act=dmenu]")) closePop(); });
@@ -2810,6 +2828,7 @@ async function render() {
   const hit = ROUTES.map(r => [hash.match(r[0]), ...r.slice(1)]).find(r => r[0]) || [null, ...ROUTES[0].slice(1)];
   const [m, nav, trail, title, fn, isWindowed] = hit;
   windowed = isWindowed;
+  syncRange();  /* dashboards and SQL offer hours, other pages whole days */
   range.setAttribute("aria-disabled", String(!windowed || !!SNAP));
   if (!windowed) range.dataset.tip = "This view isn't filtered by time"; else delete range.dataset.tip;
   document.querySelectorAll("#nav a").forEach(a => { if (a.dataset.nav === nav) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
